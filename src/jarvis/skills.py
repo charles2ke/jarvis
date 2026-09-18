@@ -223,7 +223,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             Skill(
                 name="clear-notes",
                 description="Forget every stored note.",
-                patterns=[r"\b(clear|delete|forget)( all)?( my)? notes\b"],
+                patterns=[r"^\s*(clear|delete|forget)( all)?( my)? notes\s*[.!]?\s*$"],
                 handler=_clear_notes,
                 examples=["clear my notes"],
             ),

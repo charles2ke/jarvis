@@ -27,6 +27,15 @@ class CalculatorTests(unittest.TestCase):
         with self.assertRaises(CalculationError):
             calculate("2 ** (2 ** 1000000)")
 
+    def test_rejects_oversized_result(self):
+        with self.assertRaises(CalculationError):
+            calculate("((10 ** 128) ** 128) ** 128")
+
+    def test_rejects_booleans(self):
+        for expression in ("True", "False", "True + 1"):
+            with self.assertRaises(CalculationError):
+                calculate(expression)
+
     def test_rejects_invalid_syntax(self):
         with self.assertRaises(CalculationError):
             calculate("1 +")

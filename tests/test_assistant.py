@@ -34,6 +34,13 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("cleared", self.assistant.respond("clear my notes"))
         self.assertIn("no notes", self.assistant.respond("show notes"))
 
+    def test_negated_clear_notes_request_preserves_notes(self):
+        self.assistant.respond("remember buy milk")
+        self.assertEqual(
+            self.assistant.respond("don't forget my notes"), FALLBACK_RESPONSE
+        )
+        self.assertIn("buy milk", self.assistant.respond("list my notes"))
+
     def test_name_memory(self):
         self.assistant.respond("my name is Charles")
         self.assertEqual(self.assistant.respond("what is my name?"), "You are Charles.")
