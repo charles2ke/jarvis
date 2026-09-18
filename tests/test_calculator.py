@@ -23,6 +23,10 @@ class CalculatorTests(unittest.TestCase):
         with self.assertRaises(CalculationError):
             calculate("9 ** 10000")
 
+    def test_rejects_huge_nested_exponent_before_evaluation(self):
+        with self.assertRaises(CalculationError):
+            calculate("2 ** (2 ** 1000000)")
+
     def test_rejects_invalid_syntax(self):
         with self.assertRaises(CalculationError):
             calculate("1 +")

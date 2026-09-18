@@ -39,18 +39,29 @@ def calculate(expression: str) -> float:
     return _evaluate(tree.body)
 
 
-def _evaluate(node: ast.AST) -> float:
+def _evaluate(node: ast.AST, limit: float | None = None) -> float:
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return node.value
-    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
-        left = _evaluate(node.left)
-        right = _evaluate(node.right)
-        if isinstance(node.op, ast.Pow) and abs(right) > MAX_EXPONENT:
+        result = node.value
+        if limit is not None and abs(result) > limit:
             raise CalculationError("That exponent is too large for me to compute.")
+        return result
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+        if isinstance(node.op, ast.Pow):
+            right = _evaluate(node.right, MAX_EXPONENT)
+            left = _evaluate(node.left, limit)
+        else:
+            left = _evaluate(node.left, limit)
+            right = _evaluate(node.right, limit)
         try:
-            return _BINARY_OPS[type(node.op)](left, right)
+            result = _BINARY_OPS[type(node.op)](left, right)
         except ZeroDivisionError as exc:
             raise CalculationError("I cannot divide by zero.") from exc
+        if limit is not None and abs(result) > limit:
+            raise CalculationError("That exponent is too large for me to compute.")
+        return result
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
-        return _UNARY_OPS[type(node.op)](_evaluate(node.operand))
+        result = _UNARY_OPS[type(node.op)](_evaluate(node.operand, limit))
+        if limit is not None and abs(result) > limit:
+            raise CalculationError("That exponent is too large for me to compute.")
+        return result
     raise CalculationError("Only basic arithmetic expressions are supported.")
