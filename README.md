@@ -57,6 +57,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| number-words | `spell out 42` |
 | science-solver | `solve 2x + 3 = 11` |
 | braille | `read braille ⠓⠑⠇⠇⠕` |
 | braille-alphabet | `braille alphabet` |
@@ -72,6 +73,10 @@ Useful flags:
 | midlife-counseling | `I think I am having a midlife crisis` |
 | career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| sign-language-alphabet | `sign language alphabet` |
+| fingerspell | `fingerspell Charles` |
+| sign-language-topics | `what signs do you know` |
+| sign-language | `how do I sign thank you?` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
 | gmdss | `what is an EPIRB?` |
@@ -151,6 +156,42 @@ finds on the system — `say` (macOS), `espeak-ng`, `espeak` or `spd-say` (Linux
 or the PowerShell speech synthesiser (Windows). Set `JARVIS_TTS_COMMAND` to use
 a different command (the text is appended as the last argument). If nothing is
 available, Jarvis says so instead of failing.
+
+## Natural language to text
+
+Jarvis converts loosely written requests into the plain text its skills expect:
+
+- `number-words` spells numbers out and reads them back: `spell out 42`,
+  `42 in words`, `how do you spell 1005`, `forty-two in digits`,
+  `write one hundred and five in digits`.
+- Multi-line input and literal escapes are flattened, so `calculate\n  21 *\n 2`
+  still reaches the calculator.
+- Polite wrappers are trimmed and spelled numbers and operator words are
+  rewritten, so `Jarvis, please tell me a joke` and
+  `what is twenty one times two` route like `tell me a joke` and
+  `what is 21 * 2`.
+- The cloud `answer` skill also understands plain-text phrasings such as
+  `answer in plain text: ...`, `give me a text answer to ...` and
+  `turn this into text: ...`.
+
+Rewriting only happens when the original wording does not already reach a more
+specific skill, so existing phrasing keeps its usual routing. The helpers live
+in `jarvis.nl` (`normalize`, `flatten`, `number_to_words`, `words_to_number`).
+
+## Sign language
+
+The `sign-language` skill explains sign language and describes, in words, how
+to make everyday American Sign Language (ASL) signs — `how do I sign thank
+you?`, `what is the sign for water`, `how do you say hello in sign language`.
+`sign-language-alphabet` walks through the manual alphabet, `fingerspell`
+spells a word or name letter by letter (`fingerspell Charles`, `spell hi in
+ASL`), and `what signs do you know` lists every sign in the data set. Signs
+Jarvis does not know are answered with a suggestion to fingerspell them.
+
+The descriptions are hand-curated and offline, cover ASL only, and leave out
+the facial expressions and movement that carry much of the grammar: they are a
+starting point, not a substitute for learning from Deaf teachers and native
+signers.
 
 The `gmdss` skill is an offline reference for the Global Maritime Distress and
 Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
