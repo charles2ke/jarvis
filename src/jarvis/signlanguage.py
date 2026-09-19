@@ -438,10 +438,8 @@ def fingerspell(text: str, limit: int = 40) -> Tuple[List[Tuple[str, str]], List
     spelled: List[Tuple[str, str]] = []
     skipped: List[str] = []
     for character in (text or "").strip():
-        if len(spelled) >= limit:
-            break
         if character.isspace():
-            if spelled and spelled[-1][0] != "␣":
+            if len(spelled) < limit and spelled and spelled[-1][0] != "␣":
                 spelled.append(("␣", "pause briefly to mark a word break"))
             continue
         shape = letter(character)
@@ -449,7 +447,8 @@ def fingerspell(text: str, limit: int = 40) -> Tuple[List[Tuple[str, str]], List
             if character not in skipped:
                 skipped.append(character)
             continue
-        spelled.append((character.upper(), shape))
+        if len(spelled) < limit:
+            spelled.append((character.upper(), shape))
     while spelled and spelled[-1][0] == "␣":
         spelled.pop()
     return spelled, skipped

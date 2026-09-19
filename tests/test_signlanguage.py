@@ -41,8 +41,9 @@ class SignLanguageDataTests(unittest.TestCase):
         self.assertEqual(skipped, [])
 
     def test_fingerspell_respects_limit(self):
-        spelled, _ = signlanguage.fingerspell("abcdef", limit=3)
+        spelled, skipped = signlanguage.fingerspell("abcdef!", limit=3)
         self.assertEqual(len(spelled), 3)
+        self.assertEqual(skipped, ["!"])
 
     def test_terms_are_sorted_and_resolvable(self):
         names = signlanguage.terms()
