@@ -67,6 +67,15 @@ class PhysicsTests(unittest.TestCase):
         answer = solve_physics("what is the kinetic energy of a 3 kg mass moving at 4 m/s")
         self.assertIn("24 J", answer)
 
+    def test_acceleration_is_not_treated_as_speed(self):
+        for unit in ("m/s^2", "m/s2", "m/s²"):
+            with self.subTest(unit=unit):
+                answer = solve_physics(
+                    f"what is the kinetic energy of a 3 kg mass moving at 4 {unit}"
+                )
+                self.assertIn("speed", answer)
+                self.assertNotIn("24 J", answer)
+
     def test_ohms_law(self):
         answer = solve_physics("what is the voltage with current 2 A and resistance 5 ohms")
         self.assertIn("10 V", answer)

@@ -205,7 +205,7 @@ _UNIT_QUANTITIES: Sequence[Tuple[str, str, float]] = (
     # (unit pattern, quantity, factor to SI)
     (r"km/h", "speed", 1 / 3.6),
     (r"m/s\s*(?:\^?2|²)", "acceleration", 1.0),
-    (r"m/s", "speed", 1.0),
+    (r"m/s(?!\s*(?:\^?2|²))", "speed", 1.0),
     (r"kg", "mass", 1.0),
     (r"grams?|g\b", "mass", 0.001),
     (r"km\b", "distance", 1000.0),
