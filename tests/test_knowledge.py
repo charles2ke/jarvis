@@ -180,6 +180,40 @@ class KnowledgeSearchTests(unittest.TestCase):
         self.assertEqual(len(knowledge.load(stored)), 1)
         self.assertEqual(knowledge.load("nonsense"), [])
 
+    def test_from_dict_requires_non_blank_string_text(self):
+        for text in (None, "", "   ", ["hi"], 123):
+            with self.subTest(text=text):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": "file", "location": "/tmp/n.md", "text": text}
+                    )
+                )
+
+    def test_from_dict_requires_non_blank_string_location(self):
+        for location in (None, "  ", 5):
+            with self.subTest(location=location):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": "file", "location": location, "text": "hi"}
+                    )
+                )
+
+    def test_from_dict_requires_string_kind(self):
+        for kind in (None, ["file"], {"file": 1}, 7):
+            with self.subTest(kind=kind):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": kind, "location": "/tmp/n.md", "text": "hi"}
+                    )
+                )
+
+    def test_from_dict_falls_back_to_location_for_blank_title(self):
+        source = knowledge.Source.from_dict(
+            {"kind": "file", "title": "  ", "location": "/tmp/n.md", "text": "hi"}
+        )
+        self.assertIsNotNone(source)
+        self.assertEqual(source.title, "/tmp/n.md")
+
 
 class KnowledgeSkillTests(unittest.TestCase):
     def setUp(self):
@@ -227,6 +261,19 @@ class KnowledgeSkillTests(unittest.TestCase):
     def test_add_website_reports_unsupported_scheme(self):
         reply = self.assistant.respond("add ftp://example.com/file as a knowledge source")
         self.assertIn("only read http and https", reply)
+
+    def test_any_scheme_reaches_the_website_skill(self):
+        phrases = [
+            "add ftp://example.com/file as a knowledge source",
+            "add FTP://example.com/file as a knowledge source",
+            "add file:///etc/hosts as a knowledge source",
+            "use ssh://git@example.com/repo.git as a knowledge source",
+            "add the website gopher://example.com as a knowledge source",
+        ]
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                reply = self.assistant.respond(phrase)
+                self.assertIn("only read http and https", reply)
 
     def test_add_nested_relative_path_is_treated_as_a_file(self):
         reply = self.assistant.respond("add src/jarvis/knowledge.py as a knowledge source")

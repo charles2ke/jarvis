@@ -8,7 +8,15 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import bible, encyclopedia, knowledge, signlanguage, sketch, traffic
+from jarvis import (
+    bible,
+    encyclopedia,
+    finance,
+    knowledge,
+    signlanguage,
+    sketch,
+    traffic,
+)
 from jarvis.atlas import (
     City,
     Country,
@@ -47,6 +55,12 @@ from jarvis.memory import Memory
 from jarvis.nl import number_to_words, words_to_number
 from jarvis.science import solve_problem
 from jarvis.speech import SpeechError, speak
+from jarvis.units import (
+    ConversionError,
+    UNIT_NAMES,
+    describe_conversion,
+    describe_units,
+)
 
 
 @dataclass
@@ -152,6 +166,31 @@ def _calculate(match: Match[str], context: SkillContext) -> str:
     if isinstance(result, float) and result.is_integer():
         result = int(result)
     return f"{expression} = {result}"
+
+
+_UNIT_PATTERN = "|".join(re.escape(name) for name in UNIT_NAMES)
+_NUMBER_PATTERN = r"-?\d+(?:[.,]\d+)?"
+
+
+def _convert_units(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    amount = groups.get("amount") or groups.get("amount2")
+    source = groups.get("source") or groups.get("source2")
+    target = groups.get("target") or groups.get("target2")
+    if not (amount and source and target):
+        return describe_units()
+    try:
+        value = float(amount.replace(",", "."))
+    except ValueError:  # pragma: no cover - guarded by the pattern
+        return f"I could not read the number '{amount}'."
+    try:
+        return describe_conversion(value, source, target)
+    except ConversionError as exc:
+        return str(exc)
+
+
+def _unit_list(match: Match[str], context: SkillContext) -> str:
+    return describe_units()
 
 
 def _number_words(match: Match[str], context: SkillContext) -> str:
@@ -1128,6 +1167,61 @@ def _gmdss_topics(match: Match[str], context: SkillContext) -> str:
     lines = [f"I have {len(titles)} GMDSS entries:"]
     lines.extend(f"- {title}" for title in titles)
     lines.append("Ask me 'what is an EPIRB?' or 'gmdss sea areas'.")
+    return "\n".join(lines)
+
+
+MONEY_MATH_HELP = (
+    "I can work through everyday money maths. Try:\n"
+    "- invest 10000 at 6% for 20 years adding 200 a month\n"
+    "- monthly payment on a 250000 mortgage at 5% over 30 years\n"
+    "- what is 50000 worth in 10 years with 3% inflation\n"
+    "- how long does money double at 7%\n"
+    "- 50/30/20 budget on 3000 a month\n"
+    "- emergency fund on 1800 a month of essentials"
+)
+
+
+def _finance_term_pattern() -> str:
+    terms = {key for entry in finance.ENTRIES for key in entry.keys}
+    escaped = (r"\s+".join(re.escape(part) for part in term.split()) for term in terms)
+    return "|".join(sorted(escaped, key=len, reverse=True))
+
+
+def _money_math(match: Match[str], context: SkillContext) -> str:
+    answer = finance.solve_money(match.string)
+    if answer:
+        return answer
+    return MONEY_MATH_HELP
+
+
+def _financial_advisor(match: Match[str], context: SkillContext) -> str:
+    return finance.advice(match.string)
+
+
+def _economics(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    subject = _clean_subject(groups.get("subject") or groups.get("term") or "")
+    if not subject or subject.lower() in {"economics", "economy"}:
+        entry = finance.lookup("Economics")
+        assert entry is not None  # The overview entry is always present.
+        return f"{entry.title}: {entry.summary}"
+    entry = finance.lookup(subject)
+    if entry is not None:
+        return f"{entry.title}: {entry.summary}"
+    lines = [f"I do not have an economics entry for '{subject}' yet."]
+    close = finance.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'economics topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _economics_topics(match: Match[str], context: SkillContext) -> str:
+    titles = finance.topics()
+    lines = [f"I have {len(titles)} economics and finance entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is inflation?' or 'financial advice on investing'.")
     return "\n".join(lines)
 
 
@@ -2131,6 +2225,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["read braille ⠓⠑⠇⠇⠕"],
             ),
             Skill(
+                name="money-math",
+                description=(
+                    "Work out compound growth, loan payments, inflation, "
+                    "budgets and emergency funds."
+                ),
+                patterns=[
+                    r"\b(?:monthly (?:payment|repayment)|mortgage|loan|repayments?)\b"
+                    r"[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\d[^?!]*\b(?:mortgage|loan)\b[^?!]*(?:%|percent)[^?!]*"
+                    r"\b(?:years?|yrs?)\b",
+                    r"\b(?:compound interest|future value|invest|save|grow)\b"
+                    r"[^?!]*\d[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\binflation\b[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\b(?:years?|yrs?)\b[^?!]*(?:%|percent)[^?!]*\binflation\b",
+                    r"\b(?:double|doubling)\b[^?!]*\d\s*(?:%|percent)",
+                    r"\b(?:50/30/20|50 30 20)\b[^?!]*\d",
+                    r"\bbudget\b[^?!]*\d[^?!]*(?:a month|monthly|income|take-home|salary|pay)",
+                    r"\bemergency fund\b[^?!]*\d[^?!]*(?:a month|monthly|essentials?|spending)",
+                ],
+                handler=_money_math,
+                examples=["monthly payment on a 250000 mortgage at 5% over 30 years"],
+            ),
+            Skill(
                 name="science-solver",
                 description=(
                     "Solve maths, physics, chemistry and biology problems step by step."
@@ -2191,6 +2308,37 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_number_words,
                 examples=["spell out 42", "forty-two in digits"],
+            ),
+            Skill(
+                name="unit-list",
+                description="List the units I can convert between.",
+                patterns=[
+                    r"\b(?:what|which)\s+units\s+(?:do\s+you\s+know|can\s+you\s+convert)\b",
+                    r"\b(?:list|show)(?:\s+me)?(?:\s+your)?\s+units\b",
+                    r"\bunit\s+(?:conversions?|list|index)\b",
+                ],
+                handler=_unit_list,
+                examples=["what units can you convert?"],
+            ),
+            Skill(
+                name="unit-conversion",
+                description=(
+                    "Convert between length, mass, volume, time, temperature, "
+                    "speed and area units."
+                ),
+                patterns=[
+                    r"\b(?:convert|change|turn)\s+(?P<amount>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source>" + _UNIT_PATTERN + r")\s+(?:in ?to|into|to|in|as)\s+"
+                    r"(?P<target>" + _UNIT_PATTERN + r")\b",
+                    r"\bhow\s+many\s+(?P<target2>" + _UNIT_PATTERN + r")\s+"
+                    r"(?:is|are|in)\s+(?P<amount2>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source2>" + _UNIT_PATTERN + r")\b",
+                    r"^\s*(?:what(?:'s| is)\s+)?(?P<amount>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source>" + _UNIT_PATTERN + r")\s+(?:in ?to|into|to|in|as)\s+"
+                    r"(?P<target>" + _UNIT_PATTERN + r")\s*[.?!]*\s*$",
+                ],
+                handler=_convert_units,
+                examples=["convert 10 km to miles", "how many pounds is 70 kg"],
             ),
             Skill(
                 name="calculator",
@@ -2436,6 +2584,54 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_bible,
                 examples=["what does the bible say about hope?"],
+            ),
+            Skill(
+                name="financial-advisor",
+                description=(
+                    "Coach you through budgeting, saving, debt, investing, "
+                    "retirement and money worries."
+                ),
+                patterns=[
+                    r"\b(?:financial|finance|money|budget(?:ing)?|investment|investing|"
+                    r"debt|retirement|savings?|mortgage|pension)\s+(?:advice|advis[eo]r|"
+                    r"coach|coaching|planner|guidance|tips|help)\b",
+                    r"\b(?:be|act as|you are)\s+my\s+(?:financial|money|investment)\s+"
+                    r"(?:advis[eo]r|coach|planner)\b",
+                    r"\bhow (?:do|should|can|would)\s+(?:i|we)\s+(?:start\s+)?"
+                    r"(?:save|saving|invest|investing|budget|budgeting|retire|"
+                    r"pay off|get out of debt|manage (?:my|our) money|build (?:an\s+)?"
+                    r"emergency fund)\b",
+                    r"\bshould\s+i\s+(?:invest|save|pay off|buy a (?:house|home))\b",
+                    r"\b(?:advice|help)\s+(?:on|with)\s+(?:my\s+)?(?:money|finances|"
+                    r"budget|debt|savings|investing|investments|retirement)\b",
+                    r"\bi(?:'m| am)\s+(?:bad with money|broke|living paycheck to paycheck|"
+                    r"worried about money|struggling with (?:money|debt|bills))\b",
+                ],
+                handler=_financial_advisor,
+                examples=["how do I pay off debt", "financial advice on investing"],
+            ),
+            Skill(
+                name="economics-topics",
+                description="List the economics and finance entries I can explain.",
+                patterns=[
+                    r"\b(?:economics|economy|finance|financial)\s+(?:topics|entries|index|glossary)\b",
+                    r"\b(?:list|show)(?: me)?(?: your)? (?:economics|finance) (?:topics|entries|terms)\b",
+                ],
+                handler=_economics_topics,
+                examples=["economics topics"],
+            ),
+            Skill(
+                name="economics",
+                description=(
+                    "Explain economics and personal finance: inflation, GDP, "
+                    "interest rates, investing, debt, taxes and more."
+                ),
+                patterns=[
+                    r"^\s*(?:economics|economy)\b[:,]?\s*(?P<subject>.*?)\s*[.?!]*\s*$",
+                    r"\b(?P<term>" + _finance_term_pattern() + r")\b",
+                ],
+                handler=_economics,
+                examples=["what is inflation?"],
             ),
             Skill(
                 name="encyclopedia-topics",
