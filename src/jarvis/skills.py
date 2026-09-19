@@ -41,6 +41,7 @@ from jarvis.braille import (
 )
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
+from jarvis.cua import CuaError, actions_chart as cua_actions_chart, execute as cua_execute
 from jarvis import maritime
 from jarvis.memory import Memory
 from jarvis.nl import number_to_words, words_to_number
@@ -1058,6 +1059,25 @@ def _answer(
         return f"I could not start a cloud session: {exc}"
 
 
+def _computer_use(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    runner: Optional[Callable[[str], str]] = None,
+) -> str:
+    instruction = (match.group("instruction") or "").strip()
+    if not instruction:
+        return "Tell me what you would like me to do on the computer."
+    try:
+        return (runner or cua_execute)(instruction)
+    except CuaError as exc:
+        return f"I could not use the computer: {exc}"
+
+
+def _computer_use_actions(match: Match[str], context: SkillContext) -> str:
+    return cua_actions_chart()
+
+
 def _speak(
     match: Match[str],
     context: SkillContext,
@@ -1689,6 +1709,33 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_answer,
                 examples=["answer how does the skill registry resolve matches?"],
+            ),
+            Skill(
+                name="cua-actions",
+                description="List the computer use actions Jarvis can plan.",
+                patterns=[
+                    r"^\s*(?:cua|computer[- ]use)(?: agent)? actions\b",
+                    r"^\s*what (?:computer|cua)(?: use)? actions (?:do you know|can you (?:do|plan|take))\b",
+                    r"^\s*what can you do on (?:my|the) computer\b",
+                ],
+                handler=_computer_use_actions,
+                examples=["computer use actions"],
+            ),
+            Skill(
+                name="computer-use",
+                description=(
+                    "Plan, and with your opt-in run, computer use agent actions "
+                    "such as opening apps, clicking, typing and pressing keys."
+                ),
+                patterns=[
+                    r"^\s*(?:cua|computer[- ]use(?: agent)?)[:,]?\s+(?P<instruction>.+)$",
+                    r"^\s*use (?:my|the) computer (?:to|and)\s+(?P<instruction>.+)$",
+                    r"^\s*(?:on|with) (?:my|the) computer[:,]?\s+(?P<instruction>.+)$",
+                    r"^\s*(?:control|drive|operate) (?:my|the) computer (?:to|and)\s+(?P<instruction>.+)$",
+                    r"^\s*(?:plan|show me) (?:the )?computer use (?:steps |plan )?(?:for|to)[:,]?\s+(?P<instruction>.+)$",
+                ],
+                handler=_computer_use,
+                examples=["use the computer to open Safari then click on Sign in"],
             ),
             Skill(
                 name="love-support",
