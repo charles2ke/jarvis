@@ -8,7 +8,15 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia, finance, knowledge, signlanguage, sketch, traffic
+from jarvis import (
+    bible,
+    encyclopedia,
+    finance,
+    knowledge,
+    signlanguage,
+    sketch,
+    traffic,
+)
 from jarvis.atlas import (
     City,
     Country,
@@ -1042,6 +1050,93 @@ def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
     lines.extend(f"- {title}" for title in titles)
     lines.append("Ask me 'what is gravity?' or 'tell me about Ada Lovelace'.")
     return "\n".join(lines)
+
+
+def _bible(match: Match[str], context: SkillContext) -> str:
+    subject = _clean_subject(match.groupdict().get("subject") or "")
+    subject = re.sub(
+        r"^(?:the\s+)?bible\s+(?:say|says|teach|teaches)\s+about\s+",
+        "",
+        subject,
+        flags=re.IGNORECASE,
+    ).strip()
+    subject = re.sub(
+        r"^(?:who|what|where|when)(?:'s|’s)?\s+(?:is|was|are|were)?\s*",
+        "",
+        subject,
+        flags=re.IGNORECASE,
+    ).strip()
+    subject = re.sub(
+        r"^(?:a\s+|the\s+)?(?:verses?|passages?|quotes?)\s+(?:about|on|for)\s+",
+        "",
+        subject,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not subject or subject.lower() in {"bible", "the bible", "holy bible"}:
+        topic = bible.find_topic("The Bible")
+        assert topic is not None  # The overview topic is always present.
+        return (
+            f"{bible.describe_topic(topic)}\n"
+            "Ask me about a passage ('bible John 3:16'), a book "
+            "('tell me about the book of Job') or a theme "
+            "('what does the bible say about forgiveness')."
+        )
+
+    verse = bible.find_verse(subject)
+    if verse is not None:
+        return f"{verse.reference}: {verse.text}"
+    reference = bible.parse_reference(subject)
+    if reference is not None:
+        return (
+            f"I do not have the text of {reference} in my offline selection. "
+            "Say 'bible topics' to see the themes I can quote."
+        )
+
+    topic = bible.find_topic(subject)
+    if topic is not None:
+        return bible.describe_topic(topic)
+
+    book = bible.find_book(subject)
+    if book is not None:
+        return bible.describe_book(book)
+
+    found = bible.search(subject)
+    if found:
+        lines = [f"I do not have a Bible entry titled '{subject}', but these verses mention it:"]
+        lines.extend(f"- {verse.reference}: {verse.text}" for verse in found)
+        return "\n".join(lines)
+
+    lines = [f"I do not have a Bible entry for '{subject}' yet."]
+    close = bible.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'bible topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _bible_topics(match: Match[str], context: SkillContext) -> str:
+    titles = bible.topics()
+    lines = [f"I can talk about {len(titles)} Bible themes:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append(
+        "Ask me 'what does the bible say about hope?' or 'bible John 3:16'."
+    )
+    return "\n".join(lines)
+
+
+def _bible_books(match: Match[str], context: SkillContext) -> str:
+    names = bible.books()
+    old = [book.name for book in bible.BOOKS if book.testament == "Old Testament"]
+    new = [book.name for book in bible.BOOKS if book.testament == "New Testament"]
+    return "\n".join(
+        [
+            f"The Bible has {len(names)} books.",
+            f"Old Testament ({len(old)}): " + ", ".join(old) + ".",
+            f"New Testament ({len(new)}): " + ", ".join(new) + ".",
+            "Ask me about one, such as 'bible book of Romans'.",
+        ]
+    )
 
 
 def _gmdss(match: Match[str], context: SkillContext) -> str:
@@ -2445,6 +2540,51 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_gmdss,
                 examples=["what is an EPIRB?"],
+            ),
+            Skill(
+                name="bible-books",
+                description="List the 66 books of the Bible.",
+                patterns=[
+                    r"\bbible\s+books\b",
+                    r"\bbooks\s+of\s+the\s+bible\b",
+                    r"\bhow\s+many\s+books\s+(?:are\s+)?(?:there\s+)?in\s+the\s+bible\b",
+                ],
+                handler=_bible_books,
+                examples=["books of the bible"],
+            ),
+            Skill(
+                name="bible-topics",
+                description="List the Bible themes I can talk about.",
+                patterns=[
+                    r"\bbible\s+(topics|themes|entries|index)\b",
+                    r"\b(list|show)( me)?( your)? bible (topics|themes|verses)\b",
+                    r"\bwhat bible (topics|themes) do you know\b",
+                ],
+                handler=_bible_topics,
+                examples=["bible topics"],
+            ),
+            Skill(
+                name="bible",
+                description=(
+                    "Answer questions from the Bible: passages, books and themes."
+                ),
+                patterns=[
+                    r"\bwhat\s+does\s+(?:the\s+)?(?:bible|scripture)\s+"
+                    r"(?:say|says|teach|teaches)\s+about\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"\b(?:bible|scripture)\s+(?:verses?|passages?|quotes?)\s+"
+                    r"(?:about|on|for)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:the\s+)?bible[:,]?\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:tell|teach)\s+(?:me|us)\s+(?:more\s+)?about\s+"
+                    r"(?:the\s+)?book\s+of\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:the\s+)?book\s+of\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?P<subject>.+?)\s+in\s+the\s+bible\s*[.?!]*\s*$",
+                    r"^\s*(?:what|what's|what’s)\s*(?:is\s+)?(?:the\s+)?"
+                    r"(?:holy\s+)?bible\s*[.?!]*\s*$",
+                    r"^\s*(?:tell|teach)\s+(?:me|us)\s+(?:more\s+)?about\s+"
+                    r"(?:the\s+)?(?:holy\s+)?bible\s*[.?!]*\s*$",
+                ],
+                handler=_bible,
+                examples=["what does the bible say about hope?"],
             ),
             Skill(
                 name="financial-advisor",
