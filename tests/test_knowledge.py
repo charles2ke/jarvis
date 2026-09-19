@@ -198,6 +198,15 @@ class KnowledgeSearchTests(unittest.TestCase):
                     )
                 )
 
+    def test_from_dict_requires_string_kind(self):
+        for kind in (None, ["file"], {"file": 1}, 7):
+            with self.subTest(kind=kind):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": kind, "location": "/tmp/n.md", "text": "hi"}
+                    )
+                )
+
     def test_from_dict_falls_back_to_location_for_blank_title(self):
         source = knowledge.Source.from_dict(
             {"kind": "file", "title": "  ", "location": "/tmp/n.md", "text": "hi"}

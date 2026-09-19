@@ -113,7 +113,7 @@ class Source:
         kind = data.get("kind")
         location = data.get("location")
         text = data.get("text")
-        if kind not in {"file", "website"}:
+        if not isinstance(kind, str) or kind not in {"file", "website"}:
             return None
         if not isinstance(location, str) or not location.strip():
             return None
