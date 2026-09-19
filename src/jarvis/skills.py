@@ -20,6 +20,13 @@ from jarvis.atlas import (
     format_population,
     sentence,
 )
+from jarvis.braille import (
+    BrailleError,
+    alphabet_chart,
+    is_braille,
+    read_braille,
+    write_braille,
+)
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
@@ -394,6 +401,30 @@ def _science(match: Match[str], context: SkillContext) -> str:
     if answer:
         return answer
     return SCIENCE_HELP
+
+
+BRAILLE_HELP = (
+    "I read and write Grade 1 braille. Try:\n"
+    "- read braille ⠓⠑⠇⠇⠕\n"
+    "- write hello in braille\n"
+    "- braille alphabet"
+)
+
+
+def _braille_alphabet(match: Match[str], context: SkillContext) -> str:
+    return f"The Grade 1 braille alphabet:\n{alphabet_chart()}"
+
+
+def _braille(match: Match[str], context: SkillContext) -> str:
+    payload = (match.group("braille_text") or "").strip().strip('"“”')
+    if not payload:
+        return BRAILLE_HELP
+    try:
+        if is_braille(payload):
+            return f"That braille reads: {read_braille(payload)}"
+        return f"In braille that is: {write_braille(payload)}"
+    except BrailleError as error:
+        return str(error)
 
 
 _MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -1216,6 +1247,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_current_date,
                 examples=["what is today's date?"],
+            ),
+            Skill(
+                name="braille-alphabet",
+                description="Show the Grade 1 braille alphabet.",
+                patterns=[
+                    r"\bbrail(?:le)?\s+(alphabet|chart|letters)\b",
+                    r"\b(alphabet|chart)\s+(in|of|for)\s+brail(?:le)?\b",
+                ],
+                handler=_braille_alphabet,
+                examples=["braille alphabet"],
+            ),
+            Skill(
+                name="braille",
+                description="Read braille cells aloud or write text in braille.",
+                patterns=[
+                    r"\b(?:read|decode|interpret|translate)\s+(?:this\s+|the\s+|some\s+)?brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
+                    r"^\s*(?:write|translate|convert|put|spell|say)\s+(?P<braille_text>.+?)\s+(?:in|into|to)\s+brail(?:le)?\s*[.?!]*$",
+                    r"^\s*brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
+                    r"^\s*(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*)[.?!]*\s*$",
+                    r"\b(?:what\s+does|what(?:'s| is))\s+(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*?)\s*(?:say|mean|read)\b",
+                ],
+                handler=_braille,
+                examples=["read braille ⠓⠑⠇⠇⠕"],
             ),
             Skill(
                 name="science-solver",
