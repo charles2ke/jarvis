@@ -52,6 +52,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| atlas | `what is the capital of Japan?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -61,6 +62,7 @@ Useful flags:
 | love-support | `my girlfriend and I keep fighting` |
 | couples-counseling | `we need couples counseling` |
 | midlife-counseling | `I think I am having a midlife crisis` |
+| career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
@@ -79,6 +81,13 @@ heartbreak, conflict and new feelings. `couples-counseling` answers explicit
 requests to work on a marriage or relationship together, and
 `midlife-counseling` reflects on ageing, regret, purpose and what comes next;
 both point to a professional counsellor for ongoing work.
+`career-counselling` works through
+job loss, career moves, job searches and pay conversations.
+
+The `atlas` skill answers offline geography questions — capitals, the country
+behind a capital, continents, currencies, population estimates and the
+countries it knows on a continent. Its data set is small and hand-curated, so
+population figures are rounded estimates.
 
 The `encyclopedia` skill answers factual questions (`what is ...`, `who was
 ...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
