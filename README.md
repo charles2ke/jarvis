@@ -56,6 +56,8 @@ Useful flags:
 | recall-name | `what is my name?` |
 | time | `what is the time?` |
 | date | `what day is it` |
+| unit-conversion | `convert 10 km to miles` |
+| unit-list | `what units can you convert?` |
 | calculator | `calculate 21 * 2` |
 | number-words | `spell out 42` |
 | science-solver | `solve 2x + 3 = 11` |
@@ -171,6 +173,13 @@ questions and shows the formula it used:
 It is registered before `calculator`, so plain arithmetic such as
 `calculate 21 * 2` is still answered by the calculator. Questions it does not
 recognise get a short list of supported examples instead of a wrong answer.
+
+The `unit-conversion` skill converts between length, mass, volume, time,
+temperature, speed and area units without any network access. It understands
+`convert 10 km to miles`, `how many pounds is 70 kg` and bare phrasings such as
+`100 C in F`, and it refuses conversions across families (`convert 5 kg to
+metres`). Ask `what units can you convert?` for the full list. It is registered
+before `calculator`, so plain arithmetic is still answered by the calculator.
 
 The `encyclopedia` skill answers factual questions (`what is ...`, `who was
 ...`, `tell me about ...`, `define ...`) from a small built-in, offline set of

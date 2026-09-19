@@ -46,6 +46,12 @@ from jarvis.memory import Memory
 from jarvis.nl import number_to_words, words_to_number
 from jarvis.science import solve_problem
 from jarvis.speech import SpeechError, speak
+from jarvis.units import (
+    ConversionError,
+    UNIT_NAMES,
+    describe_conversion,
+    describe_units,
+)
 
 
 @dataclass
@@ -151,6 +157,31 @@ def _calculate(match: Match[str], context: SkillContext) -> str:
     if isinstance(result, float) and result.is_integer():
         result = int(result)
     return f"{expression} = {result}"
+
+
+_UNIT_PATTERN = "|".join(re.escape(name) for name in UNIT_NAMES)
+_NUMBER_PATTERN = r"-?\d+(?:[.,]\d+)?"
+
+
+def _convert_units(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    amount = groups.get("amount") or groups.get("amount2")
+    source = groups.get("source") or groups.get("source2")
+    target = groups.get("target") or groups.get("target2")
+    if not (amount and source and target):
+        return describe_units()
+    try:
+        value = float(amount.replace(",", "."))
+    except ValueError:  # pragma: no cover - guarded by the pattern
+        return f"I could not read the number '{amount}'."
+    try:
+        return describe_conversion(value, source, target)
+    except ConversionError as exc:
+        return str(exc)
+
+
+def _unit_list(match: Match[str], context: SkillContext) -> str:
+    return describe_units()
 
 
 def _number_words(match: Match[str], context: SkillContext) -> str:
@@ -1910,6 +1941,37 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_number_words,
                 examples=["spell out 42", "forty-two in digits"],
+            ),
+            Skill(
+                name="unit-list",
+                description="List the units I can convert between.",
+                patterns=[
+                    r"\b(?:what|which)\s+units\s+(?:do\s+you\s+know|can\s+you\s+convert)\b",
+                    r"\b(?:list|show)(?:\s+me)?(?:\s+your)?\s+units\b",
+                    r"\bunit\s+(?:conversions?|list|index)\b",
+                ],
+                handler=_unit_list,
+                examples=["what units can you convert?"],
+            ),
+            Skill(
+                name="unit-conversion",
+                description=(
+                    "Convert between length, mass, volume, time, temperature, "
+                    "speed and area units."
+                ),
+                patterns=[
+                    r"\b(?:convert|change|turn)\s+(?P<amount>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source>" + _UNIT_PATTERN + r")\s+(?:in ?to|into|to|in|as)\s+"
+                    r"(?P<target>" + _UNIT_PATTERN + r")\b",
+                    r"\bhow\s+many\s+(?P<target2>" + _UNIT_PATTERN + r")\s+"
+                    r"(?:is|are|in)\s+(?P<amount2>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source2>" + _UNIT_PATTERN + r")\b",
+                    r"^\s*(?:what(?:'s| is)\s+)?(?P<amount>" + _NUMBER_PATTERN + r")\s*"
+                    r"(?P<source>" + _UNIT_PATTERN + r")\s+(?:in ?to|into|to|in|as)\s+"
+                    r"(?P<target>" + _UNIT_PATTERN + r")\s*[.?!]*\s*$",
+                ],
+                handler=_convert_units,
+                examples=["convert 10 km to miles", "how many pounds is 70 kg"],
             ),
             Skill(
                 name="calculator",
