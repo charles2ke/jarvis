@@ -31,6 +31,8 @@ class BrailleModuleTests(unittest.TestCase):
     def test_unknown_character_is_reported(self) -> None:
         with self.assertRaises(BrailleError):
             write_braille("caf\u00e9")
+        with self.assertRaises(BrailleError):
+            write_braille("\u201c")
 
     def test_reading_plain_text_is_rejected(self) -> None:
         with self.assertRaises(BrailleError):

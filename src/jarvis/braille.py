@@ -68,7 +68,6 @@ _PUNCTUATION_DOTS: Tuple[Tuple[str, Tuple[int, ...]], ...] = (
     ("'", (3,)),
     ("-", (3, 6)),
     ("/", (3, 4)),
-    ("\u201c", (2, 3, 6)),
     ("\u201d", (3, 5, 6)),
 )
 
@@ -85,7 +84,6 @@ CELL_TO_LETTER: Dict[str, str] = {
 PUNCTUATION_TO_CELL: Dict[str, str] = {
     mark: _cell(*dots) for mark, dots in _PUNCTUATION_DOTS
 }
-# The first spelling of a shared cell wins when reading, so "?" beats "“".
 CELL_TO_PUNCTUATION: Dict[str, str] = {}
 for _mark, _cell_char in PUNCTUATION_TO_CELL.items():
     CELL_TO_PUNCTUATION.setdefault(_cell_char, _mark)
