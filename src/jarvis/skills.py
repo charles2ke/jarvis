@@ -8,17 +8,29 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia, signlanguage
+from jarvis import encyclopedia, signlanguage, traffic
 from jarvis.atlas import (
+    City,
     Country,
+    EVENTS,
+    cities_in,
     countries_in,
     describe,
+    describe_event,
+    describe_wonder,
     display_name,
+    events_in_year,
     find_by_capital,
+    find_city,
     find_continent,
     find_country,
+    find_event,
+    find_wonder,
+    find_wonder_category,
     format_population,
     sentence,
+    timezone_for_country,
+    wonders_in,
 )
 from jarvis.braille import (
     BrailleError,
@@ -840,6 +852,24 @@ def _clean_subject(subject: str) -> str:
     return cleaned.strip().rstrip("?!.").strip()
 
 
+def _world_knowledge(subject: str) -> Optional[str]:
+    """Return an atlas or traffic answer for ``subject``, if there is one."""
+
+    wonder = find_wonder(subject)
+    if wonder is not None:
+        return describe_wonder(wonder)
+    event = find_event(subject)
+    if event is not None:
+        return describe_event(event)
+    city = find_city(subject)
+    if city is not None:
+        return _describe_city(city)
+    sign = traffic.find_sign(subject)
+    if sign is not None:
+        return traffic.describe_sign(sign)
+    return None
+
+
 def _encyclopedia(match: Match[str], context: SkillContext) -> str:
     subject = _clean_subject(match.group("subject") or "")
     if not subject:
@@ -850,6 +880,9 @@ def _encyclopedia(match: Match[str], context: SkillContext) -> str:
     article = encyclopedia.lookup(subject)
     if article is not None:
         return f"{article.title}: {article.summary}"
+    from_world = _world_knowledge(subject)
+    if from_world is not None:
+        return from_world
     lines = [f"I do not have an encyclopedia entry for '{subject}' yet."]
     close = encyclopedia.suggestions(subject)
     if close:
@@ -1200,6 +1233,207 @@ def _atlas(match: Match[str], context: SkillContext) -> str:
     )
 
 
+def _country_name(name: str) -> str:
+    """Return ``name`` with the definite article English expects."""
+
+    country = find_country(name)
+    return display_name(country) if country is not None else name
+
+
+def _describe_city(city: City) -> str:
+    """Return a one line profile of ``city``."""
+
+    country = find_country(city.country)
+    country_name = _country_name(city.country)
+    detail = f" {city.note}" if city.note else ""
+    return sentence(
+        f"{city.name} is in {country_name}"
+        f"{f', {country.continent}' if country is not None else ''}. "
+        f"It keeps {city.utc_offset} ({city.timezone}).{detail}".rstrip()
+    )
+
+
+_TIMEZONE_HELP = (
+    "Ask me for the time zone of a country or a major city, for example "
+    "'what time zone is Japan in?' or 'time zone of New York'."
+)
+
+
+def _timezone(match: Match[str], context: SkillContext) -> str:
+    subject = _atlas_group(match, "zone_place", "zone_place2")
+    if subject is None:
+        return _TIMEZONE_HELP
+
+    city = find_city(subject)
+    if city is not None:
+        return sentence(
+            f"{city.name} keeps {city.utc_offset} ({city.timezone}), the time "
+            f"zone of {_country_name(city.country)}"
+        )
+
+    country = find_country(subject) or find_by_capital(subject)
+    if country is not None:
+        zone = timezone_for_country(country)
+        if zone is not None:
+            reply = sentence(
+                f"{display_name(country)} keeps {zone.utc_offset} "
+                f"({zone.zone}), the time zone of its capital {country.capital}"
+            )
+            return f"{reply} {zone.note}".strip() if zone.note else reply
+
+    return (
+        f"I do not have a time zone for '{subject}' yet. {_TIMEZONE_HELP}"
+    )
+
+
+def _cities(match: Match[str], context: SkillContext) -> str:
+    subject = _atlas_group(match, "cities_in")
+    if subject is None:
+        return "Ask me for the major cities of a country I know, such as Japan."
+    country = find_country(subject)
+    if country is None:
+        return _ATLAS_UNKNOWN.format(subject=f"'{subject}'")
+    cities = cities_in(country.name)
+    names = [country.capital] + [
+        city.name for city in cities if city.name != country.capital
+    ]
+    return (
+        f"Cities I know in {display_name(country)}: "
+        f"{', '.join(names)} (capital first)."
+    )
+
+
+_WONDERS_HELP = (
+    "I know the Seven Wonders of the Ancient World, the New Seven Wonders of "
+    "the World and the Seven Natural Wonders of the World. Ask for one of "
+    "those lists, or about a single wonder such as Petra."
+)
+
+
+def _wonders(match: Match[str], context: SkillContext) -> str:
+    subject = _atlas_group(match, "wonder")
+    if subject is not None:
+        wonder = find_wonder(subject)
+        if wonder is not None:
+            return describe_wonder(wonder)
+
+    listing = _atlas_group(match, "wonder_list")
+    category = find_wonder_category(listing or match.group(0))
+    if category is None:
+        if subject is not None:
+            return f"'{subject}' is not on my lists of wonders. {_WONDERS_HELP}"
+        category = "New Seven Wonders of the World"
+    entries = wonders_in(category)
+    lines = [f"The {category}:"]
+    lines.extend(f"- {wonder.name} ({wonder.location})" for wonder in entries)
+    return "\n".join(lines)
+
+
+_HISTORY_HELP = (
+    "Ask me about a major event such as the fall of the Berlin Wall, or say "
+    "'what happened in 1969?' or 'list major historical events'."
+)
+
+
+def _history(match: Match[str], context: SkillContext) -> str:
+    year_text = _atlas_group(match, "year")
+    if year_text is not None:
+        try:
+            year = int(year_text)
+        except ValueError:
+            return _HISTORY_HELP
+        if _atlas_group(match, "era") in {"BC", "BCE", "bc", "bce"}:
+            year = -year
+        events = events_in_year(year)
+        if not events:
+            return f"I have no major event recorded around {year}. {_HISTORY_HELP}"
+        lines = [f"Around {year} my history covers:"]
+        lines.extend(f"- {describe_event(event)}" for event in events)
+        return "\n".join(lines)
+
+    subject = _atlas_group(match, "event")
+    if subject is not None:
+        event = find_event(subject)
+        if event is not None:
+            return describe_event(event)
+        return f"I do not have '{subject}' in my history yet. {_HISTORY_HELP}"
+
+    lines = ["Major events in world history that I know:"]
+    lines.extend(
+        f"- {event.name} ({event.period})"
+        for event in sorted(
+            EVENTS,
+            key=lambda event: event.year if event.year is not None else float("inf"),
+        )
+    )
+    lines.append("Ask me about any of them for more detail.")
+    return "\n".join(lines)
+
+
+_TRAFFIC_HELP = (
+    "Ask me what a sign means — 'what does a give way sign mean?' — or for a "
+    "family of signs such as warning signs, or say 'list traffic signs'."
+)
+
+
+_TRAFFIC_GENERIC = frozenset({"traffic", "road", "street", "the", ""})
+
+
+def _traffic_overview() -> str:
+    lines = [
+        "Road signs worldwide come from two families. "
+        + traffic.CONVENTIONS["Vienna Convention"],
+        traffic.CONVENTIONS["MUTCD"],
+        "The families I can explain:",
+    ]
+    lines.extend(
+        f"- {traffic.describe_category(category)}" for category in traffic.CATEGORIES
+    )
+    lines.append(_TRAFFIC_HELP)
+    return "\n".join(lines)
+
+
+def _traffic(match: Match[str], context: SkillContext) -> str:
+    if re.search(r"\btraffic (?:light|lights|signal lights)\b", match.string, re.I):
+        return traffic.TRAFFIC_LIGHTS
+
+    subject = _atlas_group(match, "sign", "sign2", "sign3")
+    if subject is not None and subject.strip().lower() in _TRAFFIC_GENERIC:
+        subject = None
+    if subject is not None:
+        sign = traffic.find_sign(subject)
+        if sign is not None:
+            return traffic.describe_sign(sign)
+        category = traffic.find_category(subject)
+        if category is not None:
+            signs = traffic.signs_in(category.name)
+            lines = [traffic.describe_category(category)]
+            lines.extend(f"- {sign.name}: {sign.meaning}" for sign in signs)
+            return "\n".join(lines)
+        convention = traffic.find_convention(subject)
+        if convention is not None:
+            return convention
+        close = traffic.suggestions(subject)
+        if close:
+            return (
+                f"I do not know a '{subject}' sign. Did you mean: "
+                + ", ".join(close)
+                + "?"
+            )
+        return f"I do not know a '{subject}' sign yet. {_TRAFFIC_HELP}"
+
+    if re.search(r"\b(?:list|show|which|what)\b", match.string, re.I) and re.search(
+        r"\bsigns\b", match.string, re.I
+    ):
+        names = traffic.sign_names()
+        lines = [f"I know {len(names)} road signs used around the world:"]
+        lines.extend(f"- {name}" for name in names)
+        lines.append(_TRAFFIC_HELP)
+        return "\n".join(lines)
+
+    return _traffic_overview()
+
+
 def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     """Return a registry populated with the built-in Jarvis skills."""
 
@@ -1481,6 +1715,73 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["what is my name?"],
             ),
             Skill(
+                name="traffic-signs",
+                description=(
+                    "Explain road signs, signals and the sign conventions used "
+                    "around the world."
+                ),
+                patterns=[
+                    r"\bwhat does (?:the |a |an )?(?P<sign>[^?!]+?)\s+(?:road |traffic )?(?:sign|signal)s?\s+mean\b",
+                    r"\bmeaning of (?:the |a |an )?(?P<sign2>[^?!]+?)\s+(?:road |traffic )?(?:sign|signal)s?\b",
+                    r"\b(?:tell me about|explain|describe)\s+(?:the |a |an )?(?!(?:asl|american sign language|sign language)\b)(?P<sign3>[^?!]+?)\s+(?:road |traffic )?(?:sign|signal)s?\b",
+                    r"\btraffic (?:light|lights)\b",
+                    r"\b(?:traffic|road|street) (?:sign|signal|symbol)s?\b",
+                    r"\b(?:vienna convention|mutcd)\b",
+                ],
+                handler=_traffic,
+                examples=["what does a give way sign mean?"],
+            ),
+            Skill(
+                name="time-zone",
+                description="Give the time zone and UTC offset of a country or city.",
+                patterns=[
+                    r"\b(?:time ?zone|timezone|utc offset)\s+(?:in|of|for)\s+(?P<zone_place>[^?!]+)",
+                    r"\bwhat (?:time ?zone|timezone)\s+(?:is|does)\s+(?P<zone_place2>[^?!]+?)\s+(?:in|on|use|keep|observe)\b",
+                    r"\b(?:time ?zone|timezone|utc offset)\b",
+                ],
+                handler=_timezone,
+                examples=["what time zone is Japan in?"],
+            ),
+            Skill(
+                name="wonders",
+                description=(
+                    "List the ancient, new and natural wonders of the world, or "
+                    "describe one of them."
+                ),
+                patterns=[
+                    r"\b(?:what|which) (?:are|were) the (?P<wonder_list>[^?!]*wonders[^?!]*)",
+                    r"\bis\s+(?P<wonder>[^?!]+?)\s+(?:a|one of the)\s+wonders?\b",
+                    r"\b(?:seven|7|new|ancient|natural) wonders\b",
+                    r"\bwonders of (?:the )?(?:world|nature|the ancient world)\b",
+                ],
+                handler=_wonders,
+                examples=["what are the seven wonders of the world?"],
+            ),
+            Skill(
+                name="history",
+                description=(
+                    "Recall major events in world history, by name or by year."
+                ),
+                patterns=[
+                    r"\bwhat happened in (?:the year )?(?P<year>\d{3,5})(?:\s*(?P<era>bc|bce)\b)?",
+                    r"\bwhen (?:did|was|were)\s+(?P<event>[^?!]+?)\s+(?:happen(?:ed)?|start(?:ed)?|begin|began|end(?:ed)?|take place|took place|fall|fell|collapse|occur(?:red)?|founded|signed|invented|discovered|abolished)\b",
+                    r"\b(?:major|important|key|big|list) (?:historical events|events in history|world events)\b",
+                    r"\b(?:historical events|events in history|world history|history timeline)\b",
+                ],
+                handler=_history,
+                examples=["what happened in 1969?"],
+            ),
+            Skill(
+                name="cities",
+                description="List the major cities I know in a country.",
+                patterns=[
+                    r"\b(?:what|which)\s+(?:major\s+)?cities\s+(?:are\s+)?(?:in|of)\s+(?P<cities_in>[^?!]+)",
+                    r"\b(?:list|name|show)(?: me)?(?: the)?\s+(?:major\s+)?cities\s+(?:in|of)\s+(?P<cities_in>[^?!]+)",
+                ],
+                handler=_cities,
+                examples=["what cities are in Japan?"],
+            ),
+            Skill(
                 name="time",
                 description="Report the current time.",
                 patterns=[r"\bwhat('s| is)? ?the time\b", r"\bcurrent time\b"],
@@ -1726,6 +2027,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"^\s*(?:tell|teach)\s+(?:me|us)\s+(?:more\s+)?about\s+(?P<subject>(?!(?:my|our)\b).+?)\s*[.?!]*\s*$",
                     r"^\s*(?:what|who)(?:'s|’s|'re|s|\s+is|\s+are|\s+was|\s+were)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
                     r"^\s*(?:define|explain|describe)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*what does\s+(?P<subject>.+?)\s+mean\s*[.?!]*\s*$",
                     r"^\s*(?:look\s?up|search\s+for)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
                 ],
                 handler=_encyclopedia,
