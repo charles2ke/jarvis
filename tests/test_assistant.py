@@ -110,9 +110,17 @@ class AssistantTests(unittest.TestCase):
         reply = self.assistant.respond("we need couples counseling")
         self.assertIn("couples therapist", reply)
         communication = self.assistant.respond(
-            "my wife and I need help, we keep arguing about the same thing"
+            "my wife and I need couples help, we keep arguing about the same thing"
         )
         self.assertIn("argue about the argument", communication)
+
+    def test_couples_counseling_prioritizes_safety(self):
+        reply = self.assistant.respond(
+            "we need couples counseling because my partner is abusive"
+        )
+        self.assertIn("immediate safety", reply)
+        self.assertIn("individual support", reply)
+        self.assertNotIn("trained couples therapist", reply)
 
     def test_couples_counseling_handles_trust_and_drift(self):
         trust = self.assistant.respond("we are looking for marriage therapy after an affair")
@@ -124,6 +132,7 @@ class AssistantTests(unittest.TestCase):
 
     def test_couples_counseling_does_not_shadow_love_support(self):
         self.assertIn("Conflict", self.assistant.respond("my girlfriend and I keep fighting"))
+        self.assertEqual(self.assistant.respond("we need help"), FALLBACK_RESPONSE)
 
     def test_midlife_counseling_reflects_on_purpose_and_career(self):
         reply = self.assistant.respond("I think I am having a midlife crisis")

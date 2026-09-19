@@ -490,9 +490,23 @@ _COUPLES_CLOSING = (
     "safe and respected."
 )
 
+_RELATIONSHIP_SAFETY_PATTERN = re.compile(
+    r"\b(abuse[ds]?|abusive|coerc(?:e[ds]?|ion|ive)|hit(?:s|ting)?|"
+    r"threaten(?:s|ed|ing)?|unsafe|violen(?:ce|t))\b"
+)
+
+_RELATIONSHIP_SAFETY_RESPONSE = (
+    "Your immediate safety comes first. If you are in immediate danger, move "
+    "to a safe place and contact local emergency services. Please seek "
+    "individual support from a trusted person or domestic-abuse service; "
+    "couples therapy may not be safe while abuse or coercion is present."
+)
+
 
 def _couples_counseling(match: Match[str], context: SkillContext) -> str:
     text = match.string.lower()
+    if _RELATIONSHIP_SAFETY_PATTERN.search(text):
+        return _RELATIONSHIP_SAFETY_RESPONSE
     reflection = _COUPLES_DEFAULT_REFLECTION
     for keywords, candidate in _COUPLES_REFLECTIONS:
         if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
@@ -678,7 +692,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[
                     r"\b(couples?|marriage|marital|relationship) (counsel(?:l)?ing|counsel(?:l)?or|therapy|therapist)\b",
                     r"\b(save|fix|work on|repair|rebuild) (our|my|the) (marriage|relationship)\b",
-                    r"\b(we|my (husband|wife|partner|spouse|girlfriend|boyfriend) and i) (need|should get|are in) .{0,20}(counsel(?:l)?ing|therapy|help)\b",
+                    r"\b(we|my (husband|wife|partner|spouse|girlfriend|boyfriend) and i) (need|should get|are in) .{0,20}(counsel(?:l)?ing|therapy|(couples?|marriage|marital|relationship) help)\b",
                     r"\bour (marriage|relationship) is (in trouble|failing|falling apart|struggling|broken)\b",
                 ],
                 handler=_couples_counseling,
