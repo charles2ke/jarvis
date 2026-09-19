@@ -106,6 +106,80 @@ class AssistantTests(unittest.TestCase):
         reply = self.assistant.respond("I have a crush on someone at work")
         self.assertIn("rejection", reply)
 
+    def test_couples_counseling_handles_explicit_requests(self):
+        reply = self.assistant.respond("we need couples counseling")
+        self.assertIn("couples therapist", reply)
+        communication = self.assistant.respond(
+            "my wife and I need couples help, we keep arguing about the same thing"
+        )
+        self.assertIn("argue about the argument", communication)
+
+    def test_couples_counseling_prioritizes_safety(self):
+        reply = self.assistant.respond(
+            "we need couples counseling because my partner is abusive"
+        )
+        self.assertIn("immediate safety", reply)
+        self.assertIn("individual support", reply)
+        self.assertNotIn("trained couples therapist", reply)
+
+    def test_couples_counseling_handles_trust_and_drift(self):
+        trust = self.assistant.respond("we are looking for marriage therapy after an affair")
+        self.assertIn("Broken trust", trust)
+        drift = self.assistant.respond(
+            "we want to work on our marriage, we feel like roommates"
+        )
+        self.assertIn("Drifting apart", drift)
+
+    def test_couples_counseling_does_not_shadow_love_support(self):
+        self.assertIn("Conflict", self.assistant.respond("my girlfriend and I keep fighting"))
+        self.assertEqual(self.assistant.respond("we need help"), FALLBACK_RESPONSE)
+
+    def test_midlife_counseling_reflects_on_purpose_and_career(self):
+        reply = self.assistant.respond("I think I am having a midlife crisis")
+        self.assertIn("midlife reckoning", reply)
+        career = self.assistant.respond(
+            "I'm turning 50 and I hate my job after all these years"
+        )
+        self.assertIn("job title", career)
+
+    def test_midlife_counseling_handles_regret(self):
+        reply = self.assistant.respond("is this all there is, I feel like I wasted my best years")
+        self.assertIn("Regret", reply)
+
+    def test_career_counselling_handles_job_loss_and_moves(self):
+        reply = self.assistant.respond("I was laid off last month")
+        self.assertIn("identity", reply)
+        self.assertIn("mentor", reply)
+        move = self.assistant.respond("I am thinking about changing careers")
+        self.assertIn("trade-offs", move)
+
+    def test_career_counselling_handles_job_search_and_pay(self):
+        self.assertIn(
+            "numbers game", self.assistant.respond("my job search keeps failing")
+        )
+        self.assertIn(
+            "evidence", self.assistant.respond("how do I ask for a raise?")
+        )
+
+    def test_career_counselling_handles_natural_language_topics(self):
+        self.assertIn("drains", self.assistant.respond("I am burned out at work"))
+        self.assertIn("drains", self.assistant.respond("my manager is toxic"))
+        self.assertIn(
+            "numbers game", self.assistant.respond("I was rejected for a job")
+        )
+        self.assertIn(
+            "evidence", self.assistant.respond("how do I negotiate my salary?")
+        )
+        self.assertIn("trade-offs", self.assistant.respond("I want to change jobs"))
+
+    def test_career_counselling_addresses_you_by_name(self):
+        self.assistant.respond("my name is Charles")
+        self.assertIn("Charles", self.assistant.respond("I hate my job"))
+
+    def test_crisis_support_still_wins_over_career_counselling(self):
+        reply = self.assistant.respond("I lost my job and I want to die")
+        self.assertIn("988", reply)
+
     def test_crisis_support_still_wins_over_support_skills(self):
         reply = self.assistant.respond(
             "my girlfriend left me and I want to die"

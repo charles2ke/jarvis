@@ -40,6 +40,7 @@ Useful flags:
 | Skill | Example |
 | --- | --- |
 | crisis-support | `I have been thinking about hurting myself` |
+| answer | `answer how does the skill registry work?` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
 | story | `tell me a story` |
@@ -54,6 +55,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| atlas | `what is the capital of Japan?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -61,7 +63,12 @@ Useful flags:
 | mood-history | `how have I been feeling` |
 | clear-mood-history | `clear my mood history` |
 | love-support | `my girlfriend and I keep fighting` |
+| couples-counseling | `we need couples counseling` |
+| midlife-counseling | `I think I am having a midlife crisis` |
+| career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| encyclopedia | `what is gravity?` |
+| encyclopedia-topics | `encyclopedia topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -73,9 +80,49 @@ empathetic listening and keeps an in-session mood log that is not written to
 persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
-heartbreak, conflict and new feelings. `role-model` talks about character and
-the person you want to become, `coach` turns goals and habits into a concrete
-next step, and `self-care` suggests a practical way to look after yourself.
+heartbreak, conflict and new feelings. `couples-counseling` answers explicit
+requests to work on a marriage or relationship together, and
+`midlife-counseling` reflects on ageing, regret, purpose and what comes next;
+both point to a professional counsellor for ongoing work.
+`career-counselling` works through
+job loss, career moves, job searches and pay conversations. `role-model` talks
+about character and the person you want to become, `coach` turns goals and
+habits into a concrete next step, and `self-care` suggests a practical way to
+look after yourself.
+
+The `atlas` skill answers offline geography questions — capitals, the country
+behind a capital, continents, currencies, population estimates and the
+countries it knows on a continent. Its data set is small and hand-curated, so
+population figures are rounded estimates.
+
+The `encyclopedia` skill answers factual questions (`what is ...`, `who was
+...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
+articles — it never reaches the network. Lookups ignore case, punctuation and
+aliases, tolerate small typos, and suggest close titles when a topic is
+missing. It is registered last so that `what is the time?`, `what is my name?`
+and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
+list every entry.
+
+## Answering any query with a cloud session
+
+The `answer` skill hands a question to a GitHub Copilot cloud session running on
+this repository with the Opus 5 max model (`claude-opus-5`, reasoning effort
+`max`), and replies with a link to the session:
+
+```bash
+jarvis "answer how does the skill registry resolve matches?"
+jarvis "ask the cloud what does memory.py persist?"
+jarvis "spawn a cloud session on this repo to answer: who owns the CLI?"
+```
+
+It reads its configuration from the environment:
+
+- `JARVIS_GITHUB_TOKEN` (or `GITHUB_TOKEN` / `GH_TOKEN`) — token used to start the session.
+- `JARVIS_GITHUB_REPO` (or `GITHUB_REPOSITORY`) — `owner/repo` to run on (defaults to the `origin` remote of the checkout).
+- `JARVIS_CLOUD_MODEL` — override the model (default `claude-opus-5`).
+- `JARVIS_COPILOT_API` — override the Copilot API base URL (default `https://api.githubcopilot.com`).
+
+If no token is configured, Jarvis explains what is missing instead of failing.
 
 ## Adding a skill
 

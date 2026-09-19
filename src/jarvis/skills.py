@@ -8,7 +8,20 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
+from jarvis import encyclopedia
+from jarvis.atlas import (
+    Country,
+    countries_in,
+    describe,
+    display_name,
+    find_by_capital,
+    find_continent,
+    find_country,
+    format_population,
+    sentence,
+)
 from jarvis.calculator import CalculationError, calculate
+from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
 
 
@@ -428,6 +441,367 @@ def _self_care(match: Match[str], context: SkillContext, *, idea: Callable[[], s
     )
 
 
+_MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("career", "job", "work", "promotion", "retire", "retirement", "quit"),
+        "Work often carries more of our identity than we admit. If the job "
+        "title disappeared tomorrow, what would you still want to be known "
+        "for?",
+    ),
+    (
+        ("regret", "wasted", "too late", "missed", "should have", "behind"),
+        "Regret usually marks something you still care about. What would "
+        "honouring that value look like from where you actually stand today?",
+    ),
+    (
+        ("meaning", "purpose", "point", "pointless", "empty", "stuck", "rut"),
+        "A life can be full and still feel hollow. What did you used to do "
+        "that made time disappear, and what stopped it?",
+    ),
+    (
+        (
+            "old",
+            "older",
+            "aging",
+            "ageing",
+            "age",
+            "body",
+            "health",
+            "mortality",
+            "dying",
+            "grey",
+            "gray",
+        ),
+        "Noticing time passing is unsettling, and it is also honest. What "
+        "would you like the next ten years to be about, rather than away from?",
+    ),
+    (
+        ("kids", "children", "son", "daughter", "empty nest", "parents", "mother", "father"),
+        "Midlife often means holding other people's needs at both ends. "
+        "Where in all of that is there any space left for you?",
+    ),
+)
+
+_MIDLIFE_DEFAULT_REFLECTION = (
+    "This stage asks hard questions: what you have built, what you still want, "
+    "and what you are willing to change. Which of those is loudest for you "
+    "right now?"
+)
+
+_MIDLIFE_CLOSING = (
+    "A midlife reckoning is not a breakdown; it is usually a signal worth "
+    "listening to. I am not a counsellor, so if it keeps weighing on you, a "
+    "therapist can help you work through it properly."
+)
+
+
+def _midlife_counseling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _MIDLIFE_DEFAULT_REFLECTION
+    for keywords, candidate in _MIDLIFE_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            f"Thank you for saying that out loud{_addressed(context)}.",
+            reflection,
+            _MIDLIFE_CLOSING,
+        ]
+    )
+
+
+_CAREER_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "fired",
+            "laid off",
+            "layoff",
+            "layoffs",
+            "redundant",
+            "redundancy",
+            "lost my job",
+            "let go",
+            "unemployed",
+            "out of work",
+        ),
+        "Losing a job shakes far more than income — it touches identity and "
+        "routine too. What kind of work would feel worth rebuilding towards, "
+        "rather than just the fastest way back in?",
+    ),
+    (
+        (
+            "quit",
+            "resign",
+            "resigning",
+            "leave my job",
+            "leaving my job",
+            "new job",
+            "job offer",
+            "offer",
+            "change careers",
+            "changing careers",
+            "career change",
+            "switch careers",
+            "career switch",
+            "change jobs",
+            "changing jobs",
+            "switch jobs",
+        ),
+        "Big career moves are easier to judge when the trade-offs are explicit. "
+        "What would you gain in the first year, and what would you be giving up "
+        "that actually matters to you?",
+    ),
+    (
+        (
+            "burned out",
+            "burnt out",
+            "burnout",
+            "overworked",
+            "hate my job",
+            "hate my boss",
+            "my boss",
+            "manager",
+            "toxic",
+            "workload",
+            "overtime",
+        ),
+        "Work that drains you is information, not a personal failing. Which part "
+        "is the job itself, and which part is the environment or the people "
+        "around it?",
+    ),
+    (
+        (
+            "promotion",
+            "promoted",
+            "raise",
+            "salary",
+            "pay",
+            "negotiate",
+            "negotiating",
+            "performance review",
+            "review",
+            "stuck",
+            "growth",
+        ),
+        "Progression usually rewards evidence more than effort. What have you "
+        "delivered recently that the people deciding would recognise, and who "
+        "needs to hear about it?",
+    ),
+    (
+        (
+            "interview",
+            "interviewing",
+            "resume",
+            "cv",
+            "cover letter",
+            "applying",
+            "application",
+            "applications",
+            "job search",
+            "job hunting",
+            "rejected",
+            "rejection",
+        ),
+        "Job hunting is a numbers game with a bruising feedback loop. Which "
+        "single step — the CV, the outreach or the interview itself — is losing "
+        "you the most opportunities right now?",
+    ),
+    (
+        (
+            "what should i do with my life",
+            "career path",
+            "direction",
+            "purpose",
+            "passion",
+            "study",
+            "degree",
+            "major",
+            "internship",
+            "graduate",
+            "first job",
+        ),
+        "Direction rarely arrives as a single revelation; it usually shows up as "
+        "a pattern. Which tasks have left you energised rather than depleted, "
+        "whatever the job title was?",
+    ),
+)
+
+_CAREER_DEFAULT_REFLECTION = (
+    "Work takes up a lot of a life, so it is worth thinking about carefully. "
+    "What would a good outcome here look like six months from now?"
+)
+
+_CAREER_CLOSING = (
+    "I can help you think it through, though a mentor or someone in the field "
+    "will know the specifics better than I do."
+)
+
+
+def _career_counselling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _CAREER_DEFAULT_REFLECTION
+    for keywords, candidate in _CAREER_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            f"Thanks for talking this through with me{_addressed(context)}.",
+            reflection,
+            _CAREER_CLOSING,
+        ]
+    )
+
+
+_COUPLES_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("affair", "cheated", "cheating", "unfaithful", "betrayed", "betrayal", "trust"),
+        "Broken trust needs more than an apology; it needs consistent, "
+        "visible repair over time. Are you both willing to do that work, and "
+        "what would honesty have to look like day to day?",
+    ),
+    (
+        (
+            "communicate",
+            "communication",
+            "talk",
+            "talking",
+            "listen",
+            "listening",
+            "shouting",
+            "fight",
+            "fighting",
+            "argue",
+            "arguing",
+            "argument",
+            "silent treatment",
+        ),
+        "Most couples argue about the argument, not the issue. Try each "
+        "taking a turn to say what you need without naming what the other "
+        "did wrong — what would your sentence be?",
+    ),
+    (
+        ("money", "finances", "chores", "housework", "in-laws", "parenting", "kids", "children"),
+        "Recurring practical fights are usually about fairness and feeling "
+        "carried. Where do you each feel the load is uneven, and what is one "
+        "concrete swap you could try this week?",
+    ),
+    (
+        ("intimacy", "sex", "distant", "roommates", "disconnected", "drifted", "apart", "lonely"),
+        "Drifting apart rarely happens in one moment; it happens in a hundred "
+        "small missed turns. When did you last feel close, and what was "
+        "different then?",
+    ),
+    (
+        ("divorce", "separate", "separating", "separation", "leave", "leaving", "end it", "break up"),
+        "Deciding whether to stay is one of the heaviest choices there is. "
+        "What would need to change for staying to feel right, and is that "
+        "change something you both want?",
+    ),
+)
+
+_COUPLES_DEFAULT_REFLECTION = (
+    "Counselling usually starts with each partner naming what they need "
+    "rather than what the other is doing wrong. If you each had one sentence, "
+    "what would yours be?"
+)
+
+_COUPLES_CLOSING = (
+    "I can help you think it through, but a trained couples therapist is the "
+    "right place for this. Whatever you decide, both of you deserve to feel "
+    "safe and respected."
+)
+
+_RELATIONSHIP_SAFETY_PATTERN = re.compile(
+    r"\b(abuse[ds]?|abusive|coerc(?:e[ds]?|ion|ive)|hit(?:s|ting)?|"
+    r"threaten(?:s|ed|ing)?|unsafe|violen(?:ce|t))\b"
+)
+
+_RELATIONSHIP_SAFETY_RESPONSE = (
+    "Your immediate safety comes first. If you are in immediate danger, move "
+    "to a safe place and contact local emergency services. Please seek "
+    "individual support from a trusted person or domestic-abuse service; "
+    "couples therapy may not be safe while abuse or coercion is present."
+)
+
+
+def _couples_counseling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    if _RELATIONSHIP_SAFETY_PATTERN.search(text):
+        return _RELATIONSHIP_SAFETY_RESPONSE
+    reflection = _COUPLES_DEFAULT_REFLECTION
+    for keywords, candidate in _COUPLES_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            "Thank you for bringing this here — wanting to work on it together "
+            "already says something.",
+            reflection,
+            _COUPLES_CLOSING,
+        ]
+    )
+
+
+_ENCYCLOPEDIA_FILLERS = re.compile(
+    r"^(?:the meaning of|the definition of|the term|the word|me about|us about|about)\s+",
+    re.IGNORECASE,
+)
+
+
+def _clean_subject(subject: str) -> str:
+    cleaned = subject.strip()
+    cleaned = re.sub(r"^(?:please|hey|ok|okay)[,\s]+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\s,]+please$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip().strip("\"'")
+    cleaned = _ENCYCLOPEDIA_FILLERS.sub("", cleaned)
+    return cleaned.strip().rstrip("?!.").strip()
+
+
+def _encyclopedia(match: Match[str], context: SkillContext) -> str:
+    subject = _clean_subject(match.group("subject") or "")
+    if not subject:
+        return (
+            "What would you like to look up? Try 'tell me about gravity', or ask "
+            "for 'encyclopedia topics'."
+        )
+    article = encyclopedia.lookup(subject)
+    if article is not None:
+        return f"{article.title}: {article.summary}"
+    lines = [f"I do not have an encyclopedia entry for '{subject}' yet."]
+    close = encyclopedia.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'encyclopedia topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
+    titles = encyclopedia.topics()
+    lines = [f"I have {len(titles)} encyclopedia entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is gravity?' or 'tell me about Ada Lovelace'.")
+    return "\n".join(lines)
+
+
+def _answer(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    spawn: Optional[Callable[[str], str]] = None,
+) -> str:
+    query = match.group("query").strip()
+    if not query:
+        return "Tell me what you would like the cloud session to answer."
+    try:
+        return (spawn or ask_cloud)(query)
+    except CloudSessionError as exc:
+        return f"I could not start a cloud session: {exc}"
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -546,6 +920,94 @@ def _joke(match: Match[str], context: SkillContext, *, gag: Callable[[], str]) -
     return gag()
 
 
+_ATLAS_UNKNOWN = (
+    "I do not have {subject} in my atlas yet. Ask me about a country such as "
+    "Japan, Brazil or Kenya."
+)
+
+
+def _capitalised(text: str) -> str:
+    """Return ``text`` with its first character upper-cased."""
+
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _atlas_group(match: Match[str], *names: str) -> Optional[str]:
+    """Return the first non-empty named group among ``names``."""
+
+    groups = match.groupdict()
+    for name in names:
+        value = groups.get(name)
+        if value:
+            stripped = value.strip().strip(".,!?;:")
+            if stripped:
+                return stripped
+    return None
+
+
+def _atlas_country(subject: str) -> Optional[Country]:
+    return find_country(subject)
+
+
+def _atlas(match: Match[str], context: SkillContext) -> str:
+    subject = _atlas_group(match, "capital_city", "capital_city2")
+    if subject is not None:
+        country = find_by_capital(subject)
+        if country is not None:
+            return sentence(
+                f"{country.capital} is the capital of {display_name(country)}, "
+                f"in {country.continent}"
+            )
+        return _ATLAS_UNKNOWN.format(subject=f"a capital called '{subject}'")
+
+    subject = _atlas_group(match, "continent_list")
+    if subject is not None:
+        continent = find_continent(subject)
+        if continent is None:
+            return _ATLAS_UNKNOWN.format(subject=f"a continent called '{subject}'")
+        countries = countries_in(continent)
+        if not countries:
+            return f"My atlas has no countries listed for {continent}."
+        names = ", ".join(country.name for country in countries)
+        return f"Countries I know in {continent}: {names}."
+
+    for keys, describe_country in (
+        (
+            ("capital_of", "capital_of2"),
+            lambda c: sentence(f"The capital of {display_name(c)} is {c.capital}"),
+        ),
+        (
+            ("continent_of", "continent_of2"),
+            lambda c: sentence(_capitalised(f"{display_name(c)} is in {c.continent}")),
+        ),
+        (
+            ("currency_of", "currency_of2"),
+            lambda c: sentence(_capitalised(f"{display_name(c)} uses the {c.currency}")),
+        ),
+        (
+            ("population_of",),
+            lambda c: sentence(
+                _capitalised(
+                    f"{display_name(c)} has {format_population(c)} (rounded estimate)"
+                )
+            ),
+        ),
+        (("about",), lambda c: _capitalised(describe(c))),
+    ):
+        subject = _atlas_group(match, *keys)
+        if subject is None:
+            continue
+        country = _atlas_country(subject)
+        if country is None:
+            return _ATLAS_UNKNOWN.format(subject=f"'{subject}'")
+        return describe_country(country)
+
+    return (
+        "Ask me for a capital, continent, currency or population, for example "
+        "'what is the capital of Japan?'."
+    )
+
+
 def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     """Return a registry populated with the built-in Jarvis skills."""
 
@@ -578,6 +1040,53 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["I have been thinking about hurting myself"],
             ),
             Skill(
+                name="couples-counseling",
+                description=(
+                    "Work through relationship problems as a couple, the way "
+                    "couples counselling would."
+                ),
+                patterns=[
+                    r"\b(couples?|marriage|marital|relationship) (counsel(?:l)?ing|counsel(?:l)?or|therapy|therapist)\b",
+                    r"\b(save|fix|work on|repair|rebuild) (our|my|the) (marriage|relationship)\b",
+                    r"\b(we|my (husband|wife|partner|spouse|girlfriend|boyfriend) and i) (need|should get|are in) .{0,20}(counsel(?:l)?ing|therapy|(couples?|marriage|marital|relationship) help)\b",
+                    r"\bour (marriage|relationship) is (in trouble|failing|falling apart|struggling|broken)\b",
+                ],
+                handler=_couples_counseling,
+                examples=["we need couples counseling"],
+            ),
+            Skill(
+                name="midlife-counseling",
+                description=(
+                    "Talk through a midlife crisis: ageing, regret, purpose and "
+                    "what comes next."
+                ),
+                patterns=[
+                    r"\bmid[- ]?life\b",
+                    r"\b(middle[- ]aged?|midlife) (crisis|slump)\b",
+                    r"\bhalf (my|his|her|their) life (is )?(over|gone)\b",
+                    r"\b(second half|rest) of my life\b",
+                    r"\bturning (4\d|5\d|6\d)\b",
+                    r"\bis this (all there is|it)\b",
+                    r"\bwasted (the best|my best) years\b",
+                ],
+                handler=_midlife_counseling,
+                examples=["I think I am having a midlife crisis"],
+            ),
+            Skill(
+                name="answer",
+                description=(
+                    "Answer any query by spawning a GitHub cloud session on this "
+                    "repository with the Opus 5 max model."
+                ),
+                patterns=[
+                    r"^\s*answer(?: me)?(?: this)?[:,]?\s+(?P<query>.+)$",
+                    r"^\s*ask (?:the )?(?:cloud|copilot|github)(?: session)?[:,]?\s+(?P<query>.+)$",
+                    r"^\s*(?:spawn|start|open) (?:a )?(?:git(?:hub)? )?cloud session(?: on this repo(?:sitory)?)?(?: to answer)?[:,]?\s+(?P<query>.+)$",
+                ],
+                handler=_answer,
+                examples=["answer how does the skill registry resolve matches?"],
+            ),
+            Skill(
                 name="love-support",
                 description=(
                     "Talk through relationships, heartbreak and matters of the heart."
@@ -591,6 +1100,31 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_love_support,
                 examples=["my girlfriend and I keep fighting"],
+            ),
+            Skill(
+                name="career-counselling",
+                description=(
+                    "Think through work, job searches and career decisions."
+                ),
+                patterns=[
+                    r"\b(career|vocational) (advice|counsel?ling|coach(ing)?|change|path|move|goals?)\b",
+                    r"\b(change|switch(ing)?|changing) careers\b",
+                    r"\b(change|switch(ing)?|changing) (jobs?|roles?|positions?)\b",
+                    r"\b(i (got|was|am being) (fired|laid off|made redundant|let go))\b",
+                    r"\b(lost my job|out of (a )?work|unemployed)\b",
+                    r"\b(quit|leave|leaving|resign(ing)?( from)?)( my)? (job|role|position)\b",
+                    r"\b(hate|love|stuck in) my (job|work|career|role|boss|manager)\b",
+                    r"\b(burned|burnt) out (at|from) (work|my job)\b",
+                    r"\bmy (boss|manager) is toxic\b",
+                    r"\b(job (search|hunt(ing)?|offer|interview|application))\b",
+                    r"\b(rejected for|rejection from) (a |the )?(job|role|position)\b",
+                    r"\b(my )?(resume|cv|cover letter)\b",
+                    r"\b(ask(ing)? for a (raise|promotion)|get(ting)? promoted|performance review)\b",
+                    r"\bnegotiate my (pay|salary|compensation)\b",
+                    r"\bwhat should i do with my (life|career)\b",
+                ],
+                handler=_career_counselling,
+                examples=["I am thinking about changing careers"],
             ),
             Skill(
                 name="story",
@@ -769,6 +1303,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["what is today's date?"],
             ),
             Skill(
+                name="atlas",
+                description=(
+                    "Answer geography questions about countries, capitals, "
+                    "continents, currencies and populations."
+                ),
+                patterns=[
+                    r"\b(?:which|what) country(?:'s|s'| is)?\s*(?:capital is|has the capital)\s+(?P<capital_city>[^?!]+)",
+                    r"\b(?P<capital_city2>[^?!]+?)\s+is the capital of (?:which|what) country\b",
+                    r"\b(?:which|what)\s+countries\s+(?:are\s+)?(?:in|of|on)\s+(?P<continent_list>[^?!]+)",
+                    r"\b(?:list|name|show)(?: me)?(?: the)?\s+countries\s+(?:in|of|on)\s+(?P<continent_list>[^?!]+)",
+                    r"\bcapital (?:city )?of\s+(?P<capital_of>[^?!]+)",
+                    r"\bwhat(?:'s| is)\s+(?P<capital_of2>[^?!]+?)(?:'s|s')\s+capital\b",
+                    r"\b(?:what|which) continent is\s+(?P<continent_of>[^?!]+?)\s+(?:in|on|part of)\b",
+                    r"\bcontinent (?:of|for)\s+(?P<continent_of2>[^?!]+)",
+                    r"\bcurrency\s+(?:of|in|used in|used by)\s+(?P<currency_of>[^?!]+)",
+                    r"\bwhat(?:'s| is)\s+(?P<currency_of2>[^?!]+?)(?:'s|s')\s+currency\b",
+                    r"\bpopulation\s+(?:of|in)\s+(?P<population_of>[^?!]+)",
+                    r"\btell me about the country\s+(?P<about>[^?!]+)",
+                ],
+                handler=_atlas,
+                examples=["what is the capital of Japan?"],
+            ),
+            Skill(
                 name="calculator",
                 description="Evaluate basic arithmetic expressions.",
                 patterns=[
@@ -817,6 +1374,30 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(bye|goodbye|see you)\b"],
                 handler=_farewell,
                 examples=["goodbye"],
+            ),
+            Skill(
+                name="encyclopedia-topics",
+                description="List the encyclopedia entries I can explain.",
+                patterns=[
+                    r"\b(encyclopedi(a|as)|encyclopaedia)\s+(topics|entries|index|articles)\b",
+                    r"\b(list|show)( me)?( your)? (encyclopedi(a|as)|encyclopaedia)\b",
+                    r"\bwhat (topics|subjects) do you know\b",
+                ],
+                handler=_encyclopedia_topics,
+                examples=["encyclopedia topics"],
+            ),
+            Skill(
+                name="encyclopedia",
+                description="Look up a short factual article on a topic I know.",
+                patterns=[
+                    r"^\s*(?:encyclopedia|encyclopaedia)[:,]?\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:tell|teach)\s+(?:me|us)\s+(?:more\s+)?about\s+(?P<subject>(?!(?:my|our)\b).+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:what|who)(?:'s|’s|'re|s|\s+is|\s+are|\s+was|\s+were)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:define|explain|describe)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:look\s?up|search\s+for)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                ],
+                handler=_encyclopedia,
+                examples=["what is gravity?"],
             ),
         ]
     )
