@@ -54,6 +54,11 @@ Useful flags:
 | calculator | `calculate 21 * 2` |
 | science-solver | `solve 2x + 3 = 11` |
 | atlas | `what is the capital of Japan?` |
+| cities | `what cities are in Japan?` |
+| time-zone | `what time zone is Japan in?` |
+| wonders | `what are the seven wonders of the world?` |
+| history | `what happened in 1969?` |
+| traffic-signs | `what does a give way sign mean?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -85,10 +90,50 @@ both point to a professional counsellor for ongoing work.
 `career-counselling` works through
 job loss, career moves, job searches and pay conversations.
 
+## World knowledge
+
 The `atlas` skill answers offline geography questions — capitals, the country
 behind a capital, continents, currencies, population estimates and the
 countries it knows on a continent. Its data set is small and hand-curated, so
-population figures are rounded estimates.
+population figures are rounded estimates. Around it sit four more world
+knowledge skills that share the same offline data:
+
+- `cities` — the major cities Jarvis knows in a country (`what cities are in
+  Japan?`), capital first.
+- `time-zone` — the IANA zone and standard UTC offset of a country or a major
+  city (`what time zone is Japan in?`, `time zone of New York`), with a note
+  when a country spans several zones.
+- `wonders` — the Seven Wonders of the Ancient World, the New Seven Wonders of
+  the World and the Seven Natural Wonders of the World, as lists or one at a
+  time (`tell me about Machu Picchu`).
+- `history` — major events in world history, by name (`when did the Berlin Wall
+  fall?`), by year (`what happened in 1969?`) or as a timeline (`list major
+  historical events`).
+
+`time-zone` is registered before `time` so that `what is the time?` still
+reports the clock, and city, wonder and event names are also reachable through
+the `encyclopedia` fallback (`tell me about Sydney`).
+
+## Traffic signs around the world
+
+The `traffic-signs` skill explains road signs, signals and the two conventions
+most of the world signs by: the Vienna Convention on Road Signs and Signals,
+which is symbol based (triangles warn, red circles forbid, blue circles
+instruct, rectangles inform), and the MUTCD used in the United States, which
+leans on words plus shape and colour coding.
+
+```bash
+jarvis "what does a give way sign mean?"       # one sign, with regional names
+jarvis "explain warning signs"                 # a family of signs
+jarvis "tell me about traffic signs"           # the conventions and families
+jarvis "list traffic signs"                    # everything it knows
+jarvis "what do traffic lights mean?"          # signal colours and phases
+```
+
+Each entry records the shape, the colours, the meaning and how the sign varies
+by region — the octagonal stop sign that reads 止まれ in Japan and ARRÊT in
+Quebec, the deer, moose, kangaroo, camel and polar bear versions of the animal
+crossing warning, and the orange work zones of North America.
 
 ## Solving science problems
 
