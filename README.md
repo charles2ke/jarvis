@@ -52,6 +52,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| atlas | `what is the capital of Japan?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -74,6 +75,11 @@ persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
 heartbreak, conflict and new feelings.
+
+The `atlas` skill answers offline geography questions — capitals, the country
+behind a capital, continents, currencies, population estimates and the
+countries it knows on a continent. Its data set is small and hand-curated, so
+population figures are rounded estimates.
 
 The `encyclopedia` skill answers factual questions (`what is ...`, `who was
 ...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
