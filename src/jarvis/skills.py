@@ -137,6 +137,240 @@ def _clear_notes(match: Match[str], context: SkillContext) -> str:
     return "All notes cleared."
 
 
+CRISIS_RESPONSE = (
+    "I am really glad you told me, and I want you to be safe. I am not a "
+    "licensed professional, so please reach out to someone who can help right "
+    "now: call or text 988 in the US, or your local emergency number. If you "
+    "are in immediate danger, contact emergency services. Would you like to "
+    "talk about what is going on while you reach out?"
+)
+
+_MOOD_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("anxious", "anxiety", "nervous", "worried", "panicked", "panic", "scared", "afraid"),
+        "Anxiety can make everything feel urgent at once. Let's slow it down: "
+        "what is the worry that feels loudest right now?",
+    ),
+    (
+        ("sad", "depressed", "down", "unhappy", "miserable", "hopeless", "empty"),
+        "I am sorry you are carrying that heaviness. How long has it been "
+        "sitting with you, and is there anything that briefly lifts it?",
+    ),
+    (
+        ("angry", "furious", "mad", "irritated", "frustrated", "annoyed"),
+        "Anger usually points at something that matters to you. What feels "
+        "unfair or out of your control right now?",
+    ),
+    (
+        ("stressed", "overwhelmed", "burned out", "burnt out", "exhausted", "tired", "drained"),
+        "That sounds like a lot to hold at once. If you could set down one of "
+        "those demands today, which would it be?",
+    ),
+    (
+        ("lonely", "alone", "isolated", "ignored", "abandoned"),
+        "Feeling unseen is genuinely painful. Who in your life feels even a "
+        "little safe to reach out to this week?",
+    ),
+    (
+        ("guilty", "ashamed", "shame", "embarrassed", "worthless", "failure"),
+        "You are being hard on yourself. What would you say to a friend who "
+        "told you the same thing about themselves?",
+    ),
+    (
+        ("happy", "great", "good", "better", "grateful", "relieved", "excited", "calm"),
+        "That is good to hear. What contributed to it, so we can notice what "
+        "helps you feel this way?",
+    ),
+)
+
+_PSYCHIATRIST_DISCLAIMER = (
+    "I am not a therapist, but I am here to listen."
+)
+
+
+def _reflection_for(feeling: str) -> str:
+    lowered = feeling.lower()
+    for keywords, reflection in _MOOD_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", lowered) for keyword in keywords):
+            return reflection
+    return (
+        "Thank you for telling me. What has been feeding that feeling lately?"
+    )
+
+
+def _crisis_support(match: Match[str], context: SkillContext) -> str:
+    return CRISIS_RESPONSE
+
+
+def _psychiatrist(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    feeling = (groups.get("feeling") or "").strip().rstrip(".!?")
+    entries = context.memory.get_session("mood_log", [])
+    if feeling:
+        entries = context.memory.append_session(
+            "mood_log",
+            {"feeling": feeling, "at": context.now().isoformat(timespec="minutes")},
+        )
+        opening = f"It sounds like you are feeling {feeling}."
+    else:
+        opening = "I am listening, and this is a safe place to think out loud."
+    lines = [opening, _reflection_for(feeling)]
+    if len(entries) > 1:
+        lines.append(
+            f"We have talked about your mood {len(entries)} times now; say "
+            "'how have I been feeling' to review it."
+        )
+    lines.append(_PSYCHIATRIST_DISCLAIMER)
+    return " ".join(lines)
+
+
+def _mood_history(match: Match[str], context: SkillContext) -> str:
+    entries = context.memory.get_session("mood_log", [])
+    if not entries:
+        return "You have not shared how you are feeling yet. Try: 'I feel anxious'."
+    lines = [
+        f"{index}. {entry.get('at', 'unknown time')} — {entry.get('feeling', 'unspecified')}"
+        for index, entry in enumerate(entries, start=1)
+    ]
+    return "Here is what you have shared with me:\n" + "\n".join(lines)
+
+
+def _clear_mood_history(match: Match[str], context: SkillContext) -> str:
+    context.memory.clear_session("mood_log")
+    return "I have cleared your mood history."
+
+
+_COPING_SUGGESTIONS: tuple[str, ...] = (
+    "Try a slow breath in for four counts and out for six; it tells your body "
+    "the danger has passed.",
+    "Name one small thing you can do in the next ten minutes — a glass of "
+    "water, a short walk, opening a window.",
+    "Write down the thought that keeps circling. On paper it is usually "
+    "smaller than it feels.",
+    "Reach out to one person today, even with a single message. Connection "
+    "does a lot of the heavy lifting.",
+    "Give yourself permission to do less today. Rest is not a reward you have "
+    "to earn.",
+)
+
+
+def _next_suggestion(context: SkillContext) -> str:
+    index = context.memory.get("support_tip_index", 0)
+    if not isinstance(index, int) or index < 0:
+        index = 0
+    context.memory.set("support_tip_index", (index + 1) % len(_COPING_SUGGESTIONS))
+    return _COPING_SUGGESTIONS[index % len(_COPING_SUGGESTIONS)]
+
+
+def _emotional_support(match: Match[str], context: SkillContext) -> str:
+    name = context.memory.get("user_name")
+    address = f" {name}" if name else ""
+    return (
+        f"I am here with you{address}, and what you are going through sounds "
+        "genuinely hard. You do not have to hold it together on your own right "
+        f"now. {_next_suggestion(context)} "
+        "Tell me more whenever you are ready — I am listening."
+    )
+
+
+_LOVE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "broke up",
+            "break up",
+            "breakup",
+            "broken up",
+            "heartbroken",
+            "heartbreak",
+            "dumped",
+            "left me",
+            "divorce",
+            "ex",
+        ),
+        "Losing a relationship is real grief, and it rarely heals in a straight "
+        "line. What do you miss most — the person, or the future you had "
+        "pictured with them?",
+    ),
+    (
+        (
+            "fight",
+            "fighting",
+            "argue",
+            "argued",
+            "arguing",
+            "argument",
+            "conflict",
+            "not talking",
+            "jealous",
+            "cheated",
+            "betrayed",
+            "trust",
+        ),
+        "Conflict with someone you love hurts because the relationship matters. "
+        "What is the need underneath the argument that you have not been able "
+        "to say out loud yet?",
+    ),
+    (
+        (
+            "crush",
+            "in love",
+            "falling for",
+            "ask out",
+            "asking out",
+            "confess",
+            "tell them how i feel",
+            "date",
+            "dating",
+            "rejected",
+            "rejection",
+            "unrequited",
+        ),
+        "New feelings are exciting and exposing at the same time. What would "
+        "you want them to know about you if fear of rejection were not in the "
+        "room?",
+    ),
+    (
+        (
+            "lonely",
+            "alone",
+            "single",
+            "unloved",
+            "nobody loves me",
+            "no one loves me",
+        ),
+        "Wanting to be loved is one of the most human things there is, not a "
+        "weakness. Where in your life do you already feel even a little "
+        "cared for?",
+    ),
+)
+
+_LOVE_DEFAULT_REFLECTION = (
+    "Love asks a lot of us. What matters most to you about this relationship "
+    "right now?"
+)
+
+_LOVE_CLOSING = (
+    "Whatever you decide, you deserve to be treated with respect — including "
+    "by yourself."
+)
+
+
+def _love_support(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _LOVE_DEFAULT_REFLECTION
+    for keywords, candidate in _LOVE_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            "Thank you for trusting me with something this personal.",
+            reflection,
+            _LOVE_CLOSING,
+        ]
+    )
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -156,6 +390,23 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     del memory  # Reserved for skills that need memory at construction time.
     return SkillRegistry(
         [
+            Skill(
+                name="crisis-support",
+                description=(
+                    "Respond safely when you mention self-harm or suicidal thoughts."
+                ),
+                patterns=[
+                    r"\b(?:kill(?:ing)?|harm(?:ing)?|hurt(?:ing)?|cut(?:ting)?) (myself|my self)\b",
+                    r"\bkill myself\b",
+                    r"\bsuicid(e|al)\b",
+                    r"\bend(?:ing)? (my life|it all)\b",
+                    r"\b(want|going) to die\b",
+                    r"\b((no reason|nothing) to live|(?:do not|don't|don’t|dont) want to live)\b",
+                    r"\bself[- ]harm\b",
+                ],
+                handler=_crisis_support,
+                examples=["I have been thinking about hurting myself"],
+            ),
             Skill(
                 name="greeting",
                 description="Greet Jarvis and start a conversation.",
@@ -226,6 +477,64 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(clear|delete|forget)( all)?( my)? notes\s*[.!]?\s*$"],
                 handler=_clear_notes,
                 examples=["clear my notes"],
+            ),
+            Skill(
+                name="clear-mood-history",
+                description="Forget everything you told me about your mood.",
+                patterns=[
+                    r"^\s*(clear|delete|forget)( all)?( my)? (mood|feelings?) (history|log|journal)\s*[.!]?\s*$"
+                ],
+                handler=_clear_mood_history,
+                examples=["clear my mood history"],
+            ),
+            Skill(
+                name="mood-history",
+                description="Review the feelings you have shared with me.",
+                patterns=[
+                    r"\bhow have i been feeling\b",
+                    r"\b(mood|feelings?) (history|log|journal)\b",
+                ],
+                handler=_mood_history,
+                examples=["how have I been feeling"],
+            ),
+            Skill(
+                name="love-support",
+                description=(
+                    "Talk through relationships, heartbreak and matters of the heart."
+                ),
+                patterns=[
+                    r"\b(broke up|break ?up|broken up|heartbroken|heartbreak|dumped me|divorc(e|ed|ing))\b",
+                    r"\b(my|our) (girlfriend|boyfriend|partner|husband|wife|spouse|fianc(e|ée|é)|ex|marriage|relationship|crush)\b",
+                    r"\b(i('m| am)? ?(in love|falling (in love|for))|i have a crush|unrequited)\b",
+                    r"\b(love life|dating|romantic|relationship advice|ask (him|her|them) out)\b",
+                    r"\b(nobody|no one) loves me\b",
+                ],
+                handler=_love_support,
+                examples=["my girlfriend and I keep fighting"],
+            ),
+            Skill(
+                name="emotional-support",
+                description="Offer comfort, encouragement and a coping suggestion.",
+                patterns=[
+                    r"\b(i need (some )?(emotional )?support|support me|comfort me|cheer me up|encourage me)\b",
+                    r"\b(i can'?t (cope|take|handle) (it|this|any ?more)|i('m| am) (not okay|not ok)|falling apart)\b",
+                    r"\b(having a (really )?(hard|rough|tough|bad) (time|day|week)|going through a lot)\b",
+                ],
+                handler=_emotional_support,
+                examples=["I need some emotional support"],
+            ),
+            Skill(
+                name="psychiatrist",
+                description=(
+                    "Listen with empathy and ask reflective questions about how you feel."
+                ),
+                patterns=[
+                    r"^\s*i(?:'m| am)? ?feel(?:ing)? (?:like |so |really |very )?(?P<feeling>.+)$",
+                    r"^\s*i(?:'m| am) (?P<feeling>anxious|nervous|worried|scared|afraid|sad|depressed|down|unhappy|miserable|hopeless|empty|angry|furious|mad|irritated|frustrated|annoyed|stressed|overwhelmed|burned out|burnt out|exhausted|tired|drained|lonely|alone|isolated|guilty|ashamed|embarrassed|worthless)\b.*$",
+                    r"\b(i need (someone )?to talk|can we talk about (my )?(feelings|mental health)|talk to a (therapist|psychiatrist))\b",
+                ],
+                handler=_psychiatrist,
+                examples=["I feel anxious about work"],
             ),
             Skill(
                 name="help",

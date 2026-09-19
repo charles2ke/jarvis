@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from jarvis.assistant import FALLBACK_RESPONSE, Assistant
 from jarvis.memory import Memory
@@ -45,6 +47,70 @@ class AssistantTests(unittest.TestCase):
         self.assistant.respond("my name is Charles")
         self.assertEqual(self.assistant.respond("what is my name?"), "You are Charles.")
         self.assertIn("Charles", self.assistant.respond("hello"))
+
+
+    def test_psychiatrist_reflects_feeling(self):
+        reply = self.assistant.respond("I feel anxious about work")
+        self.assertIn("anxious about work", reply)
+        self.assertIn("worry", reply)
+        self.assertIn("not a therapist", reply)
+
+    def test_psychiatrist_logs_mood_history(self):
+        self.assistant.respond("I feel lonely")
+        self.assistant.respond("I am exhausted today")
+        reply = self.assistant.respond("how have I been feeling")
+        self.assertIn("lonely", reply)
+        self.assertIn("exhausted", reply)
+        self.assertIn("cleared", self.assistant.respond("clear my mood history"))
+        self.assertIn("not shared", self.assistant.respond("mood history"))
+
+    def test_psychiatrist_mood_history_is_not_persisted(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.json"
+            assistant = Assistant(memory=Memory(path), now=lambda: FIXED_NOW)
+            assistant.respond("I feel anxious about work")
+            self.assertFalse(path.exists())
+
+    def test_crisis_support_takes_priority(self):
+        reply = self.assistant.respond("I feel like I want to die")
+        self.assertIn("988", reply)
+        self.assertIn("emergency", reply)
+
+    def test_crisis_support_handles_direct_self_harm_phrases(self):
+        for message in (
+            "I want to harm myself",
+            "I want to hurt myself",
+            "I cut myself",
+            "I am thinking about ending my life",
+            "I don't want to live",
+        ):
+            with self.subTest(message=message):
+                self.assertIn("988", self.assistant.respond(message))
+
+    def test_emotional_support_offers_comfort_and_a_tip(self):
+        self.assistant.respond("my name is Charles")
+        reply = self.assistant.respond("I need some emotional support")
+        self.assertIn("Charles", reply)
+        self.assertIn("four counts", reply)
+        second = self.assistant.respond("I am having a really hard day")
+        self.assertNotEqual(reply, second)
+
+    def test_love_support_handles_heartbreak_and_conflict(self):
+        reply = self.assistant.respond("we broke up last week and I am heartbroken")
+        self.assertIn("grief", reply)
+        self.assertIn("respect", reply)
+        conflict = self.assistant.respond("my girlfriend and I keep fighting")
+        self.assertIn("Conflict", conflict)
+
+    def test_love_support_handles_crush(self):
+        reply = self.assistant.respond("I have a crush on someone at work")
+        self.assertIn("rejection", reply)
+
+    def test_crisis_support_still_wins_over_support_skills(self):
+        reply = self.assistant.respond(
+            "my girlfriend left me and I want to die"
+        )
+        self.assertIn("988", reply)
 
     def test_help_lists_skills(self):
         reply = self.assistant.respond("help")
