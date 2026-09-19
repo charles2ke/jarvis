@@ -44,6 +44,7 @@ from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis import maritime
 from jarvis.memory import Memory
 from jarvis.nl import number_to_words, words_to_number
+from jarvis import poetry
 from jarvis.science import solve_problem
 from jarvis.speech import SpeechError, speak
 
@@ -1015,6 +1016,40 @@ def _sign_alphabet(match: Match[str], context: SkillContext) -> str:
     return "\n".join(lines)
 
 
+_POEM_TOPIC_FILLERS = re.compile(
+    r"^(?:me\s+)?(?:a|an|another|some|one)?\s*(?:short|little|new|nice|quick)?\s*"
+    r"(?:poem|poetry|haiku|limerick|acrostic|couplet|verse|ode)?\s*"
+    r"(?:about|on|for|to)?\s*",
+    re.IGNORECASE,
+)
+
+
+def _poem_topic(raw: str, context: SkillContext) -> str:
+    topic = _clean_subject(_POEM_TOPIC_FILLERS.sub("", raw or "", count=1))
+    lowered = topic.lower()
+    if lowered in {"me", "myself", "i", "my life", "us"}:
+        name = context.memory.get("user_name")
+        return name or topic
+    return topic
+
+
+def _poem(match: Match[str], context: SkillContext) -> str:
+    topic = _poem_topic(match.groupdict().get("poem_topic") or "", context)
+    form = poetry.detect_form(match.string)
+    try:
+        poem = poetry.write_poem(topic, form=form)
+    except poetry.PoetryError as error:
+        return str(error)
+    return poem.render()
+
+
+def _poem_forms(match: Match[str], context: SkillContext) -> str:
+    lines = ["I can write poems in these forms:"]
+    lines.extend(poetry.form_lines())
+    lines.append("Try 'write a haiku about the sea'.")
+    return "\n".join(lines)
+
+
 def _sign_topics(match: Match[str], context: SkillContext) -> str:
     names = signlanguage.terms()
     lines = [f"I can describe {len(names)} signs:"]
@@ -1582,6 +1617,35 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_career_counselling,
                 examples=["I am thinking about changing careers"],
+            ),
+            Skill(
+                name="poetry-forms",
+                description="List the poem forms I can write.",
+                patterns=[
+                    r"\b(?:what|which)\s+(?:kinds?|types?|forms?|sorts?)\s+of\s+poe(?:m|try)\b",
+                    r"\b(?:what|which)\s+poems?\s+can\s+you\s+write\b",
+                    r"\bpoe(?:m|try)\s+(?:forms?|styles?|types?|kinds?)\b",
+                ],
+                handler=_poem_forms,
+                examples=["what poems can you write"],
+            ),
+            Skill(
+                name="poetry",
+                description=(
+                    "Write a new poem: free verse, a haiku, a limerick, an "
+                    "acrostic or a rhyming couplet."
+                ),
+                patterns=[
+                    r"\b(?:write|compose|create|make|give|read|recite|tell|say)\b[^?!]*?"
+                    r"\b(?:poem|poetry|haiku|limerick|acrostic|couplet|ode)\b"
+                    r"(?:\s*(?:about|on|for|to)\s+(?P<poem_topic>[^?!]+))?",
+                    r"\b(?:poem|haiku|limerick|acrostic|couplet|ode)\s+"
+                    r"(?:about|on|for)\s+(?P<poem_topic>[^?!]+)",
+                    r"^\s*(?:poem|poetry|haiku|limerick|acrostic|couplet)\b[:,]?\s*"
+                    r"(?P<poem_topic>[^?!]*)[.?!]*\s*$",
+                ],
+                handler=_poem,
+                examples=["write a poem about the sea", "haiku about rain"],
             ),
             Skill(
                 name="story",
