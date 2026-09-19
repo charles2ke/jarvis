@@ -71,7 +71,7 @@ class AssistantTests(unittest.TestCase):
             assistant.respond("I feel anxious about work")
             self.assertFalse(path.exists())
 
-    def test_crisis_support_takes_priority(self):
+    def test_crisis_support_mentions_emergency_help(self):
         reply = self.assistant.respond("I feel like I want to die")
         self.assertIn("988", reply)
         self.assertIn("emergency", reply)
@@ -115,6 +115,54 @@ class AssistantTests(unittest.TestCase):
     def test_help_lists_skills(self):
         reply = self.assistant.respond("help")
         self.assertIn("calculator", reply)
+
+    def test_help_triggers_on_new_patterns(self):
+        self.assertIn("calculator", self.assistant.respond("what are your skills"))
+        self.assertIn("calculator", self.assistant.respond("list your skills"))
+
+    def test_story_skill_rotates(self):
+        first = self.assistant.respond("tell me a story")
+        second = self.assistant.respond("tell me another story")
+        self.assertIn("Once upon a time", first)
+        self.assertNotEqual(first, second)
+
+    def test_joke_skill(self):
+        self.assertIn("cache", self.assistant.respond("tell me a joke"))
+        self.assertIn("computer", self.assistant.respond("make me laugh"))
+
+    def test_uplift_skill(self):
+        self.assertIn("perfect record", self.assistant.respond("cheer me up"))
+        self.assertIn("nudge", self.assistant.respond("I need some motivation"))
+
+    def test_console_skill_uses_name(self):
+        self.assistant.respond("my name is Charles")
+        reply = self.assistant.respond("I am having a rough day")
+        self.assertIn("Charles", reply)
+        self.assertIn("sorry", reply.lower())
+
+    def test_mental_health_skill_suggests_coping_step(self):
+        reply = self.assistant.respond("I feel anxious")
+        self.assertIn("breathing", reply.lower())
+        self.assertIn("therapist", reply)
+
+    def test_crisis_support_takes_priority(self):
+        for message in (
+            "hi, I want to kill myself",
+            "I have been thinking about hurting myself",
+            "I don't want to live anymore",
+        ):
+            with self.subTest(message=message):
+                self.assertIn("988", self.assistant.respond(message))
+
+    def test_emotional_skills_do_not_shadow_others(self):
+        self.assertEqual(self.assistant.respond("calculate 21 * 2"), "21 * 2 = 42")
+        self.assertIn("Jarvis", self.assistant.respond("hello"))
+
+    def test_registries_keep_independent_rotation(self):
+        other = make_assistant()
+        self.assertEqual(
+            self.assistant.respond("tell me a joke"), other.respond("tell me a joke")
+        )
 
     def test_unknown_message_falls_back(self):
         self.assertEqual(

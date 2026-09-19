@@ -40,6 +40,11 @@ Useful flags:
 | Skill | Example |
 | --- | --- |
 | crisis-support | `I have been thinking about hurting myself` |
+| mental-health | `I feel anxious` |
+| console | `I am having a rough day` |
+| story | `tell me a story` |
+| joke | `tell me a joke` |
+| uplift | `cheer me up` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -57,13 +62,15 @@ Useful flags:
 | help | `help` |
 | farewell | `goodbye` |
 
-The `psychiatrist` skill offers reflective, empathetic listening and keeps an
-in-session mood log that is not written to persistent memory; it is not a substitute for professional care. Messages that
-mention self-harm or suicidal thoughts are answered first by `crisis-support`,
-which points to emergency and crisis lines. `emotional-support` answers direct
-requests for comfort with validation and a rotating coping suggestion, and
-`love-support` talks through relationships, heartbreak, conflict and new
-feelings.
+The wellbeing skills are registered first so that a message such as
+`hi, I want to kill myself` reaches `crisis-support` rather than `greeting`.
+Jarvis is a companion, not a substitute for professional help: `crisis-support`
+always points to real help lines. The `psychiatrist` skill offers reflective,
+empathetic listening and keeps an in-session mood log that is not written to
+persistent memory; it is not a substitute for professional care.
+`emotional-support` answers direct requests for comfort with validation and a
+rotating coping suggestion, and `love-support` talks through relationships,
+heartbreak, conflict and new feelings.
 
 ## Adding a skill
 
