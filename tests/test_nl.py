@@ -53,6 +53,9 @@ class WordsToNumberTest(unittest.TestCase):
         self.assertIsNone(words_to_number("tell me a joke"))
         self.assertIsNone(words_to_number(""))
         self.assertIsNone(words_to_number("and"))
+        self.assertIsNone(words_to_number("one two"))
+        self.assertIsNone(words_to_number("one hundred hundred"))
+        self.assertIsNone(words_to_number("one and"))
 
 
 class FlattenTest(unittest.TestCase):
@@ -80,6 +83,7 @@ class NormalizeTest(unittest.TestCase):
 
     def test_leaves_plain_commands_alone(self) -> None:
         self.assertEqual(normalize("calculate 21 * 2"), "calculate 21 * 2")
+        self.assertEqual(normalize("one two people"), "one two people")
 
 
 class NumberWordsSkillTest(unittest.TestCase):

@@ -184,6 +184,14 @@ def words_to_number(text: str) -> Optional[int]:
     if not seen:
         return None
     result = total + current
+    try:
+        canonical = re.split(r"[\s-]+", number_to_words(result))
+    except ValueError:
+        return None
+    if tokens != canonical and (
+        "and" in tokens or tokens != [token for token in canonical if token != "and"]
+    ):
+        return None
     return -result if negative else result
 
 
