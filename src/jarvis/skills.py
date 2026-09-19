@@ -20,6 +20,13 @@ from jarvis.atlas import (
     format_population,
     sentence,
 )
+from jarvis.braille import (
+    BrailleError,
+    alphabet_chart,
+    is_braille,
+    read_braille,
+    write_braille,
+)
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
@@ -399,6 +406,74 @@ def _love_support(match: Match[str], context: SkillContext) -> str:
     )
 
 
+ROLE_MODEL_LINES: Sequence[str] = (
+    "A role model is not someone flawless; it is someone whose habits you would "
+    "be glad to copy. Name one person you admire and the single habit of theirs "
+    "you could borrow this week.",
+    "The version of you that other people look up to is built out of ordinary "
+    "choices: showing up, telling the truth, finishing what you start. Which of "
+    "those three needs your attention right now?",
+    "Character is what you do when it costs you something. What is one value you "
+    "want to hold on to even when it is inconvenient?",
+    "If someone followed you around for a week, what would they conclude you "
+    "care about? If that answer is not the one you want, we can change one habit "
+    "at a time.",
+)
+
+
+COACH_PROMPTS: Sequence[str] = (
+    "What does 'done' look like? Describe the finish line in one sentence.",
+    "What is the smallest next step you could take in the next 24 hours?",
+    "What has got in the way before, and how will you handle it this time?",
+    "When exactly will you do it, and who will you tell about it?",
+)
+
+
+SELF_CARE_IDEAS: Sequence[str] = (
+    "Start with the basics: water, food, and somewhere comfortable to sit. Care "
+    "is usually physical before it is profound.",
+    "Protect one small block of time today that belongs to nobody else — even "
+    "fifteen minutes counts.",
+    "Sleep is the cheapest repair tool you own. What would make tonight's rest "
+    "a little easier?",
+    "Move your body gently: a short walk, a stretch, stepping outside for fresh "
+    "air. It resets more than it should be able to.",
+    "Say no to one thing this week. Boundaries are a form of looking after "
+    "yourself, not a failure of generosity.",
+)
+
+
+def _role_model(match: Match[str], context: SkillContext, *, line: Callable[[], str]) -> str:
+    return (
+        f"I will hold the bar high with you{_addressed(context)}. "
+        f"{line()} "
+        "Tell me what you decide and I will keep reminding you of it."
+    )
+
+
+def _coach(match: Match[str], context: SkillContext, *, prompt: Callable[[], str]) -> str:
+    groups = match.groupdict()
+    goal = (groups.get("goal") or "").strip().rstrip(".!?")
+    if goal:
+        opening = f"Good — let's make '{goal}' concrete."
+    else:
+        opening = "I am in your corner. Let's turn this into something you can act on."
+    return (
+        f"{opening} "
+        f"{prompt()} "
+        "Answer that and we will build the next step from it."
+    )
+
+
+def _self_care(match: Match[str], context: SkillContext, *, idea: Callable[[], str]) -> str:
+    return (
+        f"Looking after yourself counts as useful work{_addressed(context)}, not "
+        "an indulgence. "
+        f"{idea()} "
+        "Pick one thing and let it be enough for today."
+    )
+
+
 SCIENCE_HELP = (
     "I can work through maths, physics, chemistry and biology problems. Try:\n"
     "- solve 2x + 3 = 11\n"
@@ -419,6 +494,30 @@ def _science(match: Match[str], context: SkillContext) -> str:
     if answer:
         return answer
     return SCIENCE_HELP
+
+
+BRAILLE_HELP = (
+    "I read and write Grade 1 braille. Try:\n"
+    "- read braille ⠓⠑⠇⠇⠕\n"
+    "- write hello in braille\n"
+    "- braille alphabet"
+)
+
+
+def _braille_alphabet(match: Match[str], context: SkillContext) -> str:
+    return f"The Grade 1 braille alphabet:\n{alphabet_chart()}"
+
+
+def _braille(match: Match[str], context: SkillContext) -> str:
+    payload = (match.group("braille_text") or "").strip().strip('"“”')
+    if not payload:
+        return BRAILLE_HELP
+    try:
+        if is_braille(payload):
+            return f"That braille reads: {read_braille(payload)}"
+        return f"In braille that is: {write_braille(payload)}"
+    except BrailleError as error:
+        return str(error)
 
 
 _MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -996,6 +1095,9 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     next_joke = _rotator(JOKES)
     next_uplift = _rotator(UPLIFTS)
     next_idea = _rotator(COPING_IDEAS)
+    next_role_model = _rotator(ROLE_MODEL_LINES)
+    next_coach_prompt = _rotator(COACH_PROMPTS)
+    next_self_care = _rotator(SELF_CARE_IDEAS)
     return SkillRegistry(
         [
             Skill(
@@ -1138,6 +1240,43 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["cheer me up"],
             ),
             Skill(
+                name="role-model",
+                description="Talk about character, values and the person you want to become.",
+                patterns=[
+                    r"\brole[- ]?model\b",
+                    r"\b(look up to|someone to admire|who should i admire)\b",
+                    r"\b(be|become) a better (person|man|woman|human|version of myself)\b",
+                    r"\b(what|which) values? (should i|do i want to)\b",
+                ],
+                handler=partial(_role_model, line=next_role_model),
+                examples=["be my role model"],
+            ),
+            Skill(
+                name="coach",
+                description="Coach you through goals, habits and staying accountable.",
+                patterns=[
+                    r"\b(coach me|be my coach|i need a coach)\b",
+                    r"\bhold me accountable\b",
+                    r"\bhelp me (?:to )?(?:reach|achieve|set|stick to|follow through on) (?P<goal>.+)$",
+                    r"\bi want to (?:get better at|learn|achieve|build a habit of) (?P<goal>.+)$",
+                    r"\b(my goal is|set a goal|goal setting|stay disciplined|build (a|the) habit)\b",
+                ],
+                handler=partial(_coach, prompt=next_coach_prompt),
+                examples=["coach me"],
+            ),
+            Skill(
+                name="self-care",
+                description="Suggest a practical way to take care of yourself.",
+                patterns=[
+                    r"\bself[- ]?care\b",
+                    r"\b(take|taking) care of (myself|me)\b",
+                    r"\blook after myself\b",
+                    r"\bi (?:keep )?(?:forget|neglect|ignore)(?:ting)? (?:to look after |about )?myself\b",
+                ],
+                handler=partial(_self_care, idea=next_self_care),
+                examples=["how do I take care of myself"],
+            ),
+            Skill(
                 name="mental-health",
                 description="Talk through anxiety, low mood or burnout and suggest a coping step.",
                 patterns=[
@@ -1244,6 +1383,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_current_date,
                 examples=["what is today's date?"],
+            ),
+            Skill(
+                name="braille-alphabet",
+                description="Show the Grade 1 braille alphabet.",
+                patterns=[
+                    r"\bbrail(?:le)?\s+(alphabet|chart|letters)\b",
+                    r"\b(alphabet|chart)\s+(in|of|for)\s+brail(?:le)?\b",
+                ],
+                handler=_braille_alphabet,
+                examples=["braille alphabet"],
+            ),
+            Skill(
+                name="braille",
+                description="Read braille cells aloud or write text in braille.",
+                patterns=[
+                    r"\b(?:read|decode|interpret|translate)\s+(?:this\s+|the\s+|some\s+)?brail(?:le)?\b[:,]?\s*(?P<braille_text>.*?)\s*[.?!]*$",
+                    r"^\s*(?:write|translate|convert|put|spell|say)\s+(?P<braille_text>.+?)\s+(?:in|into|to)\s+brail(?:le)?\s*[.?!]*$",
+                    r"^\s*brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
+                    r"^\s*(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*)[.?!]*\s*$",
+                    r"\b(?:what\s+does|what(?:'s| is))\s+(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*?)\s*(?:say|mean|read)\b",
+                ],
+                handler=_braille,
+                examples=["read braille ⠓⠑⠇⠇⠕"],
             ),
             Skill(
                 name="science-solver",
