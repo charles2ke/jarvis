@@ -275,6 +275,19 @@ class AssistantTests(unittest.TestCase):
                     "Looking after yourself", self.assistant.respond(message)
                 )
 
+    def test_role_model_skill_rotates_lines(self):
+        replies = [self.assistant.respond("be my role model") for _ in range(2)]
+        self.assertNotEqual(replies[0], replies[1])
+        self.assertNotIn("reminding you", replies[0])
+
+    def test_coach_skill_rotates_prompts(self):
+        replies = [self.assistant.respond("coach me") for _ in range(2)]
+        self.assertNotEqual(replies[0], replies[1])
+
+    def test_self_care_skill_rotates_ideas(self):
+        replies = [self.assistant.respond("self care") for _ in range(2)]
+        self.assertNotEqual(replies[0], replies[1])
+
     def test_new_skills_do_not_shadow_wellbeing_skills(self):
         self.assertIn("988", self.assistant.respond("I want to kill myself"))
         self.assertIn("therapist", self.assistant.respond("I feel anxious"))
