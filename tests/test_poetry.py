@@ -34,6 +34,15 @@ class PoetryModuleTests(unittest.TestCase):
             counts = [poetry.count_syllables(line) for line in poem.lines]
             self.assertEqual(counts, [5, 7, 5])
 
+    def test_haiku_uses_measured_line_for_overlong_topic(self):
+        poem = poetry.write_poem(
+            "the quiet hour in the city",
+            form="haiku",
+            seed=1,
+        )
+        counts = [poetry.count_syllables(line) for line in poem.lines]
+        self.assertEqual(counts, [5, 7, 5])
+
     def test_limerick_and_couplet_shapes(self):
         limerick = poetry.write_poem("cats", form="limerick", seed=2)
         self.assertEqual(len(limerick.lines), 5)

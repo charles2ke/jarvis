@@ -295,7 +295,7 @@ def _metred_line(rng: random.Random, topic: str, target: int, lead: bool) -> str
         if used <= target:
             padding = _pad(rng, target - used)
             return f"{topic} {padding}".strip()
-        return topic
+        return _pad(rng, target)
     return _pad(rng, target) or topic
 
 
