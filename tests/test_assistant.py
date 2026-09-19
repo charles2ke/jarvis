@@ -279,6 +279,9 @@ class AssistantTests(unittest.TestCase):
         replies = [self.assistant.respond("be my role model") for _ in range(2)]
         self.assertNotEqual(replies[0], replies[1])
         self.assertNotIn("reminding you", replies[0])
+        for reply in replies:
+            self.assertNotIn("next choice", reply)
+            self.assertNotIn("Tell me what you decide", reply)
 
     def test_coach_skill_rotates_prompts(self):
         replies = [self.assistant.respond("coach me") for _ in range(2)]

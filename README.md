@@ -43,6 +43,8 @@ Useful flags:
 | crisis-support | `I have been thinking about hurting myself` |
 | answer | `answer how does the skill registry work?` |
 | speak | `say out loud hello Charles` |
+| computer-use | `use the computer to open Safari then click on Sign in` |
+| cua-actions | `computer use actions` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
 | story | `tell me a story` |
@@ -68,6 +70,10 @@ Useful flags:
 | history | `what happened in 1969?` |
 | traffic-signs | `what does a give way sign mean?` |
 | money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
+| add-knowledge-website | `add https://example.com as a knowledge source` |
+| add-knowledge-file | `add the file notes.md as a knowledge source` |
+| list-knowledge-sources | `list my knowledge sources` |
+| clear-knowledge-sources | `clear my knowledge sources` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -79,6 +85,8 @@ Useful flags:
 | midlife-counseling | `I think I am having a midlife crisis` |
 | career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| sketch-topics | `what can you sketch?` |
+| sketch | `draw a cat` |
 | sign-language-alphabet | `sign language alphabet` |
 | fingerspell | `fingerspell Charles` |
 | sign-language-topics | `what signs do you know` |
@@ -216,6 +224,26 @@ is registered before `encyclopedia` so that `what is inflation?` reaches the
 finance entries. The wellbeing skills still come first, so `I am broke and
 want to kill myself` reaches `crisis-support`.
 
+## Knowledge sources
+
+Jarvis can learn from your own material. Point it at a text file or a web page
+and the readable text is stored alongside the rest of its memory:
+
+```bash
+jarvis "add the file ~/notes/handbook.md as a knowledge source"
+jarvis "add https://example.com/docs as a knowledge source"
+jarvis "list my knowledge sources"
+jarvis "clear my knowledge sources"
+```
+
+Afterwards, questions that no built-in skill answers are looked up in the
+sources, and the reply quotes the matching passage and says where it came from
+(`what is the release cadence?`). Files are read as plain text — HTML files and
+web pages have their markup, scripts and styles stripped first — and anything
+that is not a text file, is empty or cannot be reached is reported rather than
+guessed at. Adding the same location twice replaces the earlier copy, and only
+fetching a website reaches the network.
+
 ## Text to speech
 
 Jarvis can read text aloud with the `speak` skill:
@@ -282,6 +310,14 @@ the distress alert procedure. It is registered before `encyclopedia` so that
 that a message such as `mayday, I want to kill myself` still reaches the help
 lines. Say `gmdss topics` to list every entry.
 
+## ASCII sketches
+
+The `sketch` skill draws small ASCII pictures from a hand-curated, offline
+gallery — `draw a cat`, `sketch a boat`, `can you draw me a house?`, `show me a
+sketch of the moon`. Subjects are matched by name or alias and tolerate small
+typos; an unknown subject is answered with the closest alternatives rather than
+an invented drawing. `what can you sketch?` lists the whole gallery.
+
 ## Reading and writing braille
 
 The `braille` skill translates Grade 1 (uncontracted) English braille in both
@@ -316,6 +352,34 @@ It reads its configuration from the environment:
 - `JARVIS_COPILOT_API` — override the Copilot API base URL (default `https://api.githubcopilot.com`).
 
 If no token is configured, Jarvis explains what is missing instead of failing.
+
+## Computer use (CUA)
+
+The `computer-use` skill turns a plain English instruction into an ordered
+computer use agent plan:
+
+```bash
+jarvis "use the computer to open Safari then click on Sign in and type hello"
+jarvis "cua take a screenshot, scroll down 5, then press ctrl+s"
+jarvis "computer use actions"
+```
+
+Planning is offline and has no side effects: Jarvis prints the numbered steps
+it would take. Running them drives the real machine, so it is opt-in and reads
+its configuration from the environment:
+
+- `JARVIS_CUA_COMMAND` — the backend command that performs one action. Jarvis
+  appends the action and its arguments, for example
+  `my-cua-tool click "Save button"`.
+- `JARVIS_CUA_ENABLED` — set to `1` (or `true`/`yes`) to let Jarvis actually
+  run a plan. Without it, Jarvis replies with the plan and says how to enable
+  execution.
+
+The planner understands `open`, `click`, `double_click`, `right_click`,
+`move`, `drag`, `type`, `key`, `scroll`, `wait` and `screenshot`, split on
+`then`, `and` and commas. Steps it does not recognise are reported, together
+with how much of the instruction it did understand, rather than guessed at.
+The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
 ## Adding a skill
 
