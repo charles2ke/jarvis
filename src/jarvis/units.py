@@ -186,6 +186,8 @@ def convert(value: float, source: str, target: str) -> float:
 def format_quantity(value: float, unit: Unit) -> str:
     """Render ``value`` with a sensible precision and the unit's name."""
 
+    if not math.isfinite(value):
+        raise ConversionError("That value is too large for me to convert.")
     rounded = round(value, 4)
     if rounded == int(rounded):
         text = str(int(rounded))
