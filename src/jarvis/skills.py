@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia
+from jarvis import encyclopedia, signlanguage
 from jarvis.atlas import (
     Country,
     countries_in,
@@ -757,6 +757,87 @@ def _answer(
         return f"I could not start a cloud session: {exc}"
 
 
+_SIGN_TERM_GROUPS = ("term", "term2", "term3", "term4")
+
+
+_SIGN_OVERVIEW = (
+    "Sign languages are full natural languages made with the hands, face and "
+    "body; American Sign Language (ASL) has its own grammar and is not signed "
+    "English. I know the ASL manual alphabet and a set of everyday signs, all "
+    "described in words. Ask me 'how do I sign thank you?', 'fingerspell "
+    "Charles' or 'sign language alphabet', and say 'what signs do you know' for "
+    "the full list. Descriptions are a starting point — learning from Deaf "
+    "teachers and native signers is what makes signing fluent."
+)
+
+
+def _sign_term(match: Match[str]) -> str:
+    groups = match.groupdict()
+    for name in _SIGN_TERM_GROUPS:
+        value = groups.get(name)
+        if value:
+            return _clean_subject(value)
+    return ""
+
+
+def _sign_language(match: Match[str], context: SkillContext) -> str:
+    term = _sign_term(match)
+    if not term:
+        return _SIGN_OVERVIEW
+    sign = signlanguage.lookup(term)
+    if sign is not None:
+        return f"{sign.term.capitalize()} in {signlanguage.LANGUAGE}: {sign.description}"
+    shape = signlanguage.letter(term)
+    if shape is not None:
+        return (
+            f"The letter {term.upper()} is fingerspelled as {shape}."
+        )
+    lines = [f"I do not have a sign for '{term}' yet."]
+    close = signlanguage.suggestions(term)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    lines.append(
+        f"Names and unknown words are fingerspelled — try 'fingerspell {term}'."
+    )
+    return " ".join(lines)
+
+
+def _sign_alphabet(match: Match[str], context: SkillContext) -> str:
+    lines = [f"The {signlanguage.LANGUAGE} manual alphabet:"]
+    lines.extend(f"- {line}" for line in signlanguage.alphabet_lines())
+    lines.append("Ask me to 'fingerspell' a word to see it letter by letter.")
+    return "\n".join(lines)
+
+
+def _sign_topics(match: Match[str], context: SkillContext) -> str:
+    names = signlanguage.terms()
+    lines = [f"I can describe {len(names)} signs:"]
+    lines.extend(f"- {name}" for name in names)
+    lines.append("Ask me 'how do I sign thank you?' for any of them.")
+    return "\n".join(lines)
+
+
+def _fingerspell(match: Match[str], context: SkillContext) -> str:
+    text = _clean_subject(match.group("text") or "")
+    if not text:
+        return "What would you like me to fingerspell? Try 'fingerspell Charles'."
+    spelled, skipped = signlanguage.fingerspell(text)
+    if not spelled:
+        return (
+            f"I can only fingerspell letters and digits, so I cannot spell "
+            f"'{text}'."
+        )
+    lines = [f"Fingerspelling '{text}' in {signlanguage.LANGUAGE}:"]
+    for character, shape in spelled:
+        if character == "␣":
+            lines.append("- (space) pause briefly to mark a word break")
+        else:
+            lines.append(f"- {character}: {shape}")
+    if skipped:
+        lines.append("I skipped: " + " ".join(skipped) + ".")
+    return "\n".join(lines)
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -1298,6 +1379,53 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(clear|delete|forget)( all)?( my)? notes\s*[.!]?\s*$"],
                 handler=_clear_notes,
                 examples=["clear my notes"],
+            ),
+            Skill(
+                name="sign-language-alphabet",
+                description="Describe the ASL manual alphabet, letter by letter.",
+                patterns=[
+                    r"\b(?:asl|american sign language|sign language|manual|fingerspelling|finger ?spelling)\s+alphabet\b",
+                    r"\balphabet\s+in\s+(?:asl|american sign language|sign language)\b",
+                ],
+                handler=_sign_alphabet,
+                examples=["sign language alphabet"],
+            ),
+            Skill(
+                name="fingerspell",
+                description="Fingerspell a word letter by letter in ASL.",
+                patterns=[
+                    r"\bfinger ?spell(?:ing)?\b[:,]?\s+(?P<text>[^?!]+)",
+                    r"\b(?:how (?:do|would) (?:i|you|we) )?spell\s+(?P<text>[^?!]+?)\s+in\s+(?:asl|american sign language|sign language)\b",
+                ],
+                handler=_fingerspell,
+                examples=["fingerspell Charles"],
+            ),
+            Skill(
+                name="sign-language-topics",
+                description="List the signs I can describe.",
+                patterns=[
+                    r"\b(?:what|which)\s+signs\s+do\s+you\s+know\b",
+                    r"\b(?:list|show)(?: me)?(?: the| your)?\s+signs\b",
+                    r"\b(?:sign language|asl)\s+(?:signs|vocabulary|index|list)\b",
+                ],
+                handler=_sign_topics,
+                examples=["what signs do you know"],
+            ),
+            Skill(
+                name="sign-language",
+                description=(
+                    "Describe how to make a sign in American Sign Language and "
+                    "explain sign language itself."
+                ),
+                patterns=[
+                    r"\bhow (?:do|would|can) (?:i|you|we|someone)\s+sign\b[:,]?\s+(?P<term>[^?!]+)",
+                    r"\bhow (?:do|would|can) (?:i|you|we|someone)\s+say\s+(?P<term2>[^?!]+?)\s+in\s+(?:asl|american sign language|sign language)\b",
+                    r"\b(?:what(?:'s| is)\s+)?(?:the\s+)?(?:asl\s+)?sign\s+for\s+(?P<term3>[^?!]+)",
+                    r"\b(?:sign|signing)\s+(?P<term4>[^?!]+?)\s+in\s+(?:asl|american sign language|sign language)\b",
+                    r"\b(?:what(?:'s| is)|explain|tell me about|teach me|learn|understand)\b[^?!]*\b(?:asl|american sign language|sign language)\b",
+                ],
+                handler=_sign_language,
+                examples=["how do I sign thank you?"],
             ),
             Skill(
                 name="help",
