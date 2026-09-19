@@ -1,0 +1,252 @@
+import subprocess
+import unittest
+from unittest import mock
+
+from jarvis.assistant import Assistant
+from jarvis.cua import (
+    DEFAULT_TIMEOUT,
+    Action,
+    CuaError,
+    actions_chart,
+    backend_command,
+    execute,
+    is_enabled,
+    plan,
+)
+from jarvis.memory import Memory
+
+
+class PlanTests(unittest.TestCase):
+    def test_plans_a_multi_step_instruction(self):
+        parsed = plan("open Safari then click on the Save button and type hello")
+        self.assertEqual(
+            [action.kind for action in parsed.actions],
+            ["open", "click", "type"],
+        )
+        self.assertEqual(parsed.actions[0].target, "Safari")
+        self.assertEqual(parsed.actions[1].target, "Save button")
+        self.assertEqual(parsed.actions[2].value, "hello")
+
+    def test_plans_every_action_kind(self):
+        cases = {
+            "go to example.com": "open",
+            "double click the report": "double_click",
+            "right click the desktop": "right_click",
+            "move the mouse to the menu bar": "move",
+            "drag report.pdf to the bin": "drag",
+            'type "hello there" into the search box': "type",
+            "press ctrl+s": "key",
+            "scroll down 5": "scroll",
+            "wait 2 seconds": "wait",
+            "take a screenshot": "screenshot",
+        }
+        for instruction, kind in cases.items():
+            with self.subTest(instruction=instruction):
+                parsed = plan(instruction)
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(parsed.actions[0].kind, kind)
+
+    def test_typing_keeps_quoted_text_and_target(self):
+        action = plan('type "hello there" into the search box').actions[0]
+        self.assertEqual(action.value, "hello there")
+        self.assertEqual(action.target, "search box")
+
+    def test_quoted_separators_are_not_split(self):
+        parsed = plan('type "hello, and goodbye" then press enter')
+        self.assertEqual([action.kind for action in parsed.actions], ["type", "key"])
+        self.assertEqual(parsed.actions[0].value, "hello, and goodbye")
+
+    def test_quoted_whitespace_is_preserved(self):
+        action = plan('type "two  spaces"').actions[0]
+        self.assertEqual(action.value, "two  spaces")
+
+    def test_scroll_and_wait_have_defaults(self):
+        self.assertEqual(plan("scroll down").actions[0].value, "3")
+        self.assertEqual(plan("wait").actions[0].value, "1")
+
+    def test_wait_and_scroll_reject_unsupported_suffixes(self):
+        with self.assertRaises(CuaError):
+            plan("wait for the download")
+        with self.assertRaises(CuaError):
+            plan("wait 2 bananas")
+        with self.assertRaises(CuaError):
+            plan("scroll down 5 pages")
+
+    def test_summary_numbers_every_step(self):
+        summary = plan("open Mail and press enter").summary()
+        self.assertIn("1. open Mail", summary)
+        self.assertIn("2. press enter", summary)
+
+    def test_rejects_empty_instruction(self):
+        with self.assertRaises(CuaError):
+            plan("   ")
+
+    def test_reports_the_step_it_could_not_read(self):
+        with self.assertRaises(CuaError) as caught:
+            plan("open Mail then teleport to Mars")
+        self.assertIn("teleport to Mars", str(caught.exception))
+        self.assertIn("first 1 step", str(caught.exception))
+
+    def test_action_arguments_feed_the_backend(self):
+        self.assertEqual(Action("click", target="Save").arguments(), ("click", "Save"))
+        self.assertEqual(Action("screenshot").arguments(), ("screenshot",))
+
+
+class ExecutionTests(unittest.TestCase):
+    def test_is_enabled_reads_the_environment(self):
+        self.assertTrue(is_enabled({"JARVIS_CUA_ENABLED": "1"}))
+        self.assertTrue(is_enabled({"JARVIS_CUA_ENABLED": "Yes"}))
+        self.assertFalse(is_enabled({"JARVIS_CUA_ENABLED": "0"}))
+        self.assertFalse(is_enabled({}))
+
+    def test_backend_command_is_split(self):
+        self.assertEqual(
+            backend_command({"JARVIS_CUA_COMMAND": "cua-tool --device screen"}),
+            ["cua-tool", "--device", "screen"],
+        )
+
+    def test_backend_command_requires_configuration(self):
+        with self.assertRaises(CuaError):
+            backend_command({})
+
+    def test_execute_only_plans_when_not_enabled(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reply = execute("open Safari")
+        self.assertIn("Computer use plan for: open Safari", reply)
+        self.assertIn("JARVIS_CUA_ENABLED", reply)
+
+    def test_execute_runs_every_action_with_a_runner(self):
+        seen = []
+
+        def runner(action):
+            seen.append(action.kind)
+            return "ok"
+
+        with mock.patch.dict("os.environ", {"JARVIS_CUA_ENABLED": "1"}, clear=True):
+            reply = execute("open Safari then press enter", runner=runner)
+        self.assertEqual(seen, ["open", "key"])
+        self.assertIn("1. open Safari — ok", reply)
+        self.assertIn("2. press enter — ok", reply)
+
+    def test_execute_with_runner_still_requires_opt_in(self):
+        seen = []
+
+        def runner(action):
+            seen.append(action.kind)
+            return "ok"
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reply = execute("open Safari", runner=runner)
+        self.assertEqual(seen, [])
+        self.assertIn("Computer use plan for: open Safari", reply)
+        self.assertIn("JARVIS_CUA_ENABLED", reply)
+
+    def test_actions_chart_lists_the_known_actions(self):
+        chart = actions_chart()
+        self.assertIn("- click:", chart)
+        self.assertIn("- screenshot:", chart)
+
+    def test_execute_runs_real_backend_with_exact_argv(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="done", stderr="")
+        env = {
+            "JARVIS_CUA_ENABLED": "1",
+            "JARVIS_CUA_COMMAND": "my-cua-tool",
+        }
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", return_value=completed
+        ) as run_mock:
+            reply = execute('type "hello there" into the search box then drag report.pdf to the bin')
+        self.assertEqual(
+            run_mock.call_args_list[0].args[0],
+            ["my-cua-tool", "type", "search box", "hello there"],
+        )
+        self.assertEqual(
+            run_mock.call_args_list[1].args[0],
+            ["my-cua-tool", "drag", "report.pdf", "bin"],
+        )
+        for call in run_mock.call_args_list:
+            self.assertEqual(
+                call.kwargs,
+                {
+                    "capture_output": True,
+                    "text": True,
+                    "timeout": DEFAULT_TIMEOUT,
+                    "check": True,
+                },
+            )
+        self.assertIn("1. type 'hello there' — done", reply)
+        self.assertIn("2. drag report.pdf to bin — done", reply)
+
+    def test_execute_passes_a_custom_timeout_to_the_backend(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "cua-tool --device screen"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", return_value=completed
+        ) as run_mock:
+            reply = execute("take a screenshot", timeout=2.5)
+        self.assertEqual(
+            run_mock.call_args.args[0],
+            ["cua-tool", "--device", "screen", "screenshot"],
+        )
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 2.5)
+        self.assertIn("1. take a screenshot — done", reply)
+
+    def test_run_action_reports_a_missing_backend(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", side_effect=FileNotFoundError("my-cua-tool")
+        ):
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertIn("could not run the computer use backend", str(caught.exception))
+
+    def test_run_action_reports_timeout(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["my-cua-tool"], timeout=30),
+        ) as run_mock:
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], DEFAULT_TIMEOUT)
+        self.assertIn("timed out", str(caught.exception))
+
+    def test_run_action_reports_non_zero_exit(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        error = subprocess.CalledProcessError(returncode=1, cmd=["my-cua-tool"], output="", stderr="boom")
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", side_effect=error
+        ):
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertIn("boom", str(caught.exception))
+
+
+class ComputerUseSkillTests(unittest.TestCase):
+    def setUp(self):
+        self.assistant = Assistant(memory=Memory(path=None))
+
+    def test_skill_plans_without_touching_the_computer(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reply = self.assistant.respond("use the computer to open Safari and click on Sign in")
+        self.assertIn("1. open Safari", reply)
+        self.assertIn("2. click Sign in", reply)
+
+    def test_cua_prefix_routes_to_the_skill(self):
+        resolved = self.assistant.registry.resolve("cua open Mail")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved[0].name, "computer-use")
+
+    def test_unknown_step_is_reported_kindly(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reply = self.assistant.respond("use the computer to teleport to Mars")
+        self.assertIn("I could not use the computer", reply)
+
+    def test_actions_skill_lists_actions(self):
+        reply = self.assistant.respond("computer use actions")
+        self.assertIn("computer use actions", reply)
+        self.assertIn("- type:", reply)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
