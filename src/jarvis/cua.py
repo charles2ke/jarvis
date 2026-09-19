@@ -133,10 +133,13 @@ def _clean(text: str) -> str:
 
 
 def _quoted_or_rest(text: str) -> str:
-    found = re.match(r"^[\"'](?P<value>.*)[\"']\s*$", text.strip())
+    found = re.match(r"^(?P<quote>[\"'])(?P<value>.*)(?P=quote)\s*$", text.strip())
     if found is not None:
         return found.group("value")
     return text.strip().rstrip(".!?")
+
+
+_TYPE_TARGET = re.compile(r"^\s*(?:in|into|on)\s+(?:the\s+)?(?P<target>.+)$", re.IGNORECASE)
 
 
 def _parse_step(step: str) -> Action:
@@ -167,17 +170,33 @@ def _parse_step(step: str) -> Action:
     if found is not None:
         return Action("key", value=_clean(found.group("key")).lower())
 
-    found = re.match(
-        r"^(?:type|enter|write|input)\s+(?P<text>.+?)"
-        r"(?:\s+(?:in|into|on)\s+(?:the\s+)?(?P<target>.+))?$",
-        text,
-        re.IGNORECASE,
-    )
+    found = re.match(r"^(?:type|enter|write|input)\s+(?P<rest>.+)$", text, re.IGNORECASE)
     if found is not None:
-        value = _quoted_or_rest(found.group("text"))
+        rest = found.group("rest")
+        quoted = re.match(
+            r"^(?P<quote>[\"'])(?P<value>.*?)(?P=quote)(?P<remainder>.*)$", rest
+        )
+        if quoted is not None:
+            remainder = quoted.group("remainder")
+            target = ""
+            if remainder.strip():
+                target_found = _TYPE_TARGET.match(remainder)
+                if target_found is None:
+                    raise CuaError(f"I do not know how to do '{text}' on the computer")
+                target = _clean(target_found.group("target"))
+            value = quoted.group("value")
+            if not value:
+                raise CuaError("I need to know what to type")
+            return Action("type", target=target, value=value)
+        split = re.match(
+            r"^(?P<text>.+?)(?:\s+(?:in|into|on)\s+(?:the\s+)?(?P<target>.+))?$",
+            rest,
+            re.IGNORECASE,
+        )
+        value = _quoted_or_rest(split.group("text"))
         if not value:
             raise CuaError("I need to know what to type")
-        return Action("type", target=_clean(found.group("target") or ""), value=value)
+        return Action("type", target=_clean(split.group("target") or ""), value=value)
 
     found = re.match(r"^drag\s+(?P<source>.+?)\s+(?:to|onto|into)\s+(?P<target>.+)$", text, re.IGNORECASE)
     if found is not None:

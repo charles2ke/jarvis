@@ -51,6 +51,15 @@ class PlanTests(unittest.TestCase):
         action = plan('type "two  spaces"').actions[0]
         self.assertEqual(action.value, "two  spaces")
 
+    def test_quoted_text_keeps_target_words(self):
+        action = plan('type "log in to the site" into the search box').actions[0]
+        self.assertEqual(action.value, "log in to the site")
+        self.assertEqual(action.target, "search box")
+
+    def test_typing_rejects_unreadable_text_after_the_quotes(self):
+        with self.assertRaises(CuaError):
+            plan('type "hello" quickly')
+
     def test_scroll_and_wait_have_defaults(self):
         self.assertEqual(plan("scroll down").actions[0].value, "3")
         self.assertEqual(plan("wait").actions[0].value, "1")
