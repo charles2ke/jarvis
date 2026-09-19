@@ -55,6 +55,12 @@ class PoetryModuleTests(unittest.TestCase):
         initials = "".join(line[0].lower() for line in poem.lines)
         self.assertEqual(initials, "charles")
 
+    def test_acrostic_does_not_truncate_long_topics(self):
+        topic = "abcdefghijklmnopq"
+        poem = poetry.write_poem(topic, form="acrostic", seed=4)
+        initials = "".join(line[0].lower() for line in poem.lines)
+        self.assertEqual(initials, topic)
+
     def test_acrostic_handles_unknown_characters(self):
         poem = poetry.write_poem("ab9", form="acrostic", seed=1)
         self.assertEqual(len(poem.lines), 3)

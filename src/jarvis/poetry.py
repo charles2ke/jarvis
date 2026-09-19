@@ -324,7 +324,6 @@ def _acrostic(rng: random.Random, topic: str) -> Tuple[str, ...]:
     letters = [character for character in topic if character.isalnum()]
     if not letters:
         raise PoetryError("An acrostic needs a word with letters in it.")
-    letters = letters[:16]
     lines: List[str] = []
     for letter in letters:
         options = _ACROSTIC_LINES.get(letter.lower())
