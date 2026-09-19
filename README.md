@@ -45,6 +45,9 @@ Useful flags:
 | story | `tell me a story` |
 | joke | `tell me a joke` |
 | uplift | `cheer me up` |
+| role-model | `be my role model` |
+| coach | `coach me` |
+| self-care | `how do I take care of myself` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -70,7 +73,9 @@ empathetic listening and keeps an in-session mood log that is not written to
 persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
-heartbreak, conflict and new feelings.
+heartbreak, conflict and new feelings. `role-model` talks about character and
+the person you want to become, `coach` turns goals and habits into a concrete
+next step, and `self-care` suggests a practical way to look after yourself.
 
 ## Adding a skill
 
