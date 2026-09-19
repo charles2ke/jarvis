@@ -19,6 +19,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 MEMORY_KEY = "knowledge_sources"
 MAX_TEXT_CHARS = 20_000
 MAX_FILE_BYTES = 2_000_000
+MAX_WEBSITE_BYTES = MAX_TEXT_CHARS * 20
 DEFAULT_TIMEOUT = 15.0
 USER_AGENT = "jarvis-knowledge/1.0"
 
@@ -232,13 +233,21 @@ def add_website(url: str, *, opener=None, timeout: float = DEFAULT_TIMEOUT) -> S
     fetch = opener or urllib.request.urlopen
     try:
         with fetch(request, timeout=timeout) as response:
-            payload = response.read()
             charset = "utf-8"
             content_type = ""
             headers = getattr(response, "headers", None)
             if headers is not None:
                 charset = headers.get_content_charset() or "utf-8"
                 content_type = (headers.get_content_type() or "").lower()
+                try:
+                    content_length = int(headers.get("Content-Length", 0))
+                except (TypeError, ValueError):
+                    content_length = 0
+                if content_length > MAX_WEBSITE_BYTES:
+                    raise KnowledgeError(f"{address} is too large for me to read.")
+            payload = response.read(MAX_WEBSITE_BYTES + 1)
+            if len(payload) > MAX_WEBSITE_BYTES:
+                raise KnowledgeError(f"{address} is too large for me to read.")
     except urllib.error.HTTPError as exc:
         raise KnowledgeError(f"{address} refused to answer (HTTP {exc.code}).") from exc
     except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
@@ -248,7 +257,7 @@ def add_website(url: str, *, opener=None, timeout: float = DEFAULT_TIMEOUT) -> S
         markup = payload.decode(charset, errors="replace")
     else:  # pragma: no cover - defensive
         markup = str(payload)
-    markup = markup[: MAX_TEXT_CHARS * 20]
+    markup = markup[:MAX_WEBSITE_BYTES]
     if content_type and not content_type.startswith("text/"):
         raise KnowledgeError(f"{address} is not a text or HTML page.")
     if content_type == "text/plain":

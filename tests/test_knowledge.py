@@ -13,8 +13,8 @@ class FakeResponse:
         self._payload = payload
         self.headers = FakeHeaders(content_type)
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, amount=None) -> bytes:
+        return self._payload if amount is None else self._payload[:amount]
 
     def __enter__(self):
         return self
@@ -32,6 +32,9 @@ class FakeHeaders:
 
     def get_content_type(self):
         return self._content_type
+
+    def get(self, _name, default=None):
+        return default
 
 
 PAGE = b"""
@@ -111,6 +114,14 @@ class KnowledgeWebsiteTests(unittest.TestCase):
         opener = mock.Mock(return_value=FakeResponse(b"\x00", "image/png"))
         with self.assertRaises(knowledge.KnowledgeError):
             knowledge.add_website("https://example.com/logo.png", opener=opener)
+
+    def test_add_website_rejects_oversized_response(self):
+        opener = mock.Mock(
+            return_value=FakeResponse(b"x" * (knowledge.MAX_WEBSITE_BYTES + 1))
+        )
+        with self.assertRaises(knowledge.KnowledgeError) as caught:
+            knowledge.add_website("https://example.com/large", opener=opener)
+        self.assertIn("too large", str(caught.exception))
 
     def test_add_website_rejects_unsupported_scheme(self):
         with self.assertRaises(knowledge.KnowledgeError):
