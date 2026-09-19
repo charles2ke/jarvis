@@ -460,7 +460,7 @@ def _role_model(match: Match[str], context: SkillContext, *, line: Callable[[], 
     return (
         f"I will hold the bar high with you{_addressed(context)}. "
         f"{line()} "
-        "Tell me what you decide and I will keep reminding you of it."
+        "Tell me what you decide and we will hold it up against your next choice."
     )
 
 
