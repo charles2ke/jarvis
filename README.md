@@ -39,6 +39,7 @@ Useful flags:
 
 | Skill | Example |
 | --- | --- |
+| crisis-support | `I have been thinking about hurting myself` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -48,8 +49,16 @@ Useful flags:
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
+| psychiatrist | `I feel anxious about work` |
+| mood-history | `how have I been feeling` |
+| clear-mood-history | `clear my mood history` |
 | help | `help` |
 | farewell | `goodbye` |
+
+The `psychiatrist` skill offers reflective, empathetic listening and keeps a
+simple mood log; it is not a substitute for professional care. Messages that
+mention self-harm or suicidal thoughts are answered first by `crisis-support`,
+which points to emergency and crisis lines.
 
 ## Adding a skill
 

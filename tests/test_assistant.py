@@ -46,6 +46,27 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.assistant.respond("what is my name?"), "You are Charles.")
         self.assertIn("Charles", self.assistant.respond("hello"))
 
+
+    def test_psychiatrist_reflects_feeling(self):
+        reply = self.assistant.respond("I feel anxious about work")
+        self.assertIn("anxious about work", reply)
+        self.assertIn("worry", reply)
+        self.assertIn("not a therapist", reply)
+
+    def test_psychiatrist_logs_mood_history(self):
+        self.assistant.respond("I feel lonely")
+        self.assistant.respond("I am exhausted today")
+        reply = self.assistant.respond("how have I been feeling")
+        self.assertIn("lonely", reply)
+        self.assertIn("exhausted", reply)
+        self.assertIn("cleared", self.assistant.respond("clear my mood history"))
+        self.assertIn("not shared", self.assistant.respond("mood history"))
+
+    def test_crisis_support_takes_priority(self):
+        reply = self.assistant.respond("I feel like I want to die")
+        self.assertIn("988", reply)
+        self.assertIn("emergency", reply)
+
     def test_help_lists_skills(self):
         reply = self.assistant.respond("help")
         self.assertIn("calculator", reply)
