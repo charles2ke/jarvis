@@ -3,7 +3,16 @@ import unittest
 from unittest import mock
 
 from jarvis.assistant import Assistant
-from jarvis.cua import Action, CuaError, actions_chart, backend_command, execute, is_enabled, plan
+from jarvis.cua import (
+    DEFAULT_TIMEOUT,
+    Action,
+    CuaError,
+    actions_chart,
+    backend_command,
+    execute,
+    is_enabled,
+    plan,
+)
 from jarvis.memory import Memory
 
 
@@ -155,16 +164,51 @@ class ExecutionTests(unittest.TestCase):
             run_mock.call_args_list[1].args[0],
             ["my-cua-tool", "drag", "report.pdf", "bin"],
         )
+        for call in run_mock.call_args_list:
+            self.assertEqual(
+                call.kwargs,
+                {
+                    "capture_output": True,
+                    "text": True,
+                    "timeout": DEFAULT_TIMEOUT,
+                    "check": True,
+                },
+            )
         self.assertIn("1. type 'hello there' — done", reply)
+        self.assertIn("2. drag report.pdf to bin — done", reply)
+
+    def test_execute_passes_a_custom_timeout_to_the_backend(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "cua-tool --device screen"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", return_value=completed
+        ) as run_mock:
+            reply = execute("take a screenshot", timeout=2.5)
+        self.assertEqual(
+            run_mock.call_args.args[0],
+            ["cua-tool", "--device", "screen", "screenshot"],
+        )
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 2.5)
+        self.assertIn("1. take a screenshot — done", reply)
+
+    def test_run_action_reports_a_missing_backend(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", side_effect=FileNotFoundError("my-cua-tool")
+        ):
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertIn("could not run the computer use backend", str(caught.exception))
 
     def test_run_action_reports_timeout(self):
         env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
         with mock.patch.dict("os.environ", env, clear=True), mock.patch(
             "jarvis.cua.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd=["my-cua-tool"], timeout=30),
-        ):
+        ) as run_mock:
             with self.assertRaises(CuaError) as caught:
                 execute("take a screenshot")
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], DEFAULT_TIMEOUT)
         self.assertIn("timed out", str(caught.exception))
 
     def test_run_action_reports_non_zero_exit(self):
