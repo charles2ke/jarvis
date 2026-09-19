@@ -135,6 +135,9 @@ def spawn_session(
     except json.JSONDecodeError as exc:  # pragma: no cover
         raise CloudSessionError("GitHub returned a response I could not read.") from exc
 
+    if not isinstance(body, dict):
+        raise CloudSessionError("GitHub returned a response I could not read.")
+
     session_id = body.get("session_id") or body.get("id")
     return CloudSession(
         repository=slug,

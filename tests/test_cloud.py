@@ -8,7 +8,7 @@ from jarvis.memory import Memory
 
 
 class FakeResponse:
-    def __init__(self, payload: dict):
+    def __init__(self, payload):
         self._payload = json.dumps(payload).encode("utf-8")
 
     def read(self) -> bytes:
@@ -59,6 +59,14 @@ class CloudSessionTests(unittest.TestCase):
         with mock.patch.dict("os.environ", env, clear=True):
             with self.assertRaises(CloudSessionError):
                 spawn_session("hello?")
+
+    def test_spawn_session_rejects_non_object_response(self):
+        env = {"JARVIS_GITHUB_REPO": "charles2ke/jarvis", "JARVIS_GITHUB_TOKEN": "t0ken"}
+        with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+            "urllib.request.urlopen", lambda request, timeout=None: FakeResponse(None)
+        ):
+            with self.assertRaises(CloudSessionError):
+                spawn_session("why is the sky blue?")
 
     def test_summary_mentions_model_and_link(self):
         summary = CloudSession(
