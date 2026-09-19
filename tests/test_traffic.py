@@ -60,6 +60,10 @@ class TrafficSkillTests(unittest.TestCase):
         reply = self.assistant.respond("what does a give way sign mean?")
         self.assertIn("YIELD", reply)
 
+    def test_keep_left_applies_to_left_hand_traffic(self):
+        reply = self.assistant.respond("what does a keep left sign mean?")
+        self.assertIn("countries with left-hand traffic", reply)
+
     def test_category_lookup_lists_signs(self):
         reply = self.assistant.respond("explain warning signs")
         self.assertIn("triangle", reply)

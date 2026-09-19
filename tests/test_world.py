@@ -122,14 +122,30 @@ class WorldSkillTests(unittest.TestCase):
         reply = self.assistant.respond("what happened in 1969?")
         self.assertIn("Apollo 11", reply)
 
+    def test_history_by_bc_year(self):
+        self.assertIn(
+            "Invention of writing",
+            self.assistant.respond("what happened in 3200 BC?"),
+        )
+        self.assertIn(
+            "The Agricultural Revolution",
+            self.assistant.respond("what happened in 10000 BCE?"),
+        )
+
     def test_history_by_event(self):
         reply = self.assistant.respond("when did the Berlin Wall fall?")
         self.assertIn("1989", reply)
 
     def test_history_listing(self):
         reply = self.assistant.respond("list major historical events")
-        self.assertIn("The French Revolution", reply)
-        self.assertIn("The Second World War", reply)
+        self.assertLess(
+            reply.index("The Industrial Revolution"),
+            reply.index("The French Revolution"),
+        )
+        self.assertLess(
+            reply.index("Decolonisation of Africa and Asia"),
+            reply.index("The Apollo 11 Moon landing"),
+        )
 
     def test_history_unknown_year(self):
         reply = self.assistant.respond("what happened in 1200?")

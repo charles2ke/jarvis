@@ -1106,6 +1106,8 @@ def _history(match: Match[str], context: SkillContext) -> str:
             year = int(year_text)
         except ValueError:
             return _HISTORY_HELP
+        if _atlas_group(match, "era") in {"BC", "BCE", "bc", "bce"}:
+            year = -year
         events = events_in_year(year)
         if not events:
             return f"I have no major event recorded around {year}. {_HISTORY_HELP}"
@@ -1121,7 +1123,13 @@ def _history(match: Match[str], context: SkillContext) -> str:
         return f"I do not have '{subject}' in my history yet. {_HISTORY_HELP}"
 
     lines = ["Major events in world history that I know:"]
-    lines.extend(f"- {event.name} ({event.period})" for event in EVENTS)
+    lines.extend(
+        f"- {event.name} ({event.period})"
+        for event in sorted(
+            EVENTS,
+            key=lambda event: event.year if event.year is not None else float("inf"),
+        )
+    )
     lines.append("Ask me about any of them for more detail.")
     return "\n".join(lines)
 
@@ -1476,7 +1484,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "Recall major events in world history, by name or by year."
                 ),
                 patterns=[
-                    r"\bwhat happened in (?:the year )?(?P<year>\d{3,4})\b",
+                    r"\bwhat happened in (?:the year )?(?P<year>\d{3,5})(?:\s*(?P<era>bc|bce)\b)?",
                     r"\bwhen (?:did|was|were)\s+(?P<event>[^?!]+?)\s+(?:happen(?:ed)?|start(?:ed)?|begin|began|end(?:ed)?|take place|took place|fall|fell|collapse|occur(?:red)?|founded|signed|invented|discovered|abolished)\b",
                     r"\b(?:major|important|key|big|list) (?:historical events|events in history|world events)\b",
                     r"\b(?:historical events|events in history|world history|history timeline)\b",

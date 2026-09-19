@@ -306,7 +306,7 @@ SIGNS: Tuple[TrafficSign, ...] = (
         shape="circle",
         colours="blue face with a white arrow",
         meaning="Pass the obstruction or island on the side the arrow points to.",
-        regional="Mirrored as keep left in left-hand-drive-lane countries.",
+        regional="Mirrored as keep left in countries with left-hand traffic.",
         aliases=("keep left", "pass this side", "mandatory direction"),
     ),
     TrafficSign(
