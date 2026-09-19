@@ -63,6 +63,24 @@ class SpeechTests(unittest.TestCase):
             with self.assertRaises(SpeechError):
                 speak("hello")
 
+    def test_speak_reports_timeout(self):
+        import subprocess
+
+        voice = Voice("espeak", ("espeak",))
+        with mock.patch("jarvis.speech.available_voice", return_value=voice), mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired("espeak", 60),
+        ):
+            with self.assertRaisesRegex(SpeechError, "took too long to speak"):
+                speak("hello")
+
+    def test_available_voice_parses_quoted_environment_command(self):
+        with mock.patch.dict(
+            "os.environ", {"JARVIS_TTS_COMMAND": '"C:\\Program Files\\tts.exe" --voice en'}
+        ):
+            voice = available_voice()
+        self.assertEqual(voice.command, ("C:\\Program Files\\tts.exe", "--voice", "en"))
+
 
 class SpeakSkillTests(unittest.TestCase):
     def setUp(self):

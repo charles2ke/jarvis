@@ -9,6 +9,7 @@ synthesiser on Windows).
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -62,7 +63,7 @@ def available_voice(
 
     preferred = os.environ.get("JARVIS_TTS_COMMAND", "").strip()
     if preferred:
-        return Voice("custom", tuple(preferred.split()))
+        return Voice("custom", tuple(shlex.split(preferred)))
     for voice in VOICES:
         if which(voice.command[0]):
             return voice
@@ -97,7 +98,7 @@ def speak(text: str, *, timeout: float = DEFAULT_TIMEOUT) -> Voice:
             timeout=timeout,
             check=True,
         )
-    except subprocess.TimeoutExpired as exc:  # pragma: no cover - timing dependent
+    except subprocess.TimeoutExpired as exc:
         raise SpeechError(f"'{voice.name}' took too long to speak.") from exc
     except subprocess.CalledProcessError as exc:
         raise SpeechError(f"'{voice.name}' could not speak that text.") from exc
