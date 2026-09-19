@@ -59,6 +59,8 @@ Useful flags:
 | clear-mood-history | `clear my mood history` |
 | love-support | `my girlfriend and I keep fighting` |
 | emotional-support | `I need some emotional support` |
+| encyclopedia | `what is gravity?` |
+| encyclopedia-topics | `encyclopedia topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -71,6 +73,14 @@ persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
 heartbreak, conflict and new feelings.
+
+The `encyclopedia` skill answers factual questions (`what is ...`, `who was
+...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
+articles — it never reaches the network. Lookups ignore case, punctuation and
+aliases, tolerate small typos, and suggest close titles when a topic is
+missing. It is registered last so that `what is the time?`, `what is my name?`
+and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
+list every entry.
 
 ## Adding a skill
 

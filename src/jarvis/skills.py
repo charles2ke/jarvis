@@ -8,6 +8,7 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
+from jarvis import encyclopedia
 from jarvis.calculator import CalculationError, calculate
 from jarvis.memory import Memory
 
@@ -360,6 +361,48 @@ def _love_support(match: Match[str], context: SkillContext) -> str:
     )
 
 
+_ENCYCLOPEDIA_FILLERS = re.compile(
+    r"^(?:the meaning of|the definition of|the term|the word|me about|us about|about)\s+",
+    re.IGNORECASE,
+)
+
+
+def _clean_subject(subject: str) -> str:
+    cleaned = subject.strip()
+    cleaned = re.sub(r"^(?:please|hey|ok|okay)[,\s]+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\s,]+please$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip().strip("\"'")
+    cleaned = _ENCYCLOPEDIA_FILLERS.sub("", cleaned)
+    return cleaned.strip().rstrip("?!.").strip()
+
+
+def _encyclopedia(match: Match[str], context: SkillContext) -> str:
+    subject = _clean_subject(match.group("subject") or "")
+    if not subject:
+        return (
+            "What would you like to look up? Try 'tell me about gravity', or ask "
+            "for 'encyclopedia topics'."
+        )
+    article = encyclopedia.lookup(subject)
+    if article is not None:
+        return f"{article.title}: {article.summary}"
+    lines = [f"I do not have an encyclopedia entry for '{subject}' yet."]
+    close = encyclopedia.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'encyclopedia topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
+    titles = encyclopedia.topics()
+    lines = [f"I have {len(titles)} encyclopedia entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is gravity?' or 'tell me about Ada Lovelace'.")
+    return "\n".join(lines)
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -709,6 +752,30 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(bye|goodbye|see you)\b"],
                 handler=_farewell,
                 examples=["goodbye"],
+            ),
+            Skill(
+                name="encyclopedia-topics",
+                description="List the encyclopedia entries I can explain.",
+                patterns=[
+                    r"\b(encyclopedi(a|as)|encyclopaedia)\s+(topics|entries|index|articles)\b",
+                    r"\b(list|show)( me)?( your)? (encyclopedi(a|as)|encyclopaedia)\b",
+                    r"\bwhat (topics|subjects) do you know\b",
+                ],
+                handler=_encyclopedia_topics,
+                examples=["encyclopedia topics"],
+            ),
+            Skill(
+                name="encyclopedia",
+                description="Look up a short factual article on a topic I know.",
+                patterns=[
+                    r"^\s*(?:encyclopedia|encyclopaedia)[:,]?\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:tell|teach)\s+(?:me|us)\s+(?:more\s+)?about\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:what|who)(?:'s|’s|'re|s|\s+is|\s+are|\s+was|\s+were)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:define|explain|describe)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                    r"^\s*(?:look\s?up|search\s+for)\s+(?P<subject>.+?)\s*[.?!]*\s*$",
+                ],
+                handler=_encyclopedia,
+                examples=["what is gravity?"],
             ),
         ]
     )
