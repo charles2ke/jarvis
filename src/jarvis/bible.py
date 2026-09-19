@@ -1139,7 +1139,10 @@ def parse_reference(query: str) -> Optional[str]:
     chapter = int(match.group("chapter"))
     if chapter < 1 or chapter > book.chapters:
         return None
-    return f"{book.name} {chapter}:{int(match.group('verse'))}"
+    verse = int(match.group("verse"))
+    if verse < 1:
+        return None
+    return f"{book.name} {chapter}:{verse}"
 
 
 def find_verse(query: str) -> Optional[Verse]:
