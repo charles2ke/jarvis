@@ -58,6 +58,8 @@ Useful flags:
 | mood-history | `how have I been feeling` |
 | clear-mood-history | `clear my mood history` |
 | love-support | `my girlfriend and I keep fighting` |
+| couples-counseling | `we need couples counseling` |
+| midlife-counseling | `I think I am having a midlife crisis` |
 | emotional-support | `I need some emotional support` |
 | help | `help` |
 | farewell | `goodbye` |
@@ -70,7 +72,10 @@ empathetic listening and keeps an in-session mood log that is not written to
 persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
-heartbreak, conflict and new feelings.
+heartbreak, conflict and new feelings. `couples-counseling` answers explicit
+requests to work on a marriage or relationship together, and
+`midlife-counseling` reflects on ageing, regret, purpose and what comes next;
+both point to a professional counsellor for ongoing work.
 
 ## Adding a skill
 

@@ -360,6 +360,153 @@ def _love_support(match: Match[str], context: SkillContext) -> str:
     )
 
 
+_MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("career", "job", "work", "promotion", "retire", "retirement", "quit"),
+        "Work often carries more of our identity than we admit. If the job "
+        "title disappeared tomorrow, what would you still want to be known "
+        "for?",
+    ),
+    (
+        ("regret", "wasted", "too late", "missed", "should have", "behind"),
+        "Regret usually marks something you still care about. What would "
+        "honouring that value look like from where you actually stand today?",
+    ),
+    (
+        ("meaning", "purpose", "point", "pointless", "empty", "stuck", "rut"),
+        "A life can be full and still feel hollow. What did you used to do "
+        "that made time disappear, and what stopped it?",
+    ),
+    (
+        (
+            "old",
+            "older",
+            "aging",
+            "ageing",
+            "age",
+            "body",
+            "health",
+            "mortality",
+            "dying",
+            "grey",
+            "gray",
+        ),
+        "Noticing time passing is unsettling, and it is also honest. What "
+        "would you like the next ten years to be about, rather than away from?",
+    ),
+    (
+        ("kids", "children", "son", "daughter", "empty nest", "parents", "mother", "father"),
+        "Midlife often means holding other people's needs at both ends. "
+        "Where in all of that is there any space left for you?",
+    ),
+)
+
+_MIDLIFE_DEFAULT_REFLECTION = (
+    "This stage asks hard questions: what you have built, what you still want, "
+    "and what you are willing to change. Which of those is loudest for you "
+    "right now?"
+)
+
+_MIDLIFE_CLOSING = (
+    "A midlife reckoning is not a breakdown; it is usually a signal worth "
+    "listening to. I am not a counsellor, so if it keeps weighing on you, a "
+    "therapist can help you work through it properly."
+)
+
+
+def _midlife_counseling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _MIDLIFE_DEFAULT_REFLECTION
+    for keywords, candidate in _MIDLIFE_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            f"Thank you for saying that out loud{_addressed(context)}.",
+            reflection,
+            _MIDLIFE_CLOSING,
+        ]
+    )
+
+
+_COUPLES_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("affair", "cheated", "cheating", "unfaithful", "betrayed", "betrayal", "trust"),
+        "Broken trust needs more than an apology; it needs consistent, "
+        "visible repair over time. Are you both willing to do that work, and "
+        "what would honesty have to look like day to day?",
+    ),
+    (
+        (
+            "communicate",
+            "communication",
+            "talk",
+            "talking",
+            "listen",
+            "listening",
+            "shouting",
+            "fight",
+            "fighting",
+            "argue",
+            "arguing",
+            "argument",
+            "silent treatment",
+        ),
+        "Most couples argue about the argument, not the issue. Try each "
+        "taking a turn to say what you need without naming what the other "
+        "did wrong — what would your sentence be?",
+    ),
+    (
+        ("money", "finances", "chores", "housework", "in-laws", "parenting", "kids", "children"),
+        "Recurring practical fights are usually about fairness and feeling "
+        "carried. Where do you each feel the load is uneven, and what is one "
+        "concrete swap you could try this week?",
+    ),
+    (
+        ("intimacy", "sex", "distant", "roommates", "disconnected", "drifted", "apart", "lonely"),
+        "Drifting apart rarely happens in one moment; it happens in a hundred "
+        "small missed turns. When did you last feel close, and what was "
+        "different then?",
+    ),
+    (
+        ("divorce", "separate", "separating", "separation", "leave", "leaving", "end it", "break up"),
+        "Deciding whether to stay is one of the heaviest choices there is. "
+        "What would need to change for staying to feel right, and is that "
+        "change something you both want?",
+    ),
+)
+
+_COUPLES_DEFAULT_REFLECTION = (
+    "Counselling usually starts with each partner naming what they need "
+    "rather than what the other is doing wrong. If you each had one sentence, "
+    "what would yours be?"
+)
+
+_COUPLES_CLOSING = (
+    "I can help you think it through, but a trained couples therapist is the "
+    "right place for this. Whatever you decide, both of you deserve to feel "
+    "safe and respected."
+)
+
+
+def _couples_counseling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _COUPLES_DEFAULT_REFLECTION
+    for keywords, candidate in _COUPLES_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            "Thank you for bringing this here — wanting to work on it together "
+            "already says something.",
+            reflection,
+            _COUPLES_CLOSING,
+        ]
+    )
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -505,6 +652,39 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_crisis_support,
                 examples=["I have been thinking about hurting myself"],
+            ),
+            Skill(
+                name="couples-counseling",
+                description=(
+                    "Work through relationship problems as a couple, the way "
+                    "couples counselling would."
+                ),
+                patterns=[
+                    r"\b(couples?|marriage|marital|relationship) (counsel(?:l)?ing|counsel(?:l)?or|therapy|therapist)\b",
+                    r"\b(save|fix|work on|repair|rebuild) (our|my|the) (marriage|relationship)\b",
+                    r"\b(we|my (husband|wife|partner|spouse|girlfriend|boyfriend) and i) (need|should get|are in) .{0,20}(counsel(?:l)?ing|therapy|help)\b",
+                    r"\bour (marriage|relationship) is (in trouble|failing|falling apart|struggling|broken)\b",
+                ],
+                handler=_couples_counseling,
+                examples=["we need couples counseling"],
+            ),
+            Skill(
+                name="midlife-counseling",
+                description=(
+                    "Talk through a midlife crisis: ageing, regret, purpose and "
+                    "what comes next."
+                ),
+                patterns=[
+                    r"\bmid[- ]?life\b",
+                    r"\b(middle[- ]aged?|midlife) (crisis|slump)\b",
+                    r"\bhalf (my|his|her|their) life (is )?(over|gone)\b",
+                    r"\b(second half|rest) of my life\b",
+                    r"\bturning (4\d|5\d|6\d)\b",
+                    r"\bis this (all there is|it)\b",
+                    r"\bwasted (the best|my best) years\b",
+                ],
+                handler=_midlife_counseling,
+                examples=["I think I am having a midlife crisis"],
             ),
             Skill(
                 name="love-support",
