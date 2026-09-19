@@ -51,6 +51,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| science-solver | `solve 2x + 3 = 11` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -71,6 +72,26 @@ persistent memory; it is not a substitute for professional care.
 `emotional-support` answers direct requests for comfort with validation and a
 rotating coping suggestion, and `love-support` talks through relationships,
 heartbreak, conflict and new feelings.
+
+## Solving science problems
+
+The `science-solver` skill works through maths, physics, chemistry and biology
+questions and shows the formula it used:
+
+- maths — `solve 2x + 3 = 11`, `solve x^2 - 5x + 6 = 0`, `solve 3(y - 2) = 9 for y`
+- physics — `calculate the force with mass 5 kg and acceleration 2 m/s^2`,
+  `how fast is a car that travels 150 m in 10 s`,
+  `what is the voltage with current 2 A and resistance 5 ohms`
+- chemistry — `what is the molar mass of Ca(OH)2`,
+  `how many moles are in 36 g of H2O`, `what is the pH of 0.001 M solution`,
+  `ideal gas law with 2 mol at 300 K and pressure 1 atm`
+- biology — `what is the complement of ATGC`, `transcribe ATGC`,
+  `translate the RNA sequence AUGGCCUAA`, `gc content of ATGCGC`,
+  `punnett square for Aa x Aa`
+
+It is registered before `calculator`, so plain arithmetic such as
+`calculate 21 * 2` is still answered by the calculator. Questions it does not
+recognise get a short list of supported examples instead of a wrong answer.
 
 ## Adding a skill
 
