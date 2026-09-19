@@ -34,6 +34,7 @@ Useful flags:
 
 - `--memory PATH` — where to persist memory (default `~/.jarvis/memory.json`, override the directory with `JARVIS_HOME`).
 - `--no-memory` — keep everything in RAM for the session.
+- `--speak` — also read every reply aloud (see [Text to speech](#text-to-speech)).
 
 ## Built-in skills
 
@@ -41,6 +42,7 @@ Useful flags:
 | --- | --- |
 | crisis-support | `I have been thinking about hurting myself` |
 | answer | `answer how does the skill registry work?` |
+| speak | `say out loud hello Charles` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
 | story | `tell me a story` |
@@ -123,6 +125,28 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+## Text to speech
+
+Jarvis can read text aloud with the `speak` skill:
+
+```bash
+jarvis "say out loud hello Charles"
+jarvis 'read "the report is ready" aloud'
+jarvis "text to speech: good morning"
+```
+
+Use `--speak` to hear every reply of a session:
+
+```bash
+jarvis --speak "what is the time?"
+```
+
+Speech stays dependency free: Jarvis uses the first text to speech program it
+finds on the system — `say` (macOS), `espeak-ng`, `espeak` or `spd-say` (Linux),
+or the PowerShell speech synthesiser (Windows). Set `JARVIS_TTS_COMMAND` to use
+a different command (the text is appended as the last argument). If nothing is
+available, Jarvis says so instead of failing.
 
 ## Answering any query with a cloud session
 

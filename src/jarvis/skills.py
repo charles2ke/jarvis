@@ -24,6 +24,7 @@ from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
 from jarvis.science import solve_problem
+from jarvis.speech import SpeechError, speak
 
 
 @dataclass
@@ -825,6 +826,22 @@ def _answer(
         return f"I could not start a cloud session: {exc}"
 
 
+def _speak(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    voice: Optional[Callable[[str], object]] = None,
+) -> str:
+    text = (match.group("text") or "").strip().strip('"').strip("'")
+    if not text:
+        return "Tell me what you would like me to say out loud."
+    try:
+        (voice or speak)(text)
+    except SpeechError as exc:
+        return f"I could not speak that out loud: {exc}"
+    return f"I said out loud: {text}"
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -1094,6 +1111,17 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_midlife_counseling,
                 examples=["I think I am having a midlife crisis"],
+            ),
+            Skill(
+                name="speak",
+                description="Read text aloud with the system text to speech voice.",
+                patterns=[
+                    r"^\s*(?:say|speak|read)\s+(?:this\s+)?(?:out loud|aloud)[:,]?\s+(?P<text>.+)$",
+                    r"^\s*(?:say|speak|read)[:,]?\s+(?P<text>.+?)\s+(?:out loud|aloud)\s*[.!]?\s*$",
+                    r"^\s*(?:text[- ]to[- ]speech|tts)[:,]?\s+(?P<text>.+)$",
+                ],
+                handler=_speak,
+                examples=["say out loud hello Charles"],
             ),
             Skill(
                 name="answer",
