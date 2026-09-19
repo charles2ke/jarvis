@@ -228,6 +228,19 @@ class KnowledgeSkillTests(unittest.TestCase):
         reply = self.assistant.respond("add ftp://example.com/file as a knowledge source")
         self.assertIn("only read http and https", reply)
 
+    def test_any_scheme_reaches_the_website_skill(self):
+        phrases = [
+            "add ftp://example.com/file as a knowledge source",
+            "add FTP://example.com/file as a knowledge source",
+            "add file:///etc/hosts as a knowledge source",
+            "use ssh://git@example.com/repo.git as a knowledge source",
+            "add the website gopher://example.com as a knowledge source",
+        ]
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                reply = self.assistant.respond(phrase)
+                self.assertIn("only read http and https", reply)
+
     def test_add_nested_relative_path_is_treated_as_a_file(self):
         reply = self.assistant.respond("add src/jarvis/knowledge.py as a knowledge source")
         self.assertIn("Added the file 'knowledge.py'", reply)
