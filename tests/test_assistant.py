@@ -238,6 +238,28 @@ class AssistantTests(unittest.TestCase):
             self.assistant.respond("tell me a joke"), other.respond("tell me a joke")
         )
 
+    def test_role_model_skill(self):
+        for message in ("be my role model", "I want to be a better person"):
+            with self.subTest(message=message):
+                self.assertIn("hold the bar high", self.assistant.respond(message))
+
+    def test_coach_skill_echoes_goal(self):
+        self.assertIn(
+            "'guitar'", self.assistant.respond("I want to get better at guitar")
+        )
+        self.assertIn("in your corner", self.assistant.respond("coach me"))
+
+    def test_self_care_skill(self):
+        for message in ("self care", "how do I take care of myself"):
+            with self.subTest(message=message):
+                self.assertIn(
+                    "Looking after yourself", self.assistant.respond(message)
+                )
+
+    def test_new_skills_do_not_shadow_wellbeing_skills(self):
+        self.assertIn("988", self.assistant.respond("I want to kill myself"))
+        self.assertIn("therapist", self.assistant.respond("I feel anxious"))
+
     def test_unknown_message_falls_back(self):
         self.assertEqual(
             self.assistant.respond("please pilot the suit"), FALLBACK_RESPONSE

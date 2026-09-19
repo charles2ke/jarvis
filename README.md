@@ -46,6 +46,9 @@ Useful flags:
 | story | `tell me a story` |
 | joke | `tell me a joke` |
 | uplift | `cheer me up` |
+| role-model | `be my role model` |
+| coach | `coach me` |
+| self-care | `how do I take care of myself` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -83,7 +86,10 @@ requests to work on a marriage or relationship together, and
 `midlife-counseling` reflects on ageing, regret, purpose and what comes next;
 both point to a professional counsellor for ongoing work.
 `career-counselling` works through
-job loss, career moves, job searches and pay conversations.
+job loss, career moves, job searches and pay conversations. `role-model` talks
+about character and the person you want to become, `coach` turns goals and
+habits into a concrete next step, and `self-care` suggests a practical way to
+look after yourself.
 
 The `atlas` skill answers offline geography questions — capitals, the country
 behind a capital, continents, currencies, population estimates and the
