@@ -26,7 +26,8 @@ class UnitConversionTests(unittest.TestCase):
         self.assertAlmostEqual(convert(0, "c", "kelvin"), 273.15, places=9)
         self.assertAlmostEqual(convert(300, "kelvin", "celsius"), 26.85, places=9)
 
-    def test_speed_and_area_conversions(self):
+    def test_time_speed_and_area_conversions(self):
+        self.assertAlmostEqual(convert(1, "week", "hours"), 168.0, places=9)
         self.assertAlmostEqual(convert(1, "knot", "kph"), 1.852, places=9)
         self.assertAlmostEqual(convert(1, "hectare", "square metres"), 10000.0, places=6)
 

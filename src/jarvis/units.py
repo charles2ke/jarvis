@@ -71,7 +71,7 @@ _UNITS: Tuple[Tuple[Unit, Tuple[str, ...]], ...] = (
     (Unit("litre", "litres", "volume", 1.0),
      ("l", "liter", "liters", "litre", "litres")),
     (Unit("US cup", "US cups", "volume", 0.2365882365),
-     ("cup", "cups")),
+     ("cup", "cups", "us cup", "us cups")),
     (Unit("US pint", "US pints", "volume", 0.473176473),
      ("pt", "pint", "pints", "us pint", "us pints")),
     (Unit("US gallon", "US gallons", "volume", 3.785411784),
