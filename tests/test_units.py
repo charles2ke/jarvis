@@ -7,6 +7,7 @@ from jarvis.units import (
     describe_conversion,
     describe_units,
     find_unit,
+    format_quantity,
 )
 
 
@@ -48,6 +49,12 @@ class UnitConversionTests(unittest.TestCase):
 
     def test_describe_conversion_formats_singular(self):
         self.assertEqual(describe_conversion(1, "km", "m"), "1 kilometre = 1000 metres.")
+
+    def test_format_quantity_rejects_non_finite(self):
+        metre = find_unit("metres")
+        for value in (float("inf"), float("-inf"), float("nan")):
+            with self.assertRaises(ConversionError):
+                format_quantity(value, metre)
 
     def test_describe_units_lists_families(self):
         summary = describe_units()
