@@ -237,6 +237,11 @@ def _normalise(text: str) -> str:
     cleaned = re.sub(r"[^\w\s'-]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     cleaned = _STOPWORD_PREFIX.sub("", cleaned)
+    cleaned = re.sub(
+        r"\b(?:[a-z]\s+)+[a-z]\b",
+        lambda match: match.group().replace(" ", ""),
+        cleaned,
+    )
     return cleaned
 
 

@@ -15,6 +15,7 @@ class MaritimeTests(unittest.TestCase):
 
     def test_lookup_is_forgiving(self):
         self.assertEqual(maritime.lookup("  Navtex! ").title, "NAVTEX")
+        self.assertEqual(maritime.lookup("s.o.s.").title, "SOS")
         self.assertEqual(maritime.lookup("epirbs").title, "EPIRB")
         self.assertEqual(maritime.lookup("navtexx").title, "NAVTEX")
 
