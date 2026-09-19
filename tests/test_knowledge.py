@@ -9,9 +9,11 @@ from jarvis.memory import Memory
 
 
 class FakeResponse:
-    def __init__(self, payload: bytes, content_type: str = "text/html") -> None:
+    def __init__(
+        self, payload: bytes, content_type: str = "text/html", charset: str = "utf-8"
+    ) -> None:
         self._payload = payload
-        self.headers = FakeHeaders(content_type)
+        self.headers = FakeHeaders(content_type, charset)
 
     def read(self, amount=None) -> bytes:
         return self._payload if amount is None else self._payload[:amount]
@@ -24,11 +26,12 @@ class FakeResponse:
 
 
 class FakeHeaders:
-    def __init__(self, content_type: str) -> None:
+    def __init__(self, content_type: str, charset: str) -> None:
         self._content_type = content_type
+        self._charset = charset
 
     def get_content_charset(self):
-        return "utf-8"
+        return self._charset
 
     def get_content_type(self):
         return self._content_type
@@ -110,6 +113,11 @@ class KnowledgeWebsiteTests(unittest.TestCase):
         source = knowledge.add_website("https://example.com/notes.txt", opener=opener)
         self.assertEqual(source.text, "Zephyr ships monthly.")
 
+    def test_add_website_falls_back_for_unknown_charset(self):
+        opener = mock.Mock(return_value=FakeResponse(b"<p>hello</p>", charset="unknown"))
+        source = knowledge.add_website("https://example.com", opener=opener)
+        self.assertEqual(source.text, "hello")
+
     def test_add_website_rejects_non_text_content(self):
         opener = mock.Mock(return_value=FakeResponse(b"\x00", "image/png"))
         with self.assertRaises(knowledge.KnowledgeError):
@@ -152,9 +160,20 @@ class KnowledgeSearchTests(unittest.TestCase):
         source = knowledge.Source("file", "notes.md", "/tmp/notes.md", "Zephyr.")
         self.assertIsNone(knowledge.search([source], "quantum tunnelling"))
 
+    def test_search_ignores_stopword_only_query(self):
+        source = knowledge.Source("file", "notes.md", "/tmp/notes.md", "It is ready.")
+        self.assertIsNone(knowledge.search([source], "what is it?"))
+
+    def test_search_matches_whole_words(self):
+        source = knowledge.Source(
+            "file", "notes.md", "/tmp/notes.md", "Concatenate these strings."
+        )
+        self.assertIsNone(knowledge.search([source], "cat"))
+
     def test_load_ignores_unreadable_entries(self):
         stored = [
             {"kind": "file", "title": "n", "location": "/tmp/n.md", "text": "hi"},
+            {"kind": "file", "title": "empty", "location": "/tmp/empty.md", "text": " "},
             {"kind": "podcast", "location": "x"},
             "nonsense",
         ]
@@ -204,6 +223,14 @@ class KnowledgeSkillTests(unittest.TestCase):
                 "learn from the website https://example.com/docs"
             )
         self.assertIn("Added the website", reply)
+
+    def test_add_website_reports_unsupported_scheme(self):
+        reply = self.assistant.respond("add ftp://example.com/file as a knowledge source")
+        self.assertIn("only read http and https", reply)
+
+    def test_add_nested_relative_path_is_treated_as_a_file(self):
+        reply = self.assistant.respond("add src/jarvis/knowledge.py as a knowledge source")
+        self.assertIn("Added the file 'knowledge.py'", reply)
 
     def test_adding_the_same_source_twice_does_not_duplicate(self):
         opener = mock.Mock(return_value=FakeResponse(PAGE))

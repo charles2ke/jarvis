@@ -2041,7 +2041,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"(?:web\s?site|web\s?page|url|link|site|page)\s*"
                     r"(?P<url>[^\s]*)(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                     r"^\s*(?:add|use|load|index|import|learn\s+from|read|fetch)\s+"
-                    r"(?P<url>(?:https?://|www\.)\S+"
+                    r"(?P<url>(?:[a-z][a-z0-9+.-]*://|www\.)\S+"
                     r"|[\w-]+(?:\.[\w-]+)*\.(?:com|org|net|io|gov|edu|dev|ai|co|uk)(?:/\S*)?)"
                     r"(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                 ],
@@ -2058,7 +2058,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"(?P<path>[^\s]*)(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                     r"^\s*(?:add|use|load|index|import|learn\s+from|read)\s+"
                     r"(?P<path>(?:[~./]|[A-Za-z]:\\)\S*"
-                    r"|[\w.-]+\.(?:txt|md|markdown|rst|csv|json|ya?ml|html?|xml|py|log|ini|toml|cfg))"
+                    r"|[\w.-]+(?:/[\w.-]+)*\.(?:txt|md|markdown|rst|csv|json|ya?ml|html?|xml|py|log|ini|toml|cfg))"
                     r"(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                 ],
                 handler=_add_knowledge_file,

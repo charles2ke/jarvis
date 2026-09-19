@@ -113,7 +113,7 @@ class Source:
         kind = str(data.get("kind") or "")
         location = str(data.get("location") or "")
         text = str(data.get("text") or "")
-        if kind not in {"file", "website"} or not location:
+        if kind not in {"file", "website"} or not location or not text.strip():
             return None
         return cls(
             kind=kind,
@@ -254,7 +254,10 @@ def add_website(url: str, *, opener=None, timeout: float = DEFAULT_TIMEOUT) -> S
         raise KnowledgeError(f"I could not reach {address}: {exc}") from exc
 
     if isinstance(payload, bytes):
-        markup = payload.decode(charset, errors="replace")
+        try:
+            markup = payload.decode(charset, errors="replace")
+        except LookupError:
+            markup = payload.decode("utf-8", errors="replace")
     else:  # pragma: no cover - defensive
         markup = str(payload)
     markup = markup[:MAX_WEBSITE_BYTES]
@@ -288,8 +291,7 @@ def dump(sources: Iterable[Source]) -> List[Dict[str, str]]:
 
 def _keywords(query: str) -> List[str]:
     words = re.findall(r"[a-z0-9]+", (query or "").lower())
-    keywords = [word for word in words if word not in _STOPWORDS and len(word) > 1]
-    return keywords or words
+    return [word for word in words if word not in _STOPWORDS]
 
 
 def _passages(text: str) -> List[str]:
@@ -309,8 +311,8 @@ def search(
     for source in sources:
         scored: List[tuple[int, int, str]] = []
         for index, passage in enumerate(_passages(source.text)):
-            lowered = passage.lower()
-            hits = sum(1 for word in keywords if word in lowered)
+            tokens = set(re.findall(r"[a-z0-9]+", passage.lower()))
+            hits = sum(1 for word in keywords if word in tokens)
             if hits:
                 scored.append((hits, -index, passage))
         if not scored:
