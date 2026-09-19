@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Dict, Iterable, List, Tuple
 
 
@@ -168,13 +169,18 @@ def find_unit(name: str) -> Unit:
 def convert(value: float, source: str, target: str) -> float:
     """Convert ``value`` from the ``source`` unit into the ``target`` unit."""
 
+    if not math.isfinite(value):
+        raise ConversionError("That value is too large for me to convert.")
     from_unit = find_unit(source)
     to_unit = find_unit(target)
     if from_unit.family != to_unit.family:
         raise ConversionError(
             f"I cannot convert {from_unit.family} into {to_unit.family}."
         )
-    return to_unit.from_base(from_unit.to_base(value))
+    result = to_unit.from_base(from_unit.to_base(value))
+    if not math.isfinite(result):
+        raise ConversionError("That value is too large for me to convert.")
+    return result
 
 
 def format_quantity(value: float, unit: Unit) -> str:

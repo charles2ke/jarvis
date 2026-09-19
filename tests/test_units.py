@@ -72,6 +72,10 @@ class UnitSkillTests(unittest.TestCase):
         reply = self.assistant.respond("convert 5 kg to metres")
         self.assertIn("cannot convert", reply)
 
+    def test_rejects_overflowing_amount(self):
+        reply = self.assistant.respond(f"convert {'9' * 400} metres to kilometres")
+        self.assertEqual(reply, "That value is too large for me to convert.")
+
     def test_unit_list_skill(self):
         reply = self.assistant.respond("what units can you convert?")
         self.assertIn("temperature", reply)
