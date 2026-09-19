@@ -69,6 +69,7 @@ Useful flags:
 | wonders | `what are the seven wonders of the world?` |
 | history | `what happened in 1969?` |
 | traffic-signs | `what does a give way sign mean?` |
+| money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
 | add-knowledge-website | `add https://example.com as a knowledge source` |
 | add-knowledge-file | `add the file notes.md as a knowledge source` |
 | list-knowledge-sources | `list my knowledge sources` |
@@ -94,6 +95,9 @@ Useful flags:
 | encyclopedia-topics | `encyclopedia topics` |
 | gmdss | `what is an EPIRB?` |
 | gmdss-topics | `gmdss topics` |
+| financial-advisor | `financial advice on investing` |
+| economics | `what is inflation?` |
+| economics-topics | `economics topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -187,6 +191,38 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+## Economics and financial advice
+
+Three skills cover money, all of them offline and all of them general
+education rather than personalised advice — every coaching and calculator
+answer says so:
+
+- `economics` explains economics and personal finance terms — inflation, GDP,
+  recessions, interest rates, central banks, fiscal policy, shares, bonds,
+  index funds, diversification, emergency funds, budgeting, debt repayment,
+  credit scores, mortgages, retirement saving, insurance, taxes, opportunity
+  cost, exchange rates and unemployment. Say `economics topics` to list every
+  entry.
+- `financial-advisor` coaches on a money situation (`how do I pay off debt`,
+  `how should I start investing`, `advice on my budget`, `I am living paycheck
+  to paycheck`) with a short, ordered playbook.
+- `money-math` does the arithmetic:
+
+```bash
+jarvis "invest 10000 at 6% for 20 years adding 200 a month"
+jarvis "monthly payment on a 250000 mortgage at 5% over 30 years"
+jarvis "what is 50000 worth in 10 years with 3% inflation"
+jarvis "how long does money double at 7%"
+jarvis "50/30/20 budget on 3000 a month"
+jarvis "emergency fund on 1800 a month"
+```
+
+`money-math` is registered before `science-solver` so that `how long does
+money double at 7%` is answered as money rather than physics, and `economics`
+is registered before `encyclopedia` so that `what is inflation?` reaches the
+finance entries. The wellbeing skills still come first, so `I am broke and
+want to kill myself` reaches `crisis-support`.
 
 ## Knowledge sources
 
