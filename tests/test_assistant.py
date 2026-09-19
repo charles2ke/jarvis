@@ -228,6 +228,25 @@ class AssistantTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertIn("988", self.assistant.respond(message))
 
+    def test_gmdss_explains_the_system_and_its_equipment(self):
+        overview = self.assistant.respond("what is gmdss")
+        self.assertIn("Global Maritime Distress and Safety System", overview)
+        self.assertIn("1999", overview)
+        self.assertIn("406 MHz", self.assistant.respond("what is an EPIRB?"))
+        self.assertIn("channel 70", self.assistant.respond("explain dsc"))
+        self.assertIn("A4", self.assistant.respond("gmdss sea areas"))
+        self.assertIn("MAYDAY", self.assistant.respond("how do I send a distress alert"))
+
+    def test_gmdss_topics_and_unknown_subject(self):
+        topics = self.assistant.respond("gmdss topics")
+        self.assertIn("NAVTEX", topics)
+        self.assertIn("SART", topics)
+        reply = self.assistant.respond("gmdss quantum submarine")
+        self.assertIn("do not have a GMDSS entry", reply)
+
+    def test_gmdss_does_not_shadow_crisis_support(self):
+        self.assertIn("988", self.assistant.respond("mayday, I want to kill myself"))
+
     def test_emotional_skills_do_not_shadow_others(self):
         self.assertEqual(self.assistant.respond("calculate 21 * 2"), "21 * 2 = 42")
         self.assertIn("Jarvis", self.assistant.respond("hello"))

@@ -22,6 +22,7 @@ from jarvis.atlas import (
 )
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
+from jarvis import maritime
 from jarvis.memory import Memory
 from jarvis.science import solve_problem
 
@@ -742,6 +743,37 @@ def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
     return "\n".join(lines)
 
 
+def _gmdss(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    subject = _clean_subject(groups.get("subject") or "")
+    if not subject or _normalised_gmdss(subject) in {"", "gmdss"}:
+        entry = maritime.lookup("GMDSS")
+        assert entry is not None  # The overview entry is always present.
+        return f"{entry.title}: {entry.summary}"
+    entry = maritime.lookup(subject)
+    if entry is not None:
+        return f"{entry.title}: {entry.summary}"
+    lines = [f"I do not have a GMDSS entry for '{subject}' yet."]
+    close = maritime.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'gmdss topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _normalised_gmdss(subject: str) -> str:
+    return re.sub(r"[^a-z]+", "", subject.lower())
+
+
+def _gmdss_topics(match: Match[str], context: SkillContext) -> str:
+    titles = maritime.topics()
+    lines = [f"I have {len(titles)} GMDSS entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is an EPIRB?' or 'gmdss sea areas'.")
+    return "\n".join(lines)
+
+
 def _answer(
     match: Match[str],
     context: SkillContext,
@@ -1315,6 +1347,34 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(bye|goodbye|see you)\b"],
                 handler=_farewell,
                 examples=["goodbye"],
+            ),
+            Skill(
+                name="gmdss-topics",
+                description="List the GMDSS reference entries I can explain.",
+                patterns=[
+                    r"\bgmdss\s+(topics|entries|index|glossary)\b",
+                    r"\b(list|show)( me)?( your)? gmdss\b",
+                ],
+                handler=_gmdss_topics,
+                examples=["gmdss topics"],
+            ),
+            Skill(
+                name="gmdss",
+                description=(
+                    "Explain the Global Maritime Distress and Safety System: "
+                    "sea areas, DSC, EPIRBs, SARTs, NAVTEX and distress calls."
+                ),
+                patterns=[
+                    r"^\s*gmdss\b[:,]?\s*(?P<subject>.*?)\s*[.?!]*\s*$",
+                    r"\b(?P<subject>epirbs?|ais[- ]sarts?|sarts?|"
+                    r"digital selective calling|dsc|navtex|mmsi|"
+                    r"maritime mobile service identity|inmarsat|safetynet|"
+                    r"cospas[- ]sarsat|pan[- ]pan|securit[eé]|mayday|cqd|"
+                    r"s\.?o\.?s\.?|sea areas?|area a[1-4]|distress alerts?|"
+                    r"false alerts?|solas chapter iv|gmdss)\b",
+                ],
+                handler=_gmdss,
+                examples=["what is an EPIRB?"],
             ),
             Skill(
                 name="encyclopedia-topics",

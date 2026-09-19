@@ -67,6 +67,8 @@ Useful flags:
 | emotional-support | `I need some emotional support` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
+| gmdss | `what is an EPIRB?` |
+| gmdss-topics | `gmdss topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -117,6 +119,14 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+The `gmdss` skill is an offline reference for the Global Maritime Distress and
+Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
+the mayday/pan-pan/securite priorities, the Morse SOS it replaced in 1999 and
+the distress alert procedure. It is registered before `encyclopedia` so that
+`what is an EPIRB?` reaches the maritime entries, and after `crisis-support` so
+that a message such as `mayday, I want to kill myself` still reaches the help
+lines. Say `gmdss topics` to list every entry.
 
 ## Answering any query with a cloud session
 
