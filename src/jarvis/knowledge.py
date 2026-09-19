@@ -110,17 +110,19 @@ class Source:
     def from_dict(cls, data: Dict[str, str]) -> Optional["Source"]:
         if not isinstance(data, dict):
             return None
-        kind = str(data.get("kind") or "")
-        location = str(data.get("location") or "")
-        text = str(data.get("text") or "")
-        if kind not in {"file", "website"} or not location or not text.strip():
+        kind = data.get("kind")
+        location = data.get("location")
+        text = data.get("text")
+        if kind not in {"file", "website"}:
             return None
-        return cls(
-            kind=kind,
-            title=str(data.get("title") or location),
-            location=location,
-            text=text,
-        )
+        if not isinstance(location, str) or not location.strip():
+            return None
+        if not isinstance(text, str) or not text.strip():
+            return None
+        title = data.get("title")
+        if not isinstance(title, str) or not title.strip():
+            title = location
+        return cls(kind=kind, title=title, location=location, text=text)
 
     def describe(self) -> str:
         words = len(self.text.split())
