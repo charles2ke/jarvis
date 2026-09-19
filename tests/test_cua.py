@@ -95,10 +95,24 @@ class ExecutionTests(unittest.TestCase):
             seen.append(action.kind)
             return "ok"
 
-        reply = execute("open Safari then press enter", runner=runner)
+        with mock.patch.dict("os.environ", {"JARVIS_CUA_ENABLED": "1"}, clear=True):
+            reply = execute("open Safari then press enter", runner=runner)
         self.assertEqual(seen, ["open", "key"])
         self.assertIn("1. open Safari — ok", reply)
         self.assertIn("2. press enter — ok", reply)
+
+    def test_execute_with_runner_still_requires_opt_in(self):
+        seen = []
+
+        def runner(action):
+            seen.append(action.kind)
+            return "ok"
+
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reply = execute("open Safari", runner=runner)
+        self.assertEqual(seen, [])
+        self.assertIn("Computer use plan for: open Safari", reply)
+        self.assertIn("JARVIS_CUA_ENABLED", reply)
 
     def test_actions_chart_lists_the_known_actions(self):
         chart = actions_chart()

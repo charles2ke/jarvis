@@ -299,7 +299,7 @@ def execute(
     """Plan ``instruction`` and, when enabled, run it on this computer."""
 
     parsed = plan(instruction)
-    if runner is None and not is_enabled():
+    if not is_enabled():
         return (
             f"{parsed.summary()}\n"
             f"I did not run it: set {ENABLE_ENV_VAR}=1 (and {COMMAND_ENV_VAR}) "
