@@ -180,6 +180,40 @@ class KnowledgeSearchTests(unittest.TestCase):
         self.assertEqual(len(knowledge.load(stored)), 1)
         self.assertEqual(knowledge.load("nonsense"), [])
 
+    def test_from_dict_requires_non_blank_string_text(self):
+        for text in (None, "", "   ", ["hi"], 123):
+            with self.subTest(text=text):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": "file", "location": "/tmp/n.md", "text": text}
+                    )
+                )
+
+    def test_from_dict_requires_non_blank_string_location(self):
+        for location in (None, "  ", 5):
+            with self.subTest(location=location):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": "file", "location": location, "text": "hi"}
+                    )
+                )
+
+    def test_from_dict_requires_string_kind(self):
+        for kind in (None, ["file"], {"file": 1}, 7):
+            with self.subTest(kind=kind):
+                self.assertIsNone(
+                    knowledge.Source.from_dict(
+                        {"kind": kind, "location": "/tmp/n.md", "text": "hi"}
+                    )
+                )
+
+    def test_from_dict_falls_back_to_location_for_blank_title(self):
+        source = knowledge.Source.from_dict(
+            {"kind": "file", "title": "  ", "location": "/tmp/n.md", "text": "hi"}
+        )
+        self.assertIsNotNone(source)
+        self.assertEqual(source.title, "/tmp/n.md")
+
 
 class KnowledgeSkillTests(unittest.TestCase):
     def setUp(self):
