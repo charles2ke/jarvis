@@ -125,7 +125,7 @@ def write_braille(text: str) -> str:
             cells.append(BLANK if char == " " else char)
             in_number = False
             continue
-        if char.isdigit():
+        if char in DIGIT_TO_CELL:
             if not in_number:
                 cells.append(NUMBER_SIGN)
                 in_number = True
@@ -133,7 +133,7 @@ def write_braille(text: str) -> str:
             continue
         in_number = False
         lowered = char.lower()
-        if lowered in LETTER_TO_CELL:
+        if char.isascii() and lowered in LETTER_TO_CELL:
             if char.isupper():
                 cells.append(CAPITAL_SIGN)
             cells.append(LETTER_TO_CELL[lowered])

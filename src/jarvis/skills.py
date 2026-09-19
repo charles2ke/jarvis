@@ -1262,7 +1262,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 name="braille",
                 description="Read braille cells aloud or write text in braille.",
                 patterns=[
-                    r"\b(?:read|decode|interpret|translate)\s+(?:this\s+|the\s+|some\s+)?brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
+                    r"\b(?:read|decode|interpret|translate)\s+(?:this\s+|the\s+|some\s+)?brail(?:le)?\b[:,]?\s*(?P<braille_text>.*?)\s*[.?!]*$",
                     r"^\s*(?:write|translate|convert|put|spell|say)\s+(?P<braille_text>.+?)\s+(?:in|into|to)\s+brail(?:le)?\s*[.?!]*$",
                     r"^\s*brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
                     r"^\s*(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*)[.?!]*\s*$",

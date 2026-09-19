@@ -33,6 +33,10 @@ class BrailleModuleTests(unittest.TestCase):
             write_braille("caf\u00e9")
         with self.assertRaises(BrailleError):
             write_braille("\u201c")
+        with self.assertRaises(BrailleError):
+            write_braille("\u0661")
+        with self.assertRaises(BrailleError):
+            write_braille("\u212a")
 
     def test_reading_plain_text_is_rejected(self) -> None:
         with self.assertRaises(BrailleError):
@@ -56,6 +60,10 @@ class BrailleSkillTests(unittest.TestCase):
 
     def test_read_braille_request(self) -> None:
         reply = self.assistant.respond("read braille ⠓⠑⠇⠇⠕")
+        self.assertIn("hello", reply)
+
+    def test_read_braille_request_with_terminal_punctuation(self) -> None:
+        reply = self.assistant.respond("read braille ⠓⠑⠇⠇⠕.")
         self.assertIn("hello", reply)
 
     def test_bare_braille_is_read(self) -> None:
