@@ -997,18 +997,20 @@ def find_event(name: str) -> Optional[HistoricalEvent]:
 
 
 def events_in_year(year: int) -> List[HistoricalEvent]:
-    """Return the events whose span covers ``year``."""
+    """Return every event whose span covers ``year``, in chronological order."""
 
-    return [
-        event
-        for event in EVENTS
-        if event.year == year
-        or (
-            event.start_year is not None
-            and event.end_year is not None
-            and event.start_year <= year <= event.end_year
-        )
-    ]
+    matches: List[HistoricalEvent] = []
+    for event in EVENTS:
+        bounds = [
+            bound
+            for bound in (event.start_year, event.end_year, event.year)
+            if bound is not None
+        ]
+        if not bounds:
+            continue
+        if min(bounds) <= year <= max(bounds):
+            matches.append(event)
+    return matches
 
 
 def describe_event(event: HistoricalEvent) -> str:

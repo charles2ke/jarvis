@@ -75,6 +75,12 @@ class WorldDataTests(unittest.TestCase):
         )
         self.assertEqual(atlas.events_in_year(1200), [])
 
+    def test_events_in_year_covers_every_year_of_a_span(self):
+        for year in range(1939, 1946):
+            with self.subTest(year=year):
+                names = [event.name for event in atlas.events_in_year(year)]
+                self.assertIn("The Second World War", names)
+
 
 class WorldSkillTests(unittest.TestCase):
     def setUp(self) -> None:
