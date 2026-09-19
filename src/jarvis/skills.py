@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia, knowledge, signlanguage, traffic
+from jarvis import encyclopedia, knowledge, signlanguage, sketch, traffic
 from jarvis.atlas import (
     City,
     Country,
@@ -569,7 +569,7 @@ def _role_model(match: Match[str], context: SkillContext, *, line: Callable[[], 
     return (
         f"I will hold the bar high with you{_addressed(context)}. "
         f"{line()} "
-        "Tell me what you decide and I will keep reminding you of it."
+        "Answer it for yourself now — naming it plainly is what turns it into a choice."
     )
 
 
@@ -1153,6 +1153,42 @@ def _fingerspell(match: Match[str], context: SkillContext) -> str:
     if skipped:
         lines.append("I skipped: " + " ".join(skipped) + ".")
     return "\n".join(lines)
+
+
+def _sketch_topics(match: Match[str], context: SkillContext) -> str:
+    names = sketch.subjects()
+    lines = [f"I can sketch {len(names)} things:"]
+    lines.extend(f"- {name}" for name in names)
+    lines.append("Ask me to 'draw a cat' for any of them.")
+    return "\n".join(lines)
+
+
+def _sketch(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    subject = ""
+    for key in ("subject", "subject2"):
+        subject = _clean_subject(groups.get(key) or "")
+        if subject:
+            break
+    if not subject:
+        return (
+            "What would you like me to sketch? Try 'draw a cat', or ask "
+            "'what can you sketch?'."
+        )
+    drawing = sketch.lookup(subject)
+    if drawing is not None:
+        return f"Here is my {drawing.subject} sketch:\n{sketch.render(drawing)}"
+    close = sketch.suggestions(subject)
+    if close:
+        return (
+            f"I cannot sketch '{subject}' yet. I could draw "
+            + " or ".join(close)
+            + " instead."
+        )
+    return (
+        f"I cannot sketch '{subject}' yet. Ask me 'what can you sketch?' to "
+        "see the gallery."
+    )
 
 
 def _help(match: Match[str], context: SkillContext) -> str:
@@ -2153,6 +2189,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_sign_language,
                 examples=["how do I sign thank you?"],
+            ),
+            Skill(
+                name="sketch-topics",
+                description="List the things I can sketch.",
+                patterns=[
+                    r"\b(?:what|which)\s+(?:things\s+)?can\s+you\s+(?:sketch|draw)\b",
+                    r"\b(?:sketch|drawing)\s+(?:topics|gallery|list|index|subjects)\b",
+                    r"\b(?:list|show)(?: me)?(?: your| the)?\s+(?:sketches|drawings)\b",
+                ],
+                handler=_sketch_topics,
+                examples=["what can you sketch?"],
+            ),
+            Skill(
+                name="sketch",
+                description="Draw a small ASCII sketch of something I know.",
+                patterns=[
+                    r"\b(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:draw|sketch)\s+(?:me\s+)?(?P<subject>[^?!]*)",
+                    r"\b(?:draw|sketch)\s+(?:me\s+)?(?:a picture of|an? image of|a sketch of)\s+(?P<subject>[^?!]*)",
+                    r"^\s*(?:please\s+)?(?:draw|sketch)\b[:,]?\s*(?P<subject>[^?!]*)",
+                    r"\b(?:i want|i'd like|id like|show me)\s+a\s+(?:sketch|drawing)\s+of\s+(?P<subject2>[^?!]*)",
+                ],
+                handler=_sketch,
+                examples=["draw a cat"],
             ),
             Skill(
                 name="help",

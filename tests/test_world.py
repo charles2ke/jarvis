@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from jarvis import atlas
 from jarvis.assistant import Assistant
@@ -58,9 +59,9 @@ class WorldDataTests(unittest.TestCase):
         self.assertEqual(
             names,
             [
+                "Decolonisation of Africa and Asia",
                 "The Cold War",
                 "The Apollo 11 Moon landing",
-                "Decolonisation of Africa and Asia",
             ],
         )
         self.assertTrue(atlas.events_in_year(1943))
@@ -74,6 +75,17 @@ class WorldDataTests(unittest.TestCase):
             ],
         )
         self.assertEqual(atlas.events_in_year(1200), [])
+
+    def test_events_in_year_with_incomplete_bounds(self):
+        event = atlas.HistoricalEvent(
+            "Synthetic event",
+            "1990-2000",
+            2000,
+            "An event with no explicit end year.",
+            start_year=1990,
+        )
+        with mock.patch.object(atlas, "EVENTS", (event,)):
+            self.assertEqual(atlas.events_in_year(1995), [event])
 
 
 class WorldSkillTests(unittest.TestCase):
