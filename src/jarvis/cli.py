@@ -8,6 +8,7 @@ from typing import Optional, Sequence
 from jarvis import __version__
 from jarvis.assistant import Assistant
 from jarvis.memory import DEFAULT_MEMORY_PATH, Memory
+from jarvis.speech import SpeechError, speak
 
 EXIT_COMMANDS = {"exit", "quit", ":q"}
 
@@ -31,8 +32,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run without persisting anything to disk.",
     )
+    parser.add_argument(
+        "--speak",
+        action="store_true",
+        help="Also read every reply aloud with the system text to speech voice.",
+    )
     parser.add_argument("--version", action="version", version=f"jarvis {__version__}")
     return parser
+
+
+def _say_aloud(reply: str) -> None:
+    try:
+        speak(reply)
+    except SpeechError as exc:
+        print(f"(speech unavailable: {exc})")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -41,7 +54,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     assistant = Assistant(memory=memory)
 
     if args.message:
-        print(assistant.respond(" ".join(args.message)))
+        reply = assistant.respond(" ".join(args.message))
+        print(reply)
+        if args.speak:
+            _say_aloud(reply)
         return 0
 
     print(assistant.greet())
@@ -54,7 +70,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if message.strip().lower() in EXIT_COMMANDS:
             print("jarvis> Goodbye.")
             break
-        print(f"jarvis> {assistant.respond(message)}")
+        reply = assistant.respond(message)
+        print(f"jarvis> {reply}")
+        if args.speak:
+            _say_aloud(reply)
     return 0
 
 
