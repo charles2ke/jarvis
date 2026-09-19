@@ -46,6 +46,9 @@ Useful flags:
 | story | `tell me a story` |
 | joke | `tell me a joke` |
 | uplift | `cheer me up` |
+| role-model | `be my role model` |
+| coach | `coach me` |
+| self-care | `how do I take care of myself` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -53,6 +56,8 @@ Useful flags:
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
 | science-solver | `solve 2x + 3 = 11` |
+| braille | `read braille ⠓⠑⠇⠇⠕` |
+| braille-alphabet | `braille alphabet` |
 | atlas | `what is the capital of Japan?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
@@ -87,7 +92,10 @@ requests to work on a marriage or relationship together, and
 `midlife-counseling` reflects on ageing, regret, purpose and what comes next;
 both point to a professional counsellor for ongoing work.
 `career-counselling` works through
-job loss, career moves, job searches and pay conversations.
+job loss, career moves, job searches and pay conversations. `role-model` talks
+about character and the person you want to become, `coach` turns goals and
+habits into a concrete next step, and `self-care` suggests a practical way to
+look after yourself.
 
 The `atlas` skill answers offline geography questions — capitals, the country
 behind a capital, continents, currencies, population estimates and the
@@ -136,6 +144,20 @@ The descriptions are hand-curated and offline, cover ASL only, and leave out
 the facial expressions and movement that carry much of the grammar: they are a
 starting point, not a substitute for learning from Deaf teachers and native
 signers.
+
+## Reading and writing braille
+
+The `braille` skill translates Grade 1 (uncontracted) English braille in both
+directions and never reaches the network:
+
+- `read braille ⠓⠑⠇⠇⠕` → `hello`
+- paste bare cells such as `⠠⠓⠊` and Jarvis reads them
+- `write Hello 42 in braille` → `⠠⠓⠑⠇⠇⠕⠀⠼⠙⠃`
+- `braille alphabet` prints the letter chart
+
+Capitals use the capital sign (dot 6) and numbers the number sign (dots
+3-4-5-6), with number mode ending at the next space. Letters, digits and common
+punctuation are supported; anything else is reported rather than guessed.
 
 ## Answering any query with a cloud session
 
