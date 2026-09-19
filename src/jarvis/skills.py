@@ -23,6 +23,7 @@ from jarvis.atlas import (
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
+from jarvis.science import solve_problem
 
 
 @dataclass
@@ -439,6 +440,28 @@ def _self_care(match: Match[str], context: SkillContext, *, idea: Callable[[], s
         f"{idea()} "
         "Pick one thing and let it be enough for today."
     )
+
+
+SCIENCE_HELP = (
+    "I can work through maths, physics, chemistry and biology problems. Try:\n"
+    "- solve 2x + 3 = 11\n"
+    "- solve x^2 - 5x + 6 = 0\n"
+    "- calculate the force with mass 5 kg and acceleration 2 m/s^2\n"
+    "- what is the molar mass of Ca(OH)2\n"
+    "- how many moles are in 36 g of H2O\n"
+    "- what is the pH of 0.001 M solution\n"
+    "- what is the complement of ATGC\n"
+    "- transcribe ATGC\n"
+    "- translate the RNA AUGGCC\n"
+    "- punnett square for Aa x Aa"
+)
+
+
+def _science(match: Match[str], context: SkillContext) -> str:
+    answer = solve_problem(match.string)
+    if answer:
+        return answer
+    return SCIENCE_HELP
 
 
 _MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -1301,6 +1324,32 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_current_date,
                 examples=["what is today's date?"],
+            ),
+            Skill(
+                name="science-solver",
+                description=(
+                    "Solve maths, physics, chemistry and biology problems step by step."
+                ),
+                patterns=[
+                    r"^\s*solve\b[^=]*=",
+                    r"\bsolve\b.*\b(equation|for [a-z]\b)",
+                    r"\b(?:help me with|solve|do)\b.*\b(maths?|mathematics|physics|chemistry|biology)\b.*\bproblem",
+                    r"\b(molar|molecular|formula|relative molecular) (mass|weight)\b",
+                    r"\bhow many moles\b",
+                    r"\bideal gas\b",
+                    r"\bpv\s*=\s*nrt\b",
+                    r"\bph\b[^\n]*\d",
+                    r"\b(reverse )?complement\b",
+                    r"\btranscrib(e|ing|ed)\b",
+                    r"\bgc content\b",
+                    r"\btranslate\b[^\n]*\b(dna|rna|codon|sequence|protein)\b",
+                    r"\b(punnett|monohybrid)\b",
+                    r"\b(genotype|phenotype|offspring)\b[^\n]*\bcross\b",
+                    r"\b(?:find|calculate|compute|work out|what(?:'s| is)|how (?:fast|far|long|much))\b[^\n]*\b(force|weight|kinetic energy|potential energy|momentum|density|voltage|current|resistance|pressure|acceleration|velocity|speed|work done|power)\b[^\n]*\d",
+                    r"\bhow (?:fast|far|long)\b[^\n]*\d",
+                ],
+                handler=_science,
+                examples=["solve 2x + 3 = 11"],
             ),
             Skill(
                 name="atlas",
