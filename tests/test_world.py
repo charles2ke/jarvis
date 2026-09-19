@@ -55,8 +55,24 @@ class WorldDataTests(unittest.TestCase):
 
     def test_events_in_year(self):
         names = [event.name for event in atlas.events_in_year(1969)]
-        self.assertEqual(names, ["The Apollo 11 Moon landing"])
+        self.assertEqual(
+            names,
+            [
+                "The Cold War",
+                "The Apollo 11 Moon landing",
+                "Decolonisation of Africa and Asia",
+            ],
+        )
         self.assertTrue(atlas.events_in_year(1943))
+        names = [event.name for event in atlas.events_in_year(1945)]
+        self.assertEqual(
+            names,
+            [
+                "The Second World War",
+                "Founding of the United Nations",
+                "Decolonisation of Africa and Asia",
+            ],
+        )
         self.assertEqual(atlas.events_in_year(1200), [])
 
 

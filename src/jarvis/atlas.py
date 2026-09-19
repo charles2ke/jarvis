@@ -629,6 +629,8 @@ class HistoricalEvent:
     year: Optional[int]
     summary: str
     aliases: Tuple[str, ...] = field(default_factory=tuple)
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 EVENTS: Tuple[HistoricalEvent, ...] = (
@@ -680,6 +682,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Plague spread along trade routes and killed perhaps a third of "
         "Europe's population, reshaping labour, wages and belief.",
         ("black death", "bubonic plague"),
+        start_year=1347,
+        end_year=1351,
     ),
     HistoricalEvent(
         "Gutenberg's printing press",
@@ -712,6 +716,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "From Copernicus to Newton, observation and mathematics replaced "
         "authority as the test of truth about nature.",
         ("scientific revolution",),
+        start_year=1500,
+        end_year=1699,
     ),
     HistoricalEvent(
         "The American Revolution",
@@ -720,6 +726,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Thirteen British colonies declared independence in 1776 and won it by "
         "1783, creating the United States.",
         ("american revolution", "american war of independence", "declaration of independence"),
+        start_year=1775,
+        end_year=1783,
     ),
     HistoricalEvent(
         "The French Revolution",
@@ -728,6 +736,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "The storming of the Bastille began a decade that abolished the French "
         "monarchy and spread the language of rights across Europe.",
         ("french revolution", "storming of the bastille"),
+        start_year=1789,
+        end_year=1799,
     ),
     HistoricalEvent(
         "The Industrial Revolution",
@@ -736,6 +746,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Steam power, factories and railways began in Britain and transformed "
         "work, cities and living standards worldwide.",
         ("industrial revolution",),
+        start_year=1760,
+        end_year=1840,
     ),
     HistoricalEvent(
         "Abolition of the transatlantic slave trade",
@@ -744,6 +756,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Britain banned the trade in 1807; emancipation followed through the "
         "century, ending with Brazil in 1888.",
         ("abolition of slavery", "slave trade abolition"),
+        start_year=1807,
+        end_year=1888,
     ),
     HistoricalEvent(
         "The First World War",
@@ -752,6 +766,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "A four-year industrial war that killed around 17 million people, "
         "ended four empires and redrew Europe and the Middle East.",
         ("world war i", "world war 1", "ww1", "wwi", "great war"),
+        start_year=1914,
+        end_year=1918,
     ),
     HistoricalEvent(
         "The Russian Revolution",
@@ -768,6 +784,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "A global slump that began with the Wall Street crash, throwing "
         "millions out of work and fuelling political extremism.",
         ("great depression", "wall street crash"),
+        start_year=1929,
+        end_year=1939,
     ),
     HistoricalEvent(
         "The Second World War",
@@ -777,6 +795,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "million people, including six million Jews murdered in the "
         "Holocaust, and ending with the first use of atomic weapons.",
         ("world war ii", "world war 2", "ww2", "wwii", "second world war"),
+        start_year=1939,
+        end_year=1945,
     ),
     HistoricalEvent(
         "Founding of the United Nations",
@@ -809,6 +829,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Four decades of rivalry between the United States and the Soviet "
         "Union, fought through proxy wars, espionage and an arms race.",
         ("cold war",),
+        start_year=1947,
+        end_year=1991,
     ),
     HistoricalEvent(
         "The Apollo 11 Moon landing",
@@ -825,6 +847,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Dozens of colonies became independent states; 1960 alone, the Year "
         "of Africa, saw seventeen African countries gain independence.",
         ("decolonisation", "decolonization", "year of africa"),
+        start_year=1945,
+        end_year=1975,
     ),
     HistoricalEvent(
         "Fall of the Berlin Wall",
@@ -849,6 +873,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "Tim Berners-Lee's design at CERN put the first website online in "
         "1991 and made the internet a public medium.",
         ("world wide web", "first website"),
+        start_year=1989,
+        end_year=1991,
     ),
     HistoricalEvent(
         "The 11 September attacks",
@@ -865,6 +891,8 @@ EVENTS: Tuple[HistoricalEvent, ...] = (
         "A coronavirus pandemic that closed borders and economies worldwide, "
         "answered by the fastest vaccine development in history.",
         ("covid", "covid-19", "coronavirus pandemic"),
+        start_year=2020,
+        end_year=2023,
     ),
 )
 
@@ -971,13 +999,15 @@ def find_event(name: str) -> Optional[HistoricalEvent]:
 def events_in_year(year: int) -> List[HistoricalEvent]:
     """Return the events whose span covers ``year``."""
 
-    matches = [event for event in EVENTS if event.year == year]
-    if matches:
-        return matches
     return [
         event
         for event in EVENTS
-        if event.year is not None and 0 <= year - event.year <= 10
+        if event.year == year
+        or (
+            event.start_year is not None
+            and event.end_year is not None
+            and event.start_year <= year <= event.end_year
+        )
     ]
 
 
