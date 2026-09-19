@@ -396,12 +396,12 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "Respond safely when you mention self-harm or suicidal thoughts."
                 ),
                 patterns=[
-                    r"\b(kill|harm|hurt|cut)ing? (myself|my self)\b",
+                    r"\b(?:kill(?:ing)?|harm(?:ing)?|hurt(?:ing)?|cut(?:ting)?) (myself|my self)\b",
                     r"\bkill myself\b",
                     r"\bsuicid(e|al)\b",
-                    r"\bend (my life|it all)\b",
+                    r"\bend(?:ing)? (my life|it all)\b",
                     r"\b(want|going) to die\b",
-                    r"\b(no reason|nothing) to live\b",
+                    r"\b((no reason|nothing) to live|(?:do not|don't|don’t|dont) want to live)\b",
                     r"\bself[- ]harm\b",
                 ],
                 handler=_crisis_support,

@@ -76,6 +76,17 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("988", reply)
         self.assertIn("emergency", reply)
 
+    def test_crisis_support_handles_direct_self_harm_phrases(self):
+        for message in (
+            "I want to harm myself",
+            "I want to hurt myself",
+            "I cut myself",
+            "I am thinking about ending my life",
+            "I don't want to live",
+        ):
+            with self.subTest(message=message):
+                self.assertIn("988", self.assistant.respond(message))
+
     def test_emotional_support_offers_comfort_and_a_tip(self):
         self.assistant.respond("my name is Charles")
         reply = self.assistant.respond("I need some emotional support")
