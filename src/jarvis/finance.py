@@ -692,7 +692,7 @@ def solve_money(text: str) -> Optional[str]:
         if found is None:
             continue
         try:
-            return handler(found)
+            return f"{handler(found)}\n{DISCLAIMER}"
         except (ValueError, ZeroDivisionError, OverflowError):
             continue
     return None

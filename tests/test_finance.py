@@ -65,6 +65,7 @@ class MoneyMathTests(unittest.TestCase):
         )
         self.assertIsNotNone(loan)
         self.assertIn("1,342.05", loan)
+        self.assertIn(finance.DISCLAIMER, loan)
 
         savings = finance.solve_money("invest 10k at 6% for 20 years")
         self.assertIsNotNone(savings)
@@ -132,6 +133,19 @@ class FinanceSkillRoutingTests(unittest.TestCase):
         answer = self.respond("monthly payment on a 250000 mortgage at 5% over 30 years")
         self.assertIn("1,342.05", answer)
         self.assertIn(finance.DISCLAIMER, answer)
+        self.assertEqual(answer.count(finance.DISCLAIMER), 1)
+
+    def test_reference_questions_with_dates_do_not_route_to_money_math(self):
+        self.assertTrue(self.respond("what was inflation in 2024?").startswith("Inflation:"))
+        self.assertTrue(self.respond("what is a mortgage in 2024?").startswith("Mortgages:"))
+
+    def test_economics_aliases_route_to_the_economics_skill(self):
+        self.assertTrue(self.respond("what is budgeting?").startswith("Budgeting:"))
+        self.assertTrue(self.respond("what are stocks?").startswith("Stocks and shares:"))
+        self.assertTrue(self.respond("what are shares?").startswith("Stocks and shares:"))
+        self.assertTrue(self.respond("what is insurance?").startswith("Insurance:"))
+        self.assertTrue(self.respond("what are taxes?").startswith("Taxes:"))
+        self.assertTrue(self.respond("what is unemployment?").startswith("Unemployment:"))
 
     def test_advice_questions_route_to_the_advisor(self):
         answer = self.respond("financial advice on investing")

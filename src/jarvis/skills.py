@@ -943,10 +943,16 @@ MONEY_MATH_HELP = (
 )
 
 
+def _finance_term_pattern() -> str:
+    terms = {key for entry in finance.ENTRIES for key in entry.keys}
+    escaped = (r"\s+".join(re.escape(part) for part in term.split()) for term in terms)
+    return "|".join(sorted(escaped, key=len, reverse=True))
+
+
 def _money_math(match: Match[str], context: SkillContext) -> str:
     answer = finance.solve_money(match.string)
     if answer:
-        return f"{answer}\n{finance.DISCLAIMER}"
+        return answer
     return MONEY_MATH_HELP
 
 
@@ -1905,13 +1911,18 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "budgets and emergency funds."
                 ),
                 patterns=[
-                    r"\b(?:compound interest|future value|monthly (?:payment|repayment)|"
-                    r"mortgage|loan|repayments?|inflation|emergency fund|"
-                    r"50/30/20|50 30 20|budget)\b[^?!]*\d",
-                    r"\d[^?!]*\b(?:compound interest|future value|monthly (?:payment|repayment)|"
-                    r"mortgage|inflation|emergency fund|50/30/20|50 30 20)\b",
-                    r"\b(?:invest|save|grow)\b[^?!]*\d[^?!]*(?:%|percent)",
+                    r"\b(?:monthly (?:payment|repayment)|mortgage|loan|repayments?)\b"
+                    r"[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\d[^?!]*\b(?:mortgage|loan)\b[^?!]*(?:%|percent)[^?!]*"
+                    r"\b(?:years?|yrs?)\b",
+                    r"\b(?:compound interest|future value|invest|save|grow)\b"
+                    r"[^?!]*\d[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\binflation\b[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
+                    r"\b(?:years?|yrs?)\b[^?!]*(?:%|percent)[^?!]*\binflation\b",
                     r"\b(?:double|doubling)\b[^?!]*\d\s*(?:%|percent)",
+                    r"\b(?:50/30/20|50 30 20)\b[^?!]*\d",
+                    r"\bbudget\b[^?!]*\d[^?!]*(?:a month|monthly|income|take-home|salary|pay)",
+                    r"\bemergency fund\b[^?!]*\d[^?!]*(?:a month|monthly|essentials?|spending)",
                 ],
                 handler=_money_math,
                 examples=["monthly payment on a 250000 mortgage at 5% over 30 years"],
@@ -2146,18 +2157,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ),
                 patterns=[
                     r"^\s*(?:economics|economy)\b[:,]?\s*(?P<subject>.*?)\s*[.?!]*\s*$",
-                    r"\b(?P<term>inflation|deflation|hyperinflation|consumer price index|"
-                    r"gdp|gross domestic product|gdp per capita|recession|business cycle|"
-                    r"supply and demand|interest rates?|real interest rate|compound interest|"
-                    r"rule of 72|central bank|monetary policy|federal reserve|"
-                    r"quantitative easing|fiscal policy|budget deficit|national debt|"
-                    r"stock market|equities|index funds?|etfs?|expense ratio|"
-                    r"diversification|asset allocation|rebalancing|emergency fund|"
-                    r"50/30/20|debt (?:snowball|avalanche)|credit score|credit utilisation|"
-                    r"amortisation|amortization|employer match|4 percent rule|"
-                    r"opportunity cost|sunk cost|exchange rates?|foreign exchange|"
-                    r"unemployment rate|marginal tax rate|effective tax rate|tax bracket|"
-                    r"capital gains tax|bond yields?)\b",
+                    r"\b(?P<term>" + _finance_term_pattern() + r")\b",
                 ],
                 handler=_economics,
                 examples=["what is inflation?"],
