@@ -43,6 +43,8 @@ Useful flags:
 | crisis-support | `I have been thinking about hurting myself` |
 | answer | `answer how does the skill registry work?` |
 | speak | `say out loud hello Charles` |
+| computer-use | `use the computer to open Safari then click on Sign in` |
+| cua-actions | `computer use actions` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
 | story | `tell me a story` |
@@ -280,6 +282,34 @@ It reads its configuration from the environment:
 - `JARVIS_COPILOT_API` — override the Copilot API base URL (default `https://api.githubcopilot.com`).
 
 If no token is configured, Jarvis explains what is missing instead of failing.
+
+## Computer use (CUA)
+
+The `computer-use` skill turns a plain English instruction into an ordered
+computer use agent plan:
+
+```bash
+jarvis "use the computer to open Safari then click on Sign in and type hello"
+jarvis "cua take a screenshot, scroll down 5, then press ctrl+s"
+jarvis "computer use actions"
+```
+
+Planning is offline and has no side effects: Jarvis prints the numbered steps
+it would take. Running them drives the real machine, so it is opt-in and reads
+its configuration from the environment:
+
+- `JARVIS_CUA_COMMAND` — the backend command that performs one action. Jarvis
+  appends the action and its arguments, for example
+  `my-cua-tool click "Save button"`.
+- `JARVIS_CUA_ENABLED` — set to `1` (or `true`/`yes`) to let Jarvis actually
+  run a plan. Without it, Jarvis replies with the plan and says how to enable
+  execution.
+
+The planner understands `open`, `click`, `double_click`, `right_click`,
+`move`, `drag`, `type`, `key`, `scroll`, `wait` and `screenshot`, split on
+`then`, `and` and commas. Steps it does not recognise are reported, together
+with how much of the instruction it did understand, rather than guessed at.
+The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
 ## Adding a skill
 
