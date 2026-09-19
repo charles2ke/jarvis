@@ -70,6 +70,8 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(CuaError):
             plan("wait 2 bananas")
         with self.assertRaises(CuaError):
+            plan("wait 2 minutes")
+        with self.assertRaises(CuaError):
             plan("scroll down 5 pages")
 
     def test_summary_numbers_every_step(self):

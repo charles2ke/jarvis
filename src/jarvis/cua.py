@@ -150,14 +150,14 @@ def _parse_step(step: str) -> Action:
         return Action("screenshot")
 
     found = re.match(
-        r"^(?:wait|pause|sleep)(?:\s+for)?(?:\s+(?P<seconds>\d+)(?:\s+seconds?)?)?$",
+        r"^(?:wait|pause|sleep)(?:\s+for)?(?:\s+(?P<seconds>\d+)(?:\s+seconds?)?)?\Z",
         lowered,
     )
     if found is not None:
         return Action("wait", value=found.group("seconds") or "1")
 
     found = re.match(
-        r"^scroll\s+(?P<direction>up|down|left|right)(?:\s+(?:by\s+)?(?P<amount>\d+))?$",
+        r"^scroll\s+(?P<direction>up|down|left|right)(?:\s+(?:by\s+)?(?P<amount>\d+))?\Z",
         lowered,
     )
     if found is not None:
