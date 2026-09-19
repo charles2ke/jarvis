@@ -8,6 +8,17 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
+from jarvis.atlas import (
+    Country,
+    countries_in,
+    describe,
+    display_name,
+    find_by_capital,
+    find_continent,
+    find_country,
+    format_population,
+    sentence,
+)
 from jarvis.calculator import CalculationError, calculate
 from jarvis.memory import Memory
 
@@ -478,6 +489,97 @@ def _joke(match: Match[str], context: SkillContext, *, gag: Callable[[], str]) -
     return gag()
 
 
+_ATLAS_UNKNOWN = (
+    "I do not have {subject} in my atlas yet. Ask me about a country such as "
+    "Japan, Brazil or Kenya."
+)
+
+
+def _capitalised(text: str) -> str:
+    """Return ``text`` with its first character upper-cased."""
+
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _atlas_group(match: Match[str], *names: str) -> Optional[str]:
+    """Return the first non-empty named group among ``names``."""
+
+    groups = match.groupdict()
+    for name in names:
+        value = groups.get(name)
+        if value:
+            stripped = value.strip().strip(".,!?;:")
+            if stripped:
+                return stripped
+    return None
+
+
+def _atlas_country(subject: str) -> Optional[Country]:
+    country = find_country(subject)
+    if country is not None:
+        return country
+    return find_by_capital(subject)
+
+
+def _atlas(match: Match[str], context: SkillContext) -> str:
+    subject = _atlas_group(match, "capital_city", "capital_city2")
+    if subject is not None:
+        country = find_by_capital(subject)
+        if country is not None:
+            return sentence(
+                f"{country.capital} is the capital of {display_name(country)}, "
+                f"in {country.continent}"
+            )
+        return _ATLAS_UNKNOWN.format(subject=f"a capital called '{subject}'")
+
+    subject = _atlas_group(match, "continent_list")
+    if subject is not None:
+        continent = find_continent(subject)
+        if continent is None:
+            return _ATLAS_UNKNOWN.format(subject=f"a continent called '{subject}'")
+        countries = countries_in(continent)
+        if not countries:
+            return f"My atlas has no countries listed for {continent}."
+        names = ", ".join(country.name for country in countries)
+        return f"Countries I know in {continent}: {names}."
+
+    for keys, describe_country in (
+        (
+            ("capital_of", "capital_of2"),
+            lambda c: sentence(f"The capital of {display_name(c)} is {c.capital}"),
+        ),
+        (
+            ("continent_of", "continent_of2"),
+            lambda c: sentence(_capitalised(f"{display_name(c)} is in {c.continent}")),
+        ),
+        (
+            ("currency_of", "currency_of2"),
+            lambda c: sentence(_capitalised(f"{display_name(c)} uses the {c.currency}")),
+        ),
+        (
+            ("population_of",),
+            lambda c: sentence(
+                _capitalised(
+                    f"{display_name(c)} has {format_population(c)} (rounded estimate)"
+                )
+            ),
+        ),
+        (("about",), lambda c: _capitalised(describe(c))),
+    ):
+        subject = _atlas_group(match, *keys)
+        if subject is None:
+            continue
+        country = _atlas_country(subject)
+        if country is None:
+            return _ATLAS_UNKNOWN.format(subject=f"'{subject}'")
+        return describe_country(country)
+
+    return (
+        "Ask me for a capital, continent, currency or population, for example "
+        "'what is the capital of Japan?'."
+    )
+
+
 def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     """Return a registry populated with the built-in Jarvis skills."""
 
@@ -659,6 +761,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_current_date,
                 examples=["what is today's date?"],
+            ),
+            Skill(
+                name="atlas",
+                description=(
+                    "Answer geography questions about countries, capitals, "
+                    "continents, currencies and populations."
+                ),
+                patterns=[
+                    r"\b(?:which|what) country(?:'s|s'| is)?\s*(?:capital is|has the capital)\s+(?P<capital_city>[^?.!]+)",
+                    r"\b(?P<capital_city2>[^?.!]+?)\s+is the capital of (?:which|what) country\b",
+                    r"\b(?:which|what)\s+countries\s+(?:are\s+)?(?:in|of|on)\s+(?P<continent_list>[^?.!]+)",
+                    r"\b(?:list|name|show)(?: me)?(?: the)?\s+countries\s+(?:in|of|on)\s+(?P<continent_list>[^?.!]+)",
+                    r"\bcapital (?:city )?of\s+(?P<capital_of>[^?.!]+)",
+                    r"\bwhat(?:'s| is)\s+(?P<capital_of2>[^?.!]+?)(?:'s|s')\s+capital\b",
+                    r"\b(?:what|which) continent is\s+(?P<continent_of>[^?.!]+?)\s+(?:in|on|part of)\b",
+                    r"\bcontinent (?:of|for)\s+(?P<continent_of2>[^?.!]+)",
+                    r"\bcurrency\s+(?:of|in|used in|used by)\s+(?P<currency_of>[^?.!]+)",
+                    r"\bwhat(?:'s| is)\s+(?P<currency_of2>[^?.!]+?)(?:'s|s')\s+currency\b",
+                    r"\bpopulation\s+(?:of|in)\s+(?P<population_of>[^?.!]+)",
+                    r"\btell me about the country\s+(?P<about>[^?.!]+)",
+                ],
+                handler=_atlas,
+                examples=["what is the capital of Japan?"],
             ),
             Skill(
                 name="calculator",
