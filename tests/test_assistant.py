@@ -106,6 +106,29 @@ class AssistantTests(unittest.TestCase):
         reply = self.assistant.respond("I have a crush on someone at work")
         self.assertIn("rejection", reply)
 
+    def test_career_counselling_handles_job_loss_and_moves(self):
+        reply = self.assistant.respond("I was laid off last month")
+        self.assertIn("identity", reply)
+        self.assertIn("mentor", reply)
+        move = self.assistant.respond("I am thinking about changing careers")
+        self.assertIn("trade-offs", move)
+
+    def test_career_counselling_handles_job_search_and_pay(self):
+        self.assertIn(
+            "numbers game", self.assistant.respond("my job search keeps failing")
+        )
+        self.assertIn(
+            "evidence", self.assistant.respond("how do I ask for a raise?")
+        )
+
+    def test_career_counselling_addresses_you_by_name(self):
+        self.assistant.respond("my name is Charles")
+        self.assertIn("Charles", self.assistant.respond("I hate my job"))
+
+    def test_crisis_support_still_wins_over_career_counselling(self):
+        reply = self.assistant.respond("I lost my job and I want to die")
+        self.assertIn("988", reply)
+
     def test_crisis_support_still_wins_over_support_skills(self):
         reply = self.assistant.respond(
             "my girlfriend left me and I want to die"
