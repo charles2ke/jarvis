@@ -1,12 +1,16 @@
 import unittest
+from datetime import datetime
 
 from jarvis import encyclopedia
 from jarvis.assistant import Assistant
 from jarvis.memory import Memory
 
 
+FIXED_NOW = datetime(2026, 9, 18, 14, 30)
+
+
 def make_assistant() -> Assistant:
-    return Assistant(memory=Memory(None))
+    return Assistant(memory=Memory(None), now=lambda: FIXED_NOW)
 
 
 class EncyclopediaLookupTests(unittest.TestCase):
