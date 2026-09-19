@@ -240,6 +240,137 @@ def _clear_mood_history(match: Match[str], context: SkillContext) -> str:
     return "I have cleared your mood history."
 
 
+_COPING_SUGGESTIONS: tuple[str, ...] = (
+    "Try a slow breath in for four counts and out for six; it tells your body "
+    "the danger has passed.",
+    "Name one small thing you can do in the next ten minutes — a glass of "
+    "water, a short walk, opening a window.",
+    "Write down the thought that keeps circling. On paper it is usually "
+    "smaller than it feels.",
+    "Reach out to one person today, even with a single message. Connection "
+    "does a lot of the heavy lifting.",
+    "Give yourself permission to do less today. Rest is not a reward you have "
+    "to earn.",
+)
+
+
+def _next_suggestion(context: SkillContext) -> str:
+    index = context.memory.get("support_tip_index", 0)
+    if not isinstance(index, int) or index < 0:
+        index = 0
+    context.memory.set("support_tip_index", (index + 1) % len(_COPING_SUGGESTIONS))
+    return _COPING_SUGGESTIONS[index % len(_COPING_SUGGESTIONS)]
+
+
+def _emotional_support(match: Match[str], context: SkillContext) -> str:
+    name = context.memory.get("user_name")
+    address = f" {name}" if name else ""
+    return (
+        f"I am here with you{address}, and what you are going through sounds "
+        "genuinely hard. You do not have to hold it together on your own right "
+        f"now. {_next_suggestion(context)} "
+        "Tell me more whenever you are ready — I am listening."
+    )
+
+
+_LOVE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "broke up",
+            "break up",
+            "breakup",
+            "broken up",
+            "heartbroken",
+            "heartbreak",
+            "dumped",
+            "left me",
+            "divorce",
+            "ex",
+        ),
+        "Losing a relationship is real grief, and it rarely heals in a straight "
+        "line. What do you miss most — the person, or the future you had "
+        "pictured with them?",
+    ),
+    (
+        (
+            "fight",
+            "fighting",
+            "argue",
+            "argued",
+            "arguing",
+            "argument",
+            "conflict",
+            "not talking",
+            "jealous",
+            "cheated",
+            "betrayed",
+            "trust",
+        ),
+        "Conflict with someone you love hurts because the relationship matters. "
+        "What is the need underneath the argument that you have not been able "
+        "to say out loud yet?",
+    ),
+    (
+        (
+            "crush",
+            "in love",
+            "falling for",
+            "ask out",
+            "asking out",
+            "confess",
+            "tell them how i feel",
+            "date",
+            "dating",
+            "rejected",
+            "rejection",
+            "unrequited",
+        ),
+        "New feelings are exciting and exposing at the same time. What would "
+        "you want them to know about you if fear of rejection were not in the "
+        "room?",
+    ),
+    (
+        (
+            "lonely",
+            "alone",
+            "single",
+            "unloved",
+            "nobody loves me",
+            "no one loves me",
+        ),
+        "Wanting to be loved is one of the most human things there is, not a "
+        "weakness. Where in your life do you already feel even a little "
+        "cared for?",
+    ),
+)
+
+_LOVE_DEFAULT_REFLECTION = (
+    "Love asks a lot of us. What matters most to you about this relationship "
+    "right now?"
+)
+
+_LOVE_CLOSING = (
+    "Whatever you decide, you deserve to be treated with respect — including "
+    "by yourself."
+)
+
+
+def _love_support(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _LOVE_DEFAULT_REFLECTION
+    for keywords, candidate in _LOVE_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            "Thank you for trusting me with something this personal.",
+            reflection,
+            _LOVE_CLOSING,
+        ]
+    )
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -365,6 +496,32 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_mood_history,
                 examples=["how have I been feeling"],
+            ),
+            Skill(
+                name="love-support",
+                description=(
+                    "Talk through relationships, heartbreak and matters of the heart."
+                ),
+                patterns=[
+                    r"\b(broke up|break ?up|broken up|heartbroken|heartbreak|dumped me|divorc(e|ed|ing))\b",
+                    r"\b(my|our) (girlfriend|boyfriend|partner|husband|wife|spouse|fianc(e|ée|é)|ex|marriage|relationship|crush)\b",
+                    r"\b(i('m| am)? ?(in love|falling (in love|for))|i have a crush|unrequited)\b",
+                    r"\b(love life|dating|romantic|relationship advice|ask (him|her|them) out)\b",
+                    r"\b(nobody|no one) loves me\b",
+                ],
+                handler=_love_support,
+                examples=["my girlfriend and I keep fighting"],
+            ),
+            Skill(
+                name="emotional-support",
+                description="Offer comfort, encouragement and a coping suggestion.",
+                patterns=[
+                    r"\b(i need (some )?(emotional )?support|support me|comfort me|cheer me up|encourage me)\b",
+                    r"\b(i can'?t (cope|take|handle) (it|this|any ?more)|i('m| am) (not okay|not ok)|falling apart)\b",
+                    r"\b(having a (really )?(hard|rough|tough|bad) (time|day|week)|going through a lot)\b",
+                ],
+                handler=_emotional_support,
+                examples=["I need some emotional support"],
             ),
             Skill(
                 name="psychiatrist",

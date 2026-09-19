@@ -52,13 +52,18 @@ Useful flags:
 | psychiatrist | `I feel anxious about work` |
 | mood-history | `how have I been feeling` |
 | clear-mood-history | `clear my mood history` |
+| love-support | `my girlfriend and I keep fighting` |
+| emotional-support | `I need some emotional support` |
 | help | `help` |
 | farewell | `goodbye` |
 
 The `psychiatrist` skill offers reflective, empathetic listening and keeps a
 simple mood log; it is not a substitute for professional care. Messages that
 mention self-harm or suicidal thoughts are answered first by `crisis-support`,
-which points to emergency and crisis lines.
+which points to emergency and crisis lines. `emotional-support` answers direct
+requests for comfort with validation and a rotating coping suggestion, and
+`love-support` talks through relationships, heartbreak, conflict and new
+feelings.
 
 ## Adding a skill
 

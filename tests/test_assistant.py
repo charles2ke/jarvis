@@ -67,6 +67,31 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("988", reply)
         self.assertIn("emergency", reply)
 
+    def test_emotional_support_offers_comfort_and_a_tip(self):
+        self.assistant.respond("my name is Charles")
+        reply = self.assistant.respond("I need some emotional support")
+        self.assertIn("Charles", reply)
+        self.assertIn("four counts", reply)
+        second = self.assistant.respond("I am having a really hard day")
+        self.assertNotEqual(reply, second)
+
+    def test_love_support_handles_heartbreak_and_conflict(self):
+        reply = self.assistant.respond("we broke up last week and I am heartbroken")
+        self.assertIn("grief", reply)
+        self.assertIn("respect", reply)
+        conflict = self.assistant.respond("my girlfriend and I keep fighting")
+        self.assertIn("Conflict", conflict)
+
+    def test_love_support_handles_crush(self):
+        reply = self.assistant.respond("I have a crush on someone at work")
+        self.assertIn("rejection", reply)
+
+    def test_crisis_support_still_wins_over_support_skills(self):
+        reply = self.assistant.respond(
+            "my girlfriend left me and I want to die"
+        )
+        self.assertIn("988", reply)
+
     def test_help_lists_skills(self):
         reply = self.assistant.respond("help")
         self.assertIn("calculator", reply)
