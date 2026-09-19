@@ -70,6 +70,10 @@ Useful flags:
 | midlife-counseling | `I think I am having a midlife crisis` |
 | career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| sign-language-alphabet | `sign language alphabet` |
+| fingerspell | `fingerspell Charles` |
+| sign-language-topics | `what signs do you know` |
+| sign-language | `how do I sign thank you?` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
 | gmdss | `what is an EPIRB?` |
@@ -127,6 +131,21 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+## Sign language
+
+The `sign-language` skill explains sign language and describes, in words, how
+to make everyday American Sign Language (ASL) signs — `how do I sign thank
+you?`, `what is the sign for water`, `how do you say hello in sign language`.
+`sign-language-alphabet` walks through the manual alphabet, `fingerspell`
+spells a word or name letter by letter (`fingerspell Charles`, `spell hi in
+ASL`), and `what signs do you know` lists every sign in the data set. Signs
+Jarvis does not know are answered with a suggestion to fingerspell them.
+
+The descriptions are hand-curated and offline, cover ASL only, and leave out
+the facial expressions and movement that carry much of the grammar: they are a
+starting point, not a substitute for learning from Deaf teachers and native
+signers.
 
 The `gmdss` skill is an offline reference for the Global Maritime Distress and
 Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
