@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia, signlanguage, traffic
+from jarvis import encyclopedia, finance, signlanguage, traffic
 from jarvis.atlas import (
     City,
     Country,
@@ -932,6 +932,55 @@ def _gmdss_topics(match: Match[str], context: SkillContext) -> str:
     return "\n".join(lines)
 
 
+MONEY_MATH_HELP = (
+    "I can work through everyday money maths. Try:\n"
+    "- invest 10000 at 6% for 20 years adding 200 a month\n"
+    "- monthly payment on a 250000 mortgage at 5% over 30 years\n"
+    "- what is 50000 worth in 10 years with 3% inflation\n"
+    "- how long does money double at 7%\n"
+    "- 50/30/20 budget on 3000 a month\n"
+    "- emergency fund on 1800 a month of essentials"
+)
+
+
+def _money_math(match: Match[str], context: SkillContext) -> str:
+    answer = finance.solve_money(match.string)
+    if answer:
+        return f"{answer}\n{finance.DISCLAIMER}"
+    return MONEY_MATH_HELP
+
+
+def _financial_advisor(match: Match[str], context: SkillContext) -> str:
+    return finance.advice(match.string)
+
+
+def _economics(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    subject = _clean_subject(groups.get("subject") or groups.get("term") or "")
+    if not subject or subject.lower() in {"economics", "economy"}:
+        entry = finance.lookup("Economics")
+        assert entry is not None  # The overview entry is always present.
+        return f"{entry.title}: {entry.summary}"
+    entry = finance.lookup(subject)
+    if entry is not None:
+        return f"{entry.title}: {entry.summary}"
+    lines = [f"I do not have an economics entry for '{subject}' yet."]
+    close = finance.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'economics topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _economics_topics(match: Match[str], context: SkillContext) -> str:
+    titles = finance.topics()
+    lines = [f"I have {len(titles)} economics and finance entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is inflation?' or 'financial advice on investing'.")
+    return "\n".join(lines)
+
+
 def _answer(
     match: Match[str],
     context: SkillContext,
@@ -1850,6 +1899,24 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["read braille ⠓⠑⠇⠇⠕"],
             ),
             Skill(
+                name="money-math",
+                description=(
+                    "Work out compound growth, loan payments, inflation, "
+                    "budgets and emergency funds."
+                ),
+                patterns=[
+                    r"\b(?:compound interest|future value|monthly (?:payment|repayment)|"
+                    r"mortgage|loan|repayments?|inflation|emergency fund|"
+                    r"50/30/20|50 30 20|budget)\b[^?!]*\d",
+                    r"\d[^?!]*\b(?:compound interest|future value|monthly (?:payment|repayment)|"
+                    r"mortgage|inflation|emergency fund|50/30/20|50 30 20)\b",
+                    r"\b(?:invest|save|grow)\b[^?!]*\d[^?!]*(?:%|percent)",
+                    r"\b(?:double|doubling)\b[^?!]*\d\s*(?:%|percent)",
+                ],
+                handler=_money_math,
+                examples=["monthly payment on a 250000 mortgage at 5% over 30 years"],
+            ),
+            Skill(
                 name="science-solver",
                 description=(
                     "Solve maths, physics, chemistry and biology problems step by step."
@@ -2035,6 +2102,65 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_gmdss,
                 examples=["what is an EPIRB?"],
+            ),
+            Skill(
+                name="financial-advisor",
+                description=(
+                    "Coach you through budgeting, saving, debt, investing, "
+                    "retirement and money worries."
+                ),
+                patterns=[
+                    r"\b(?:financial|finance|money|budget(?:ing)?|investment|investing|"
+                    r"debt|retirement|savings?|mortgage|pension)\s+(?:advice|advis[eo]r|"
+                    r"coach|coaching|planner|guidance|tips|help)\b",
+                    r"\b(?:be|act as|you are)\s+my\s+(?:financial|money|investment)\s+"
+                    r"(?:advis[eo]r|coach|planner)\b",
+                    r"\bhow (?:do|should|can|would)\s+(?:i|we)\s+(?:start\s+)?"
+                    r"(?:save|saving|invest|investing|budget|budgeting|retire|"
+                    r"pay off|get out of debt|manage (?:my|our) money|build (?:an\s+)?"
+                    r"emergency fund)\b",
+                    r"\bshould\s+i\s+(?:invest|save|pay off|buy a (?:house|home))\b",
+                    r"\b(?:advice|help)\s+(?:on|with)\s+(?:my\s+)?(?:money|finances|"
+                    r"budget|debt|savings|investing|investments|retirement)\b",
+                    r"\bi(?:'m| am)\s+(?:bad with money|broke|living paycheck to paycheck|"
+                    r"worried about money|struggling with (?:money|debt|bills))\b",
+                ],
+                handler=_financial_advisor,
+                examples=["how do I pay off debt", "financial advice on investing"],
+            ),
+            Skill(
+                name="economics-topics",
+                description="List the economics and finance entries I can explain.",
+                patterns=[
+                    r"\b(?:economics|economy|finance|financial)\s+(?:topics|entries|index|glossary)\b",
+                    r"\b(?:list|show)(?: me)?(?: your)? (?:economics|finance) (?:topics|entries|terms)\b",
+                ],
+                handler=_economics_topics,
+                examples=["economics topics"],
+            ),
+            Skill(
+                name="economics",
+                description=(
+                    "Explain economics and personal finance: inflation, GDP, "
+                    "interest rates, investing, debt, taxes and more."
+                ),
+                patterns=[
+                    r"^\s*(?:economics|economy)\b[:,]?\s*(?P<subject>.*?)\s*[.?!]*\s*$",
+                    r"\b(?P<term>inflation|deflation|hyperinflation|consumer price index|"
+                    r"gdp|gross domestic product|gdp per capita|recession|business cycle|"
+                    r"supply and demand|interest rates?|real interest rate|compound interest|"
+                    r"rule of 72|central bank|monetary policy|federal reserve|"
+                    r"quantitative easing|fiscal policy|budget deficit|national debt|"
+                    r"stock market|equities|index funds?|etfs?|expense ratio|"
+                    r"diversification|asset allocation|rebalancing|emergency fund|"
+                    r"50/30/20|debt (?:snowball|avalanche)|credit score|credit utilisation|"
+                    r"amortisation|amortization|employer match|4 percent rule|"
+                    r"opportunity cost|sunk cost|exchange rates?|foreign exchange|"
+                    r"unemployment rate|marginal tax rate|effective tax rate|tax bracket|"
+                    r"capital gains tax|bond yields?)\b",
+                ],
+                handler=_economics,
+                examples=["what is inflation?"],
             ),
             Skill(
                 name="encyclopedia-topics",
