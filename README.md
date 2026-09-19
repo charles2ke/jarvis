@@ -40,6 +40,7 @@ Useful flags:
 | Skill | Example |
 | --- | --- |
 | crisis-support | `I have been thinking about hurting myself` |
+| answer | `answer how does the skill registry work?` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
 | story | `tell me a story` |
@@ -76,6 +77,27 @@ heartbreak, conflict and new feelings. `couples-counseling` answers explicit
 requests to work on a marriage or relationship together, and
 `midlife-counseling` reflects on ageing, regret, purpose and what comes next;
 both point to a professional counsellor for ongoing work.
+
+## Answering any query with a cloud session
+
+The `answer` skill hands a question to a GitHub Copilot cloud session running on
+this repository with the Opus 5 max model (`claude-opus-5`, reasoning effort
+`max`), and replies with a link to the session:
+
+```bash
+jarvis "answer how does the skill registry resolve matches?"
+jarvis "ask the cloud what does memory.py persist?"
+jarvis "spawn a cloud session on this repo to answer: who owns the CLI?"
+```
+
+It reads its configuration from the environment:
+
+- `JARVIS_GITHUB_TOKEN` (or `GITHUB_TOKEN` / `GH_TOKEN`) — token used to start the session.
+- `JARVIS_GITHUB_REPO` (or `GITHUB_REPOSITORY`) — `owner/repo` to run on (defaults to the `origin` remote of the checkout).
+- `JARVIS_CLOUD_MODEL` — override the model (default `claude-opus-5`).
+- `JARVIS_COPILOT_API` — override the Copilot API base URL (default `https://api.githubcopilot.com`).
+
+If no token is configured, Jarvis explains what is missing instead of failing.
 
 ## Adding a skill
 
