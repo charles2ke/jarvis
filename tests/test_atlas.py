@@ -56,6 +56,10 @@ class AtlasSkillTests(unittest.TestCase):
             self.assistant.respond("capital of the united states"),
             "The capital of the United States is Washington, D.C.",
         )
+        self.assertEqual(
+            self.assistant.respond("what is the capital of the U.S.?"),
+            "The capital of the United States is Washington, D.C.",
+        )
 
     def test_country_from_capital(self):
         self.assertEqual(
@@ -65,6 +69,10 @@ class AtlasSkillTests(unittest.TestCase):
         self.assertIn(
             "Kenya",
             self.assistant.respond("Nairobi is the capital of which country?"),
+        )
+        self.assertEqual(
+            self.assistant.respond("which country's capital is Washington, D.C.?"),
+            "Washington, D.C. is the capital of the United States, in North America.",
         )
 
     def test_continent_currency_and_population(self):
