@@ -61,6 +61,8 @@ Useful flags:
 | clear-mood-history | `clear my mood history` |
 | love-support | `my girlfriend and I keep fighting` |
 | emotional-support | `I need some emotional support` |
+| encyclopedia | `what is gravity?` |
+| encyclopedia-topics | `encyclopedia topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -93,6 +95,14 @@ questions and shows the formula it used:
 It is registered before `calculator`, so plain arithmetic such as
 `calculate 21 * 2` is still answered by the calculator. Questions it does not
 recognise get a short list of supported examples instead of a wrong answer.
+
+The `encyclopedia` skill answers factual questions (`what is ...`, `who was
+...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
+articles — it never reaches the network. Lookups ignore case, punctuation and
+aliases, tolerate small typos, and suggest close titles when a topic is
+missing. It is registered last so that `what is the time?`, `what is my name?`
+and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
+list every entry.
 
 ## Answering any query with a cloud session
 
