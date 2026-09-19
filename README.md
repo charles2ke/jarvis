@@ -39,6 +39,12 @@ Useful flags:
 
 | Skill | Example |
 | --- | --- |
+| crisis-support | `I have been thinking about hurting myself` |
+| mental-health | `I feel anxious` |
+| console | `I am having a rough day` |
+| story | `tell me a story` |
+| joke | `tell me a joke` |
+| uplift | `cheer me up` |
 | greeting | `hello` |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
@@ -50,6 +56,11 @@ Useful flags:
 | clear-notes | `clear my notes` |
 | help | `help` |
 | farewell | `goodbye` |
+
+The wellbeing skills are registered first so that a message such as
+`hi, I want to kill myself` reaches `crisis-support` rather than `greeting`.
+Jarvis is a companion, not a substitute for professional help: `crisis-support`
+always points to real help lines.
 
 ## Adding a skill
 
