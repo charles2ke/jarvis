@@ -2281,7 +2281,8 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"(?P<path>[^\s]*)(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                     r"^\s*(?:add|use|load|index|import|learn\s+from|read)\s+"
                     r"(?P<path>(?:[~./]|[A-Za-z]:\\)\S*"
-                    r"|[\w.-]+(?:/[\w.-]+)*\.(?:txt|md|markdown|rst|csv|json|ya?ml|html?|xml|py|log|ini|toml|cfg))"
+                    r"|[\w.-]+(?:/[\w.-]+)+"
+                    r"|[\w.-]+\.(?:txt|md|markdown|rst|csv|json|ya?ml|html?|xml|py|log|ini|toml|cfg))"
                     r"(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
                 ],
                 handler=_add_knowledge_file,

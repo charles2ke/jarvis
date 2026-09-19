@@ -1,3 +1,4 @@
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -278,6 +279,25 @@ class KnowledgeSkillTests(unittest.TestCase):
     def test_add_nested_relative_path_is_treated_as_a_file(self):
         reply = self.assistant.respond("add src/jarvis/knowledge.py as a knowledge source")
         self.assertIn("Added the file 'knowledge.py'", reply)
+
+    def test_add_nested_relative_path_without_extension_is_treated_as_a_file(self):
+        with TemporaryDirectory() as tmp:
+            nested = Path(tmp) / "docs"
+            nested.mkdir()
+            (nested / "handbook").write_text("Zephyr ships monthly.\n", encoding="utf-8")
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                reply = self.assistant.respond("add docs/handbook as a knowledge source")
+            finally:
+                os.chdir(cwd)
+        self.assertIn("Added the file 'handbook'", reply)
+
+    def test_nested_domain_path_is_still_read_as_a_website(self):
+        opener = mock.Mock(return_value=FakeResponse(PAGE))
+        with mock.patch("urllib.request.urlopen", opener):
+            reply = self.assistant.respond("add example.com/docs as a knowledge source")
+        self.assertIn("Added the website", reply)
 
     def test_adding_the_same_source_twice_does_not_duplicate(self):
         opener = mock.Mock(return_value=FakeResponse(PAGE))
