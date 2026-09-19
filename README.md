@@ -71,8 +71,14 @@ Useful flags:
 | midlife-counseling | `I think I am having a midlife crisis` |
 | career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| sign-language-alphabet | `sign language alphabet` |
+| fingerspell | `fingerspell Charles` |
+| sign-language-topics | `what signs do you know` |
+| sign-language | `how do I sign thank you?` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
+| gmdss | `what is an EPIRB?` |
+| gmdss-topics | `gmdss topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -147,6 +153,29 @@ Jarvis converts loosely written requests into the plain text its skills expect:
 Rewriting only happens when the original wording does not already reach a more
 specific skill, so existing phrasing keeps its usual routing. The helpers live
 in `jarvis.nl` (`normalize`, `flatten`, `number_to_words`, `words_to_number`).
+
+## Sign language
+
+The `sign-language` skill explains sign language and describes, in words, how
+to make everyday American Sign Language (ASL) signs — `how do I sign thank
+you?`, `what is the sign for water`, `how do you say hello in sign language`.
+`sign-language-alphabet` walks through the manual alphabet, `fingerspell`
+spells a word or name letter by letter (`fingerspell Charles`, `spell hi in
+ASL`), and `what signs do you know` lists every sign in the data set. Signs
+Jarvis does not know are answered with a suggestion to fingerspell them.
+
+The descriptions are hand-curated and offline, cover ASL only, and leave out
+the facial expressions and movement that carry much of the grammar: they are a
+starting point, not a substitute for learning from Deaf teachers and native
+signers.
+
+The `gmdss` skill is an offline reference for the Global Maritime Distress and
+Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
+the mayday/pan-pan/securite priorities, the Morse SOS it replaced in 1999 and
+the distress alert procedure. It is registered before `encyclopedia` so that
+`what is an EPIRB?` reaches the maritime entries, and after `crisis-support` so
+that a message such as `mayday, I want to kill myself` still reaches the help
+lines. Say `gmdss topics` to list every entry.
 
 ## Reading and writing braille
 
