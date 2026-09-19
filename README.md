@@ -55,6 +55,7 @@ Useful flags:
 | time | `what is the time?` |
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
+| number-words | `spell out 42` |
 | science-solver | `solve 2x + 3 = 11` |
 | braille | `read braille ⠓⠑⠇⠇⠕` |
 | braille-alphabet | `braille alphabet` |
@@ -131,6 +132,27 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+## Natural language to text
+
+Jarvis converts loosely written requests into the plain text its skills expect:
+
+- `number-words` spells numbers out and reads them back: `spell out 42`,
+  `42 in words`, `how do you spell 1005`, `forty-two in digits`,
+  `write one hundred and five in digits`.
+- Multi-line input and literal escapes are flattened, so `calculate\n  21 *\n 2`
+  still reaches the calculator.
+- Polite wrappers are trimmed and spelled numbers and operator words are
+  rewritten, so `Jarvis, please tell me a joke` and
+  `what is twenty one times two` route like `tell me a joke` and
+  `what is 21 * 2`.
+- The cloud `answer` skill also understands plain-text phrasings such as
+  `answer in plain text: ...`, `give me a text answer to ...` and
+  `turn this into text: ...`.
+
+Rewriting only happens when the original wording does not already reach a more
+specific skill, so existing phrasing keeps its usual routing. The helpers live
+in `jarvis.nl` (`normalize`, `flatten`, `number_to_words`, `words_to_number`).
 
 ## Sign language
 

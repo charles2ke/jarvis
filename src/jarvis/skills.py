@@ -31,6 +31,7 @@ from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis import maritime
 from jarvis.memory import Memory
+from jarvis.nl import number_to_words, words_to_number
 from jarvis.science import solve_problem
 
 
@@ -137,6 +138,30 @@ def _calculate(match: Match[str], context: SkillContext) -> str:
     if isinstance(result, float) and result.is_integer():
         result = int(result)
     return f"{expression} = {result}"
+
+
+def _number_words(match: Match[str], context: SkillContext) -> str:
+    groups = {
+        name: value for name, value in match.groupdict().items() if value is not None
+    }
+    digits = next(
+        (value for name, value in groups.items() if name.startswith("to_words")), None
+    )
+    if digits is not None:
+        try:
+            return f"{int(digits)} in words is {number_to_words(int(digits))}."
+        except ValueError as exc:
+            return str(exc)
+    words = next(
+        (value for name, value in groups.items() if name.startswith("to_digits")), ""
+    ).strip()
+    value = words_to_number(words)
+    if value is None:
+        return (
+            "I could not read that as a number. Try 'forty-two in digits' or "
+            "'spell out 42'."
+        )
+    return f"{words} in digits is {value}."
 
 
 def _add_note(match: Match[str], context: SkillContext) -> str:
@@ -1246,9 +1271,12 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "repository with the Opus 5 max model."
                 ),
                 patterns=[
+                    r"^\s*answer (?:in (?:plain )?text|as text)[:,]?\s+(?P<query>.+)$",
                     r"^\s*answer(?: me)?(?: this)?[:,]?\s+(?P<query>.+)$",
                     r"^\s*ask (?:the )?(?:cloud|copilot|github)(?: session)?[:,]?\s+(?P<query>.+)$",
                     r"^\s*(?:spawn|start|open) (?:a )?(?:git(?:hub)? )?cloud session(?: on this repo(?:sitory)?)?(?: to answer)?[:,]?\s+(?P<query>.+)$",
+                    r"^\s*(?:give|get) me (?:a |the )?(?:plain[- ]?text |text |written )?answer (?:to|for|about)[:,]?\s+(?P<query>.+)$",
+                    r"^\s*(?:put|turn) (?:this|the following|it) into text[:,]?\s+(?P<query>.+)$",
                 ],
                 handler=_answer,
                 examples=["answer how does the skill registry resolve matches?"],
@@ -1540,6 +1568,19 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_atlas,
                 examples=["what is the capital of Japan?"],
+            ),
+            Skill(
+                name="number-words",
+                description="Spell numbers out in words or turn spelled numbers back into digits.",
+                patterns=[
+                    r"^\s*(?:spell|write|say)(?:\s+out)?\s+(?:the\s+number\s+)?(?P<to_words>-?\d+)(?:\s+(?:out\s+)?(?:in|as)\s+(?:words|english|text))?\s*[.?!]*\s*$",
+                    r"^\s*how\s+do\s+(?:you|i)\s+(?:spell|write|say)\s+(?:the\s+number\s+)?(?P<to_words2>-?\d+)\s*[.?!]*\s*$",
+                    r"^\s*(?P<to_words3>-?\d+)\s+(?:in|as)\s+(?:words|english|text)\s*[.?!]*\s*$",
+                    r"^\s*(?:convert|write|put|turn|translate)\s+(?P<to_digits>[a-z][a-z\s-]*?)\s+(?:in|into|to)\s+(?:a\s+)?(?:digits?|numbers?|numerals?|figures)\s*[.?!]*\s*$",
+                    r"^\s*(?P<to_digits2>[a-z][a-z\s-]*?)\s+(?:in|as)\s+(?:digits|numerals|figures|numbers)\s*[.?!]*\s*$",
+                ],
+                handler=_number_words,
+                examples=["spell out 42", "forty-two in digits"],
             ),
             Skill(
                 name="calculator",
