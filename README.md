@@ -84,6 +84,9 @@ Useful flags:
 | sign-language | `how do I sign thank you?` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
+| bible | `what does the bible say about hope?` |
+| bible-topics | `bible topics` |
+| bible-books | `books of the bible` |
 | gmdss | `what is an EPIRB?` |
 | gmdss-topics | `gmdss topics` |
 | help | `help` |
@@ -245,6 +248,34 @@ the distress alert procedure. It is registered before `encyclopedia` so that
 `what is an EPIRB?` reaches the maritime entries, and after `crisis-support` so
 that a message such as `mayday, I want to kill myself` still reaches the help
 lines. Say `gmdss topics` to list every entry.
+
+## The Bible as a knowledge source
+
+The `bible` skill answers questions from an offline, hand-curated Bible
+reference — passages, books and themes — and never reaches the network:
+
+```bash
+jarvis "bible John 3:16"                        # a verse, quoted
+jarvis "what does the bible say about hope?"    # a theme, with its passages
+jarvis "bible verses about anxiety"             # the same, phrased differently
+jarvis "tell me about the book of Job"          # one of the 66 books
+jarvis "who was Moses in the bible"             # people and figures
+jarvis "bible shepherd"                         # keyword search over the verses
+jarvis "bible topics"                           # every theme it knows
+jarvis "books of the bible"                     # the canon, by testament
+```
+
+It knows all 66 books (testament, division, chapter count and a one-line
+summary), a selection of well known verses quoted from the public domain World
+English Bible, and themes such as love, fear, anxiety, grief, forgiveness,
+faith, hope, justice, prayer, money and the Ten Commandments. References are
+parsed forgivingly (`1 cor 13:13`, `Psalm 23:1`, `revelations`). Because the
+selection is not the complete text of scripture, a passage it does not hold is
+reported as missing rather than invented.
+
+It is registered before `encyclopedia` so that `what is the bible` reaches the
+Bible entries, and after `crisis-support` so that a message asking for help
+still reaches the help lines.
 
 ## Reading and writing braille
 
