@@ -58,6 +58,8 @@ Useful flags:
 | date | `what day is it` |
 | calculator | `calculate 21 * 2` |
 | science-solver | `solve 2x + 3 = 11` |
+| braille | `read braille ⠓⠑⠇⠇⠕` |
+| braille-alphabet | `braille alphabet` |
 | atlas | `what is the capital of Japan?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
@@ -72,6 +74,8 @@ Useful flags:
 | emotional-support | `I need some emotional support` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
+| gmdss | `what is an EPIRB?` |
+| gmdss-topics | `gmdss topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -147,6 +151,28 @@ finds on the system — `say` (macOS), `espeak-ng`, `espeak` or `spd-say` (Linux
 or the PowerShell speech synthesiser (Windows). Set `JARVIS_TTS_COMMAND` to use
 a different command (the text is appended as the last argument). If nothing is
 available, Jarvis says so instead of failing.
+
+The `gmdss` skill is an offline reference for the Global Maritime Distress and
+Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
+the mayday/pan-pan/securite priorities, the Morse SOS it replaced in 1999 and
+the distress alert procedure. It is registered before `encyclopedia` so that
+`what is an EPIRB?` reaches the maritime entries, and after `crisis-support` so
+that a message such as `mayday, I want to kill myself` still reaches the help
+lines. Say `gmdss topics` to list every entry.
+
+## Reading and writing braille
+
+The `braille` skill translates Grade 1 (uncontracted) English braille in both
+directions and never reaches the network:
+
+- `read braille ⠓⠑⠇⠇⠕` → `hello`
+- paste bare cells such as `⠠⠓⠊` and Jarvis reads them
+- `write Hello 42 in braille` → `⠠⠓⠑⠇⠇⠕⠀⠼⠙⠃`
+- `braille alphabet` prints the letter chart
+
+Capitals use the capital sign (dot 6) and numbers the number sign (dots
+3-4-5-6), with number mode ending at the next space. Letters, digits and common
+punctuation are supported; anything else is reported rather than guessed.
 
 ## Answering any query with a cloud session
 

@@ -20,8 +20,16 @@ from jarvis.atlas import (
     format_population,
     sentence,
 )
+from jarvis.braille import (
+    BrailleError,
+    alphabet_chart,
+    is_braille,
+    read_braille,
+    write_braille,
+)
 from jarvis.calculator import CalculationError, calculate
 from jarvis.cloud import CloudSessionError, ask_cloud
+from jarvis import maritime
 from jarvis.memory import Memory
 from jarvis.science import solve_problem
 from jarvis.speech import SpeechError, speak
@@ -465,6 +473,30 @@ def _science(match: Match[str], context: SkillContext) -> str:
     return SCIENCE_HELP
 
 
+BRAILLE_HELP = (
+    "I read and write Grade 1 braille. Try:\n"
+    "- read braille ⠓⠑⠇⠇⠕\n"
+    "- write hello in braille\n"
+    "- braille alphabet"
+)
+
+
+def _braille_alphabet(match: Match[str], context: SkillContext) -> str:
+    return f"The Grade 1 braille alphabet:\n{alphabet_chart()}"
+
+
+def _braille(match: Match[str], context: SkillContext) -> str:
+    payload = (match.group("braille_text") or "").strip().strip('"“”')
+    if not payload:
+        return BRAILLE_HELP
+    try:
+        if is_braille(payload):
+            return f"That braille reads: {read_braille(payload)}"
+        return f"In braille that is: {write_braille(payload)}"
+    except BrailleError as error:
+        return str(error)
+
+
 _MIDLIFE_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("career", "job", "work", "promotion", "retire", "retirement", "quit"),
@@ -808,6 +840,37 @@ def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
     lines = [f"I have {len(titles)} encyclopedia entries:"]
     lines.extend(f"- {title}" for title in titles)
     lines.append("Ask me 'what is gravity?' or 'tell me about Ada Lovelace'.")
+    return "\n".join(lines)
+
+
+def _gmdss(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    subject = _clean_subject(groups.get("subject") or "")
+    if not subject or _normalised_gmdss(subject) in {"", "gmdss"}:
+        entry = maritime.lookup("GMDSS")
+        assert entry is not None  # The overview entry is always present.
+        return f"{entry.title}: {entry.summary}"
+    entry = maritime.lookup(subject)
+    if entry is not None:
+        return f"{entry.title}: {entry.summary}"
+    lines = [f"I do not have a GMDSS entry for '{subject}' yet."]
+    close = maritime.suggestions(subject)
+    if close:
+        lines.append("Did you mean: " + ", ".join(close) + "?")
+    else:
+        lines.append("Say 'gmdss topics' to see what I do know.")
+    return " ".join(lines)
+
+
+def _normalised_gmdss(subject: str) -> str:
+    return re.sub(r"[^a-z]+", "", subject.lower())
+
+
+def _gmdss_topics(match: Match[str], context: SkillContext) -> str:
+    titles = maritime.topics()
+    lines = [f"I have {len(titles)} GMDSS entries:"]
+    lines.extend(f"- {title}" for title in titles)
+    lines.append("Ask me 'what is an EPIRB?' or 'gmdss sea areas'.")
     return "\n".join(lines)
 
 
@@ -1354,6 +1417,29 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["what is today's date?"],
             ),
             Skill(
+                name="braille-alphabet",
+                description="Show the Grade 1 braille alphabet.",
+                patterns=[
+                    r"\bbrail(?:le)?\s+(alphabet|chart|letters)\b",
+                    r"\b(alphabet|chart)\s+(in|of|for)\s+brail(?:le)?\b",
+                ],
+                handler=_braille_alphabet,
+                examples=["braille alphabet"],
+            ),
+            Skill(
+                name="braille",
+                description="Read braille cells aloud or write text in braille.",
+                patterns=[
+                    r"\b(?:read|decode|interpret|translate)\s+(?:this\s+|the\s+|some\s+)?brail(?:le)?\b[:,]?\s*(?P<braille_text>.*?)\s*[.?!]*$",
+                    r"^\s*(?:write|translate|convert|put|spell|say)\s+(?P<braille_text>.+?)\s+(?:in|into|to)\s+brail(?:le)?\s*[.?!]*$",
+                    r"^\s*brail(?:le)?\b[:,]?\s*(?P<braille_text>.*)$",
+                    r"^\s*(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*)[.?!]*\s*$",
+                    r"\b(?:what\s+does|what(?:'s| is))\s+(?P<braille_text>[\u2800-\u28ff][\u2800-\u28ff\s]*?)\s*(?:say|mean|read)\b",
+                ],
+                handler=_braille,
+                examples=["read braille ⠓⠑⠇⠇⠕"],
+            ),
+            Skill(
                 name="science-solver",
                 description=(
                     "Solve maths, physics, chemistry and biology problems step by step."
@@ -1451,6 +1537,34 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"^\s*(bye|goodbye|see you)\b"],
                 handler=_farewell,
                 examples=["goodbye"],
+            ),
+            Skill(
+                name="gmdss-topics",
+                description="List the GMDSS reference entries I can explain.",
+                patterns=[
+                    r"\bgmdss\s+(topics|entries|index|glossary)\b",
+                    r"\b(list|show)( me)?( your)? gmdss\b",
+                ],
+                handler=_gmdss_topics,
+                examples=["gmdss topics"],
+            ),
+            Skill(
+                name="gmdss",
+                description=(
+                    "Explain the Global Maritime Distress and Safety System: "
+                    "sea areas, DSC, EPIRBs, SARTs, NAVTEX and distress calls."
+                ),
+                patterns=[
+                    r"^\s*gmdss\b[:,]?\s*(?P<subject>.*?)\s*[.?!]*\s*$",
+                    r"\b(?P<subject>epirbs?|ais[- ]sarts?|sarts?|"
+                    r"digital selective calling|dsc|navtex|mmsi|"
+                    r"maritime mobile service identity|inmarsat|safetynet|"
+                    r"cospas[- ]sarsat|pan[- ]pan|securit[eé]|mayday|cqd|"
+                    r"s\.?o\.?s\.?|sea areas?|area a[1-4]|distress alerts?|"
+                    r"false alerts?|solas chapter iv|gmdss)\b",
+                ],
+                handler=_gmdss,
+                examples=["what is an EPIRB?"],
             ),
             Skill(
                 name="encyclopedia-topics",
