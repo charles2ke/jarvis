@@ -149,12 +149,15 @@ def _parse_step(step: str) -> Action:
     if re.match(r"^(?:take |grab |capture )?(?:a )?screen ?(?:shot|grab)$", lowered):
         return Action("screenshot")
 
-    found = re.match(r"^(?:wait|pause|sleep)(?:\s+for)?(?:\s+(?P<seconds>\d+))?", lowered)
+    found = re.match(
+        r"^(?:wait|pause|sleep)(?:\s+for)?(?:\s+(?P<seconds>\d+)(?:\s+seconds?)?)?$",
+        lowered,
+    )
     if found is not None:
         return Action("wait", value=found.group("seconds") or "1")
 
     found = re.match(
-        r"^scroll\s+(?P<direction>up|down|left|right)(?:\s+(?:by\s+)?(?P<amount>\d+))?",
+        r"^scroll\s+(?P<direction>up|down|left|right)(?:\s+(?:by\s+)?(?P<amount>\d+))?$",
         lowered,
     )
     if found is not None:
@@ -216,13 +219,41 @@ def _parse_step(step: str) -> Action:
     raise CuaError(f"I do not know how to do '{text}' on the computer")
 
 
+_QUOTED_SPAN = re.compile(r'"[^"]*"|\'[^\']*\'')
+
+
+def _normalize_whitespace_outside_quotes(text: str) -> str:
+    """Collapse runs of whitespace, but leave quoted spans untouched."""
+
+    pieces = re.split(r'("[^"]*"|\'[^\']*\')', text)
+    return "".join(
+        piece if index % 2 else re.sub(r"\s+", " ", piece)
+        for index, piece in enumerate(pieces)
+    ).strip()
+
+
+def _split_steps(text: str) -> List[str]:
+    """Split ``text`` on step separators that are not inside quotes."""
+
+    quoted_spans = [match.span() for match in _QUOTED_SPAN.finditer(text)]
+    steps: List[str] = []
+    last = 0
+    for match in _STEP_SPLIT.finditer(text):
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            continue
+        steps.append(text[last:match.start()])
+        last = match.end()
+    steps.append(text[last:])
+    return steps
+
+
 def plan(instruction: str) -> Plan:
     """Parse ``instruction`` into a :class:`Plan`."""
 
-    text = " ".join((instruction or "").split())
+    text = _normalize_whitespace_outside_quotes(instruction or "")
     if not text:
         raise CuaError("Tell me what you would like me to do on the computer.")
-    steps = [step for step in _STEP_SPLIT.split(text) if step and step.strip()]
+    steps = [step for step in _split_steps(text) if step and step.strip()]
     actions: List[Action] = []
     for step in steps:
         try:

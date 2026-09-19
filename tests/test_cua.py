@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from unittest import mock
 
@@ -41,9 +42,26 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(action.value, "hello there")
         self.assertEqual(action.target, "search box")
 
+    def test_quoted_separators_are_not_split(self):
+        parsed = plan('type "hello, and goodbye" then press enter')
+        self.assertEqual([action.kind for action in parsed.actions], ["type", "key"])
+        self.assertEqual(parsed.actions[0].value, "hello, and goodbye")
+
+    def test_quoted_whitespace_is_preserved(self):
+        action = plan('type "two  spaces"').actions[0]
+        self.assertEqual(action.value, "two  spaces")
+
     def test_scroll_and_wait_have_defaults(self):
         self.assertEqual(plan("scroll down").actions[0].value, "3")
         self.assertEqual(plan("wait").actions[0].value, "1")
+
+    def test_wait_and_scroll_reject_unsupported_suffixes(self):
+        with self.assertRaises(CuaError):
+            plan("wait for the download")
+        with self.assertRaises(CuaError):
+            plan("wait 2 bananas")
+        with self.assertRaises(CuaError):
+            plan("scroll down 5 pages")
 
     def test_summary_numbers_every_step(self):
         summary = plan("open Mail and press enter").summary()
@@ -118,6 +136,46 @@ class ExecutionTests(unittest.TestCase):
         chart = actions_chart()
         self.assertIn("- click:", chart)
         self.assertIn("- screenshot:", chart)
+
+    def test_execute_runs_real_backend_with_exact_argv(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="done", stderr="")
+        env = {
+            "JARVIS_CUA_ENABLED": "1",
+            "JARVIS_CUA_COMMAND": "my-cua-tool",
+        }
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", return_value=completed
+        ) as run_mock:
+            reply = execute('type "hello there" into the search box then drag report.pdf to the bin')
+        self.assertEqual(
+            run_mock.call_args_list[0].args[0],
+            ["my-cua-tool", "type", "search box", "hello there"],
+        )
+        self.assertEqual(
+            run_mock.call_args_list[1].args[0],
+            ["my-cua-tool", "drag", "report.pdf", "bin"],
+        )
+        self.assertIn("1. type 'hello there' — done", reply)
+
+    def test_run_action_reports_timeout(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["my-cua-tool"], timeout=30),
+        ):
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertIn("timed out", str(caught.exception))
+
+    def test_run_action_reports_non_zero_exit(self):
+        env = {"JARVIS_CUA_ENABLED": "1", "JARVIS_CUA_COMMAND": "my-cua-tool"}
+        error = subprocess.CalledProcessError(returncode=1, cmd=["my-cua-tool"], output="", stderr="boom")
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "jarvis.cua.subprocess.run", side_effect=error
+        ):
+            with self.assertRaises(CuaError) as caught:
+                execute("take a screenshot")
+        self.assertIn("boom", str(caught.exception))
 
 
 class ComputerUseSkillTests(unittest.TestCase):
