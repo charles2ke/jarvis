@@ -61,6 +61,8 @@ Useful flags:
 | clear-mood-history | `clear my mood history` |
 | love-support | `my girlfriend and I keep fighting` |
 | emotional-support | `I need some emotional support` |
+| encyclopedia | `what is gravity?` |
+| encyclopedia-topics | `encyclopedia topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -78,6 +80,14 @@ The `atlas` skill answers offline geography questions — capitals, the country
 behind a capital, continents, currencies, population estimates and the
 countries it knows on a continent. Its data set is small and hand-curated, so
 population figures are rounded estimates.
+
+The `encyclopedia` skill answers factual questions (`what is ...`, `who was
+...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
+articles — it never reaches the network. Lookups ignore case, punctuation and
+aliases, tolerate small typos, and suggest close titles when a topic is
+missing. It is registered last so that `what is the time?`, `what is my name?`
+and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
+list every entry.
 
 ## Answering any query with a cloud session
 
