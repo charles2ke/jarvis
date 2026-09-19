@@ -121,6 +121,17 @@ class AssistantTests(unittest.TestCase):
             "evidence", self.assistant.respond("how do I ask for a raise?")
         )
 
+    def test_career_counselling_handles_natural_language_topics(self):
+        self.assertIn("drains", self.assistant.respond("I am burned out at work"))
+        self.assertIn("drains", self.assistant.respond("my manager is toxic"))
+        self.assertIn(
+            "numbers game", self.assistant.respond("I was rejected for a job")
+        )
+        self.assertIn(
+            "evidence", self.assistant.respond("how do I negotiate my salary?")
+        )
+        self.assertIn("trade-offs", self.assistant.respond("I want to change jobs"))
+
     def test_career_counselling_addresses_you_by_name(self):
         self.assistant.respond("my name is Charles")
         self.assertIn("Charles", self.assistant.respond("I hate my job"))

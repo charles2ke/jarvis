@@ -394,6 +394,9 @@ _CAREER_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
             "career change",
             "switch careers",
             "career switch",
+            "change jobs",
+            "changing jobs",
+            "switch jobs",
         ),
         "Big career moves are easier to judge when the trade-offs are explicit. "
         "What would you gain in the first year, and what would you be giving up "
@@ -699,13 +702,18 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[
                     r"\b(career|vocational) (advice|counsel?ling|coach(ing)?|change|path|move|goals?)\b",
                     r"\b(change|switch(ing)?|changing) careers\b",
+                    r"\b(change|switch(ing)?|changing) (jobs?|roles?|positions?)\b",
                     r"\b(i (got|was|am being) (fired|laid off|made redundant|let go))\b",
                     r"\b(lost my job|out of (a )?work|unemployed)\b",
                     r"\b(quit|leave|leaving|resign(ing)?( from)?)( my)? (job|role|position)\b",
                     r"\b(hate|love|stuck in) my (job|work|career|role|boss|manager)\b",
+                    r"\b(burned|burnt) out (at|from) (work|my job)\b",
+                    r"\bmy (boss|manager) is toxic\b",
                     r"\b(job (search|hunt(ing)?|offer|interview|application))\b",
+                    r"\b(rejected for|rejection from) (a |the )?(job|role|position)\b",
                     r"\b(my )?(resume|cv|cover letter)\b",
                     r"\b(ask(ing)? for a (raise|promotion)|get(ting)? promoted|performance review)\b",
+                    r"\bnegotiate my (pay|salary|compensation)\b",
                     r"\bwhat should i do with my (life|career)\b",
                 ],
                 handler=_career_counselling,
