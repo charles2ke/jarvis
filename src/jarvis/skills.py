@@ -10,6 +10,7 @@ from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
 from jarvis import encyclopedia
 from jarvis.calculator import CalculationError, calculate
+from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.memory import Memory
 
 
@@ -403,6 +404,21 @@ def _encyclopedia_topics(match: Match[str], context: SkillContext) -> str:
     return "\n".join(lines)
 
 
+def _answer(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    spawn: Optional[Callable[[str], str]] = None,
+) -> str:
+    query = match.group("query").strip()
+    if not query:
+        return "Tell me what you would like the cloud session to answer."
+    try:
+        return (spawn or ask_cloud)(query)
+    except CloudSessionError as exc:
+        return f"I could not start a cloud session: {exc}"
+
+
 def _help(match: Match[str], context: SkillContext) -> str:
     lines = ["Here is what I can do:"]
     for skill in context.registry:
@@ -548,6 +564,20 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_crisis_support,
                 examples=["I have been thinking about hurting myself"],
+            ),
+            Skill(
+                name="answer",
+                description=(
+                    "Answer any query by spawning a GitHub cloud session on this "
+                    "repository with the Opus 5 max model."
+                ),
+                patterns=[
+                    r"^\s*answer(?: me)?(?: this)?[:,]?\s+(?P<query>.+)$",
+                    r"^\s*ask (?:the )?(?:cloud|copilot|github)(?: session)?[:,]?\s+(?P<query>.+)$",
+                    r"^\s*(?:spawn|start|open) (?:a )?(?:git(?:hub)? )?cloud session(?: on this repo(?:sitory)?)?(?: to answer)?[:,]?\s+(?P<query>.+)$",
+                ],
+                handler=_answer,
+                examples=["answer how does the skill registry resolve matches?"],
             ),
             Skill(
                 name="love-support",
