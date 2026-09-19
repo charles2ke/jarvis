@@ -1556,7 +1556,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 name="fingerspell",
                 description="Fingerspell a word letter by letter in ASL.",
                 patterns=[
-                    r"\bfinger ?spell(?:ing)?\b[:,]?\s+(?P<text>[^?!]+)",
+                    r"\bfinger ?spell(?:ing)?\b[:,]?\s*(?P<text>[^?!]*)",
                     r"\b(?:how (?:do|would) (?:i|you|we) )?spell\s+(?P<text>[^?!]+?)\s+in\s+(?:asl|american sign language|sign language)\b",
                 ],
                 handler=_fingerspell,

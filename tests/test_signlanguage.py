@@ -97,6 +97,11 @@ class SignLanguageSkillTests(unittest.TestCase):
         self.assertIn("S:", reply)
         self.assertIn("H:", self.assistant.respond("spell hi in ASL"))
 
+    def test_fingerspelling_prompts_for_missing_text(self):
+        for question in ("fingerspell", "fingerspell,"):
+            with self.subTest(question=question):
+                self.assertIn("What would you like me to fingerspell?", self.assistant.respond(question))
+
     def test_alphabet_and_topics(self):
         alphabet = self.assistant.respond("sign language alphabet")
         self.assertIn("manual alphabet", alphabet)
