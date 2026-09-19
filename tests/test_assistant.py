@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from jarvis.assistant import FALLBACK_RESPONSE, Assistant
 from jarvis.memory import Memory
@@ -61,6 +63,13 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("exhausted", reply)
         self.assertIn("cleared", self.assistant.respond("clear my mood history"))
         self.assertIn("not shared", self.assistant.respond("mood history"))
+
+    def test_psychiatrist_mood_history_is_not_persisted(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.json"
+            assistant = Assistant(memory=Memory(path), now=lambda: FIXED_NOW)
+            assistant.respond("I feel anxious about work")
+            self.assertFalse(path.exists())
 
     def test_crisis_support_takes_priority(self):
         reply = self.assistant.respond("I feel like I want to die")

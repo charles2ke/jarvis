@@ -57,8 +57,8 @@ Useful flags:
 | help | `help` |
 | farewell | `goodbye` |
 
-The `psychiatrist` skill offers reflective, empathetic listening and keeps a
-simple mood log; it is not a substitute for professional care. Messages that
+The `psychiatrist` skill offers reflective, empathetic listening and keeps an
+in-session mood log that is not written to persistent memory; it is not a substitute for professional care. Messages that
 mention self-harm or suicidal thoughts are answered first by `crisis-support`,
 which points to emergency and crisis lines. `emotional-support` answers direct
 requests for comfort with validation and a rotating coping suggestion, and

@@ -205,9 +205,9 @@ def _crisis_support(match: Match[str], context: SkillContext) -> str:
 def _psychiatrist(match: Match[str], context: SkillContext) -> str:
     groups = match.groupdict()
     feeling = (groups.get("feeling") or "").strip().rstrip(".!?")
-    entries = context.memory.get("mood_log", [])
+    entries = context.memory.get_session("mood_log", [])
     if feeling:
-        entries = context.memory.append(
+        entries = context.memory.append_session(
             "mood_log",
             {"feeling": feeling, "at": context.now().isoformat(timespec="minutes")},
         )
@@ -225,7 +225,7 @@ def _psychiatrist(match: Match[str], context: SkillContext) -> str:
 
 
 def _mood_history(match: Match[str], context: SkillContext) -> str:
-    entries = context.memory.get("mood_log", [])
+    entries = context.memory.get_session("mood_log", [])
     if not entries:
         return "You have not shared how you are feeling yet. Try: 'I feel anxious'."
     lines = [
@@ -236,7 +236,7 @@ def _mood_history(match: Match[str], context: SkillContext) -> str:
 
 
 def _clear_mood_history(match: Match[str], context: SkillContext) -> str:
-    context.memory.clear("mood_log")
+    context.memory.clear_session("mood_log")
     return "I have cleared your mood history."
 
 

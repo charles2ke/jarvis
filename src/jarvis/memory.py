@@ -23,6 +23,7 @@ class Memory:
     def __init__(self, path: Path | str | None = DEFAULT_MEMORY_PATH) -> None:
         self.path = Path(path) if path is not None else None
         self._data: Dict[str, Any] = {}
+        self._session_data: Dict[str, Any] = {}
         self._load()
 
     def _load(self) -> None:
@@ -55,6 +56,21 @@ class Memory:
         items.append(value)
         self.set(key, items)
         return items
+
+    def get_session(self, key: str, default: Any = None) -> Any:
+        return self._session_data.get(key, default)
+
+    def append_session(self, key: str, value: Any) -> List[Any]:
+        items = list(self._session_data.get(key, []))
+        items.append(value)
+        self._session_data[key] = items
+        return items
+
+    def clear_session(self, key: str | None = None) -> None:
+        if key is None:
+            self._session_data = {}
+        else:
+            self._session_data.pop(key, None)
 
     def clear(self, key: str | None = None) -> None:
         if key is None:
