@@ -290,13 +290,13 @@ def _pad(rng: random.Random, target: int) -> str:
 def _metred_line(rng: random.Random, topic: str, target: int, lead: bool) -> str:
     """Return a line of about ``target`` syllables, naming ``topic`` if it fits."""
 
-    if lead:
-        used = count_syllables(topic)
-        if used <= target:
-            padding = _pad(rng, target - used)
-            return f"{topic} {padding}".strip()
-        topic = ""
-    return _pad(rng, target) or topic
+    if not lead:
+        return _pad(rng, target) or topic
+    used = count_syllables(topic)
+    if used <= target:
+        padding = _pad(rng, target - used)
+        return f"{topic} {padding}".strip()
+    return _pad(rng, target)
 
 
 def _haiku(rng: random.Random, topic: str) -> Tuple[str, ...]:
