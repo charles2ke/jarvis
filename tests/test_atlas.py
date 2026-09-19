@@ -95,6 +95,11 @@ class AtlasSkillTests(unittest.TestCase):
         self.assertIn("Narnia", reply)
         self.assertIn("atlas", reply)
 
+    def test_capital_is_not_treated_as_country(self):
+        reply = self.assistant.respond("population of London")
+        self.assertIn("London", reply)
+        self.assertIn("atlas", reply)
+
     def test_atlas_does_not_shadow_other_skills(self):
         self.assertEqual(self.assistant.respond("calculate 21 * 2"), "21 * 2 = 42")
         self.assertIn("Jarvis", self.assistant.respond("hello"))

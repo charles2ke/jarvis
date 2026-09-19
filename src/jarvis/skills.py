@@ -531,10 +531,7 @@ def _atlas_group(match: Match[str], *names: str) -> Optional[str]:
 
 
 def _atlas_country(subject: str) -> Optional[Country]:
-    country = find_country(subject)
-    if country is not None:
-        return country
-    return find_by_capital(subject)
+    return find_country(subject)
 
 
 def _atlas(match: Match[str], context: SkillContext) -> str:
