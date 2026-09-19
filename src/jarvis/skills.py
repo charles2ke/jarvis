@@ -373,6 +373,149 @@ def _love_support(match: Match[str], context: SkillContext) -> str:
     )
 
 
+_CAREER_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "fired",
+            "laid off",
+            "layoff",
+            "layoffs",
+            "redundant",
+            "redundancy",
+            "lost my job",
+            "let go",
+            "unemployed",
+            "out of work",
+        ),
+        "Losing a job shakes far more than income — it touches identity and "
+        "routine too. What kind of work would feel worth rebuilding towards, "
+        "rather than just the fastest way back in?",
+    ),
+    (
+        (
+            "quit",
+            "resign",
+            "resigning",
+            "leave my job",
+            "leaving my job",
+            "new job",
+            "job offer",
+            "offer",
+            "change careers",
+            "changing careers",
+            "career change",
+            "switch careers",
+            "career switch",
+            "change jobs",
+            "changing jobs",
+            "switch jobs",
+        ),
+        "Big career moves are easier to judge when the trade-offs are explicit. "
+        "What would you gain in the first year, and what would you be giving up "
+        "that actually matters to you?",
+    ),
+    (
+        (
+            "burned out",
+            "burnt out",
+            "burnout",
+            "overworked",
+            "hate my job",
+            "hate my boss",
+            "my boss",
+            "manager",
+            "toxic",
+            "workload",
+            "overtime",
+        ),
+        "Work that drains you is information, not a personal failing. Which part "
+        "is the job itself, and which part is the environment or the people "
+        "around it?",
+    ),
+    (
+        (
+            "promotion",
+            "promoted",
+            "raise",
+            "salary",
+            "pay",
+            "negotiate",
+            "negotiating",
+            "performance review",
+            "review",
+            "stuck",
+            "growth",
+        ),
+        "Progression usually rewards evidence more than effort. What have you "
+        "delivered recently that the people deciding would recognise, and who "
+        "needs to hear about it?",
+    ),
+    (
+        (
+            "interview",
+            "interviewing",
+            "resume",
+            "cv",
+            "cover letter",
+            "applying",
+            "application",
+            "applications",
+            "job search",
+            "job hunting",
+            "rejected",
+            "rejection",
+        ),
+        "Job hunting is a numbers game with a bruising feedback loop. Which "
+        "single step — the CV, the outreach or the interview itself — is losing "
+        "you the most opportunities right now?",
+    ),
+    (
+        (
+            "what should i do with my life",
+            "career path",
+            "direction",
+            "purpose",
+            "passion",
+            "study",
+            "degree",
+            "major",
+            "internship",
+            "graduate",
+            "first job",
+        ),
+        "Direction rarely arrives as a single revelation; it usually shows up as "
+        "a pattern. Which tasks have left you energised rather than depleted, "
+        "whatever the job title was?",
+    ),
+)
+
+_CAREER_DEFAULT_REFLECTION = (
+    "Work takes up a lot of a life, so it is worth thinking about carefully. "
+    "What would a good outcome here look like six months from now?"
+)
+
+_CAREER_CLOSING = (
+    "I can help you think it through, though a mentor or someone in the field "
+    "will know the specifics better than I do."
+)
+
+
+def _career_counselling(match: Match[str], context: SkillContext) -> str:
+    text = match.string.lower()
+    reflection = _CAREER_DEFAULT_REFLECTION
+    for keywords, candidate in _CAREER_REFLECTIONS:
+        if any(re.search(rf"\b{re.escape(keyword)}\b", text) for keyword in keywords):
+            reflection = candidate
+            break
+    return " ".join(
+        [
+            f"Thanks for talking this through with me{_addressed(context)}.",
+            reflection,
+            _CAREER_CLOSING,
+        ]
+    )
+
+
 _ENCYCLOPEDIA_FILLERS = re.compile(
     r"^(?:the meaning of|the definition of|the term|the word|me about|us about|about)\s+",
     re.IGNORECASE,
@@ -692,6 +835,31 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_love_support,
                 examples=["my girlfriend and I keep fighting"],
+            ),
+            Skill(
+                name="career-counselling",
+                description=(
+                    "Think through work, job searches and career decisions."
+                ),
+                patterns=[
+                    r"\b(career|vocational) (advice|counsel?ling|coach(ing)?|change|path|move|goals?)\b",
+                    r"\b(change|switch(ing)?|changing) careers\b",
+                    r"\b(change|switch(ing)?|changing) (jobs?|roles?|positions?)\b",
+                    r"\b(i (got|was|am being) (fired|laid off|made redundant|let go))\b",
+                    r"\b(lost my job|out of (a )?work|unemployed)\b",
+                    r"\b(quit|leave|leaving|resign(ing)?( from)?)( my)? (job|role|position)\b",
+                    r"\b(hate|love|stuck in) my (job|work|career|role|boss|manager)\b",
+                    r"\b(burned|burnt) out (at|from) (work|my job)\b",
+                    r"\bmy (boss|manager) is toxic\b",
+                    r"\b(job (search|hunt(ing)?|offer|interview|application))\b",
+                    r"\b(rejected for|rejection from) (a |the )?(job|role|position)\b",
+                    r"\b(my )?(resume|cv|cover letter)\b",
+                    r"\b(ask(ing)? for a (raise|promotion)|get(ting)? promoted|performance review)\b",
+                    r"\bnegotiate my (pay|salary|compensation)\b",
+                    r"\bwhat should i do with my (life|career)\b",
+                ],
+                handler=_career_counselling,
+                examples=["I am thinking about changing careers"],
             ),
             Skill(
                 name="story",
