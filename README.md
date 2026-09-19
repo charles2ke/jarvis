@@ -67,6 +67,10 @@ Useful flags:
 | wonders | `what are the seven wonders of the world?` |
 | history | `what happened in 1969?` |
 | traffic-signs | `what does a give way sign mean?` |
+| add-knowledge-website | `add https://example.com as a knowledge source` |
+| add-knowledge-file | `add the file notes.md as a knowledge source` |
+| list-knowledge-sources | `list my knowledge sources` |
+| clear-knowledge-sources | `clear my knowledge sources` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
@@ -179,6 +183,26 @@ aliases, tolerate small typos, and suggest close titles when a topic is
 missing. It is registered last so that `what is the time?`, `what is my name?`
 and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
 list every entry.
+
+## Knowledge sources
+
+Jarvis can learn from your own material. Point it at a text file or a web page
+and the readable text is stored alongside the rest of its memory:
+
+```bash
+jarvis "add the file ~/notes/handbook.md as a knowledge source"
+jarvis "add https://example.com/docs as a knowledge source"
+jarvis "list my knowledge sources"
+jarvis "clear my knowledge sources"
+```
+
+Afterwards, questions that no built-in skill answers are looked up in the
+sources, and the reply quotes the matching passage and says where it came from
+(`what is the release cadence?`). Files are read as plain text — HTML files and
+web pages have their markup, scripts and styles stripped first — and anything
+that is not a text file, is empty or cannot be reached is reported rather than
+guessed at. Adding the same location twice replaces the earlier copy, and only
+fetching a website reaches the network.
 
 ## Text to speech
 

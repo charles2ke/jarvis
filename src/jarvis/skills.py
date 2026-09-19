@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
-from jarvis import encyclopedia, signlanguage, traffic
+from jarvis import encyclopedia, knowledge, signlanguage, traffic
 from jarvis.atlas import (
     City,
     Country,
@@ -196,6 +196,114 @@ def _list_notes(match: Match[str], context: SkillContext) -> str:
 def _clear_notes(match: Match[str], context: SkillContext) -> str:
     context.memory.clear("notes")
     return "All notes cleared."
+
+
+_KNOWLEDGE_TAIL = re.compile(
+    r"\s+(?:as|to|into|in)\s+(?:a|an|my|your|the)?\s*(?:new\s+)?"
+    r"(?:knowledge|reference)\s+(?:source|sources|base)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _clean_location(raw: str) -> str:
+    location = _KNOWLEDGE_TAIL.sub("", (raw or "").strip())
+    return location.strip().strip("'\"").rstrip(".,;:")
+
+
+def _stored_sources(context: SkillContext) -> List[knowledge.Source]:
+    return knowledge.load(context.memory.get(knowledge.MEMORY_KEY, []))
+
+
+def _remember_source(context: SkillContext, source: knowledge.Source) -> int:
+    sources = [
+        existing
+        for existing in _stored_sources(context)
+        if existing.location != source.location
+    ]
+    sources.append(source)
+    context.memory.set(knowledge.MEMORY_KEY, knowledge.dump(sources))
+    return len(sources)
+
+
+def _added_reply(source: knowledge.Source, total: int) -> str:
+    words = len(source.text.split())
+    what = "file" if source.kind == "file" else "website"
+    return (
+        f"Added the {what} '{source.title}' as a knowledge source "
+        f"({words} words from {source.location}). You now have {total} "
+        f"knowledge source(s); ask me about anything in it."
+    )
+
+
+def _add_knowledge_file(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    reader: Optional[Callable[[str], knowledge.Source]] = None,
+) -> str:
+    path = _clean_location(match.groupdict().get("path") or "")
+    if not path:
+        return (
+            "Which file should I read? Try 'add the file ~/notes.md as a "
+            "knowledge source'."
+        )
+    try:
+        source = (reader or knowledge.add_file)(path)
+    except knowledge.KnowledgeError as exc:
+        return str(exc)
+    return _added_reply(source, _remember_source(context, source))
+
+
+def _add_knowledge_website(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    fetcher: Optional[Callable[[str], knowledge.Source]] = None,
+) -> str:
+    url = _clean_location(match.groupdict().get("url") or "")
+    if not url:
+        return (
+            "Which website should I read? Try 'add https://example.com as a "
+            "knowledge source'."
+        )
+    try:
+        source = (fetcher or knowledge.add_website)(url)
+    except knowledge.KnowledgeError as exc:
+        return str(exc)
+    return _added_reply(source, _remember_source(context, source))
+
+
+def _list_knowledge_sources(match: Match[str], context: SkillContext) -> str:
+    sources = _stored_sources(context)
+    if not sources:
+        return (
+            "I have no knowledge sources yet. Add one with 'add the file "
+            "notes.md as a knowledge source' or 'add https://example.com as a "
+            "knowledge source'."
+        )
+    lines = [f"I have {len(sources)} knowledge source(s):"]
+    lines.extend(
+        f"{index}. {source.describe()}"
+        for index, source in enumerate(sources, start=1)
+    )
+    return "\n".join(lines)
+
+
+def _clear_knowledge_sources(match: Match[str], context: SkillContext) -> str:
+    sources = _stored_sources(context)
+    context.memory.clear(knowledge.MEMORY_KEY)
+    if not sources:
+        return "There were no knowledge sources to forget."
+    return f"Forgot {len(sources)} knowledge source(s)."
+
+
+def _answer_from_knowledge(context: SkillContext, subject: str) -> Optional[str]:
+    found = knowledge.search(_stored_sources(context), subject)
+    if found is None:
+        return None
+    source, passages = found
+    body = " ".join(passages)
+    return f"From {source.title} ({source.location}): {body}"
 
 
 _MOOD_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -884,6 +992,9 @@ def _encyclopedia(match: Match[str], context: SkillContext) -> str:
     from_world = _world_knowledge(subject)
     if from_world is not None:
         return from_world
+    from_sources = _answer_from_knowledge(context, subject)
+    if from_sources is not None:
+        return from_sources
     lines = [f"I do not have an encyclopedia entry for '{subject}' yet."]
     close = encyclopedia.suggestions(subject)
     if close:
@@ -1920,6 +2031,58 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_calculate,
                 examples=["calculate 21 * 2"],
+            ),
+            Skill(
+                name="add-knowledge-website",
+                description="Read a website and keep it as a knowledge source.",
+                patterns=[
+                    r"^\s*(?:add|use|load|index|import|learn\s+from|read|fetch)\s+"
+                    r"(?:the\s+|this\s+|a\s+|an\s+|that\s+)?"
+                    r"(?:web\s?site|web\s?page|url|link|site|page)\s*"
+                    r"(?P<url>[^\s]*)(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
+                    r"^\s*(?:add|use|load|index|import|learn\s+from|read|fetch)\s+"
+                    r"(?P<url>(?:https?://|www\.)\S+"
+                    r"|[\w-]+(?:\.[\w-]+)*\.(?:com|org|net|io|gov|edu|dev|ai|co|uk)(?:/\S*)?)"
+                    r"(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
+                ],
+                handler=_add_knowledge_website,
+                examples=["add https://example.com as a knowledge source"],
+            ),
+            Skill(
+                name="add-knowledge-file",
+                description="Read a local file and keep it as a knowledge source.",
+                patterns=[
+                    r"^\s*(?:add|use|load|index|import|learn\s+from|read|study)\s+"
+                    r"(?:the\s+|this\s+|a\s+|an\s+|my\s+|that\s+)?"
+                    r"(?:text\s+|local\s+|markdown\s+)?(?:file|document)\s*"
+                    r"(?P<path>[^\s]*)(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
+                    r"^\s*(?:add|use|load|index|import|learn\s+from|read)\s+"
+                    r"(?P<path>(?:[~./]|[A-Za-z]:\\)\S*"
+                    r"|[\w.-]+\.(?:txt|md|markdown|rst|csv|json|ya?ml|html?|xml|py|log|ini|toml|cfg))"
+                    r"(?:\s+(?:as|to|into)\s+.*)?\s*[.?!]*\s*$",
+                ],
+                handler=_add_knowledge_file,
+                examples=["add the file notes.md as a knowledge source"],
+            ),
+            Skill(
+                name="list-knowledge-sources",
+                description="List the files and websites I have learned from.",
+                patterns=[
+                    r"\b(?:list|show)(?:\s+me)?(?:\s+my|\s+your)?\s+knowledge\s+(?:sources|base)\b",
+                    r"\bwhat\s+(?:knowledge\s+)?sources\s+do\s+you\s+(?:have|know|use)\b",
+                ],
+                handler=_list_knowledge_sources,
+                examples=["list my knowledge sources"],
+            ),
+            Skill(
+                name="clear-knowledge-sources",
+                description="Forget every file and website I have learned from.",
+                patterns=[
+                    r"^\s*(?:clear|delete|forget|remove)(?:\s+all)?(?:\s+my|\s+your)?\s+"
+                    r"knowledge\s+(?:sources|base)\s*[.!?]*\s*$",
+                ],
+                handler=_clear_knowledge_sources,
+                examples=["clear my knowledge sources"],
             ),
             Skill(
                 name="add-note",
