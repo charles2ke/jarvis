@@ -62,6 +62,8 @@ Useful flags:
 | couples-counseling | `we need couples counseling` |
 | midlife-counseling | `I think I am having a midlife crisis` |
 | emotional-support | `I need some emotional support` |
+| encyclopedia | `what is gravity?` |
+| encyclopedia-topics | `encyclopedia topics` |
 | help | `help` |
 | farewell | `goodbye` |
 
@@ -77,6 +79,14 @@ heartbreak, conflict and new feelings. `couples-counseling` answers explicit
 requests to work on a marriage or relationship together, and
 `midlife-counseling` reflects on ageing, regret, purpose and what comes next;
 both point to a professional counsellor for ongoing work.
+
+The `encyclopedia` skill answers factual questions (`what is ...`, `who was
+...`, `tell me about ...`, `define ...`) from a small built-in, offline set of
+articles — it never reaches the network. Lookups ignore case, punctuation and
+aliases, tolerate small typos, and suggest close titles when a topic is
+missing. It is registered last so that `what is the time?`, `what is my name?`
+and `what is 21 * 2` still reach their own skills. Say `encyclopedia topics` to
+list every entry.
 
 ## Answering any query with a cloud session
 
