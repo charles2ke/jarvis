@@ -78,6 +78,8 @@ Useful flags:
 | midlife-counseling | `I think I am having a midlife crisis` |
 | career-counselling | `I am thinking about changing careers` |
 | emotional-support | `I need some emotional support` |
+| sketch-topics | `what can you sketch?` |
+| sketch | `draw a cat` |
 | sign-language-alphabet | `sign language alphabet` |
 | fingerspell | `fingerspell Charles` |
 | sign-language-topics | `what signs do you know` |
@@ -245,6 +247,14 @@ the distress alert procedure. It is registered before `encyclopedia` so that
 `what is an EPIRB?` reaches the maritime entries, and after `crisis-support` so
 that a message such as `mayday, I want to kill myself` still reaches the help
 lines. Say `gmdss topics` to list every entry.
+
+## ASCII sketches
+
+The `sketch` skill draws small ASCII pictures from a hand-curated, offline
+gallery — `draw a cat`, `sketch a boat`, `can you draw me a house?`, `show me a
+sketch of the moon`. Subjects are matched by name or alias and tolerate small
+typos; an unknown subject is answered with the closest alternatives rather than
+an invented drawing. `what can you sketch?` lists the whole gallery.
 
 ## Reading and writing braille
 
