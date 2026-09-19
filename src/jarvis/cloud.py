@@ -139,14 +139,18 @@ def spawn_session(
         raise CloudSessionError("GitHub returned a response I could not read.")
 
     session_id = body.get("session_id") or body.get("id")
+    pull_request = body.get("pull_request")
+    url = (
+        body.get("session_url")
+        or (pull_request.get("html_url") if isinstance(pull_request, dict) else None)
+        or body.get("html_url")
+    )
     return CloudSession(
         repository=slug,
         model=chosen_model,
         query=question,
         session_id=str(session_id) if session_id is not None else None,
-        url=body.get("pull_request", {}).get("html_url")
-        if isinstance(body.get("pull_request"), dict)
-        else body.get("html_url"),
+        url=url,
     )
 
 

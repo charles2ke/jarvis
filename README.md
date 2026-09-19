@@ -88,8 +88,9 @@ jarvis "spawn a cloud session on this repo to answer: who owns the CLI?"
 It reads its configuration from the environment:
 
 - `JARVIS_GITHUB_TOKEN` (or `GITHUB_TOKEN` / `GH_TOKEN`) — token used to start the session.
-- `JARVIS_GITHUB_REPO` — `owner/repo` to run on (defaults to the `origin` remote of the checkout).
+- `JARVIS_GITHUB_REPO` (or `GITHUB_REPOSITORY`) — `owner/repo` to run on (defaults to the `origin` remote of the checkout).
 - `JARVIS_CLOUD_MODEL` — override the model (default `claude-opus-5`).
+- `JARVIS_COPILOT_API` — override the Copilot API base URL (default `https://api.githubcopilot.com`).
 
 If no token is configured, Jarvis explains what is missing instead of failing.
 

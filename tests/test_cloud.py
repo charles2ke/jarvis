@@ -26,6 +26,40 @@ class CloudSessionTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"JARVIS_GITHUB_REPO": "charles2ke/jarvis"}):
             self.assertEqual(detect_repository(), "charles2ke/jarvis")
 
+    def test_detect_repository_falls_back_to_https_origin_remote(self):
+        fake_result = mock.Mock(stdout="https://github.com/charles2ke/jarvis.git\n")
+        env = {}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "subprocess.run", return_value=fake_result
+        ) as run:
+            self.assertEqual(detect_repository(), "charles2ke/jarvis")
+        run.assert_called_once()
+
+    def test_detect_repository_falls_back_to_ssh_origin_remote(self):
+        fake_result = mock.Mock(stdout="git@github.com:charles2ke/jarvis.git\n")
+        env = {}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "subprocess.run", return_value=fake_result
+        ):
+            self.assertEqual(detect_repository(), "charles2ke/jarvis")
+
+    def test_detect_repository_reports_unparseable_remote(self):
+        fake_result = mock.Mock(stdout="not-a-github-url\n")
+        env = {}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "subprocess.run", return_value=fake_result
+        ):
+            with self.assertRaises(CloudSessionError):
+                detect_repository()
+
+    def test_detect_repository_reports_missing_git(self):
+        env = {}
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch(
+            "subprocess.run", side_effect=OSError("no git")
+        ):
+            with self.assertRaises(CloudSessionError):
+                detect_repository()
+
     def test_spawn_session_posts_query_and_model(self):
         captured = {}
 
@@ -49,6 +83,22 @@ class CloudSessionTests(unittest.TestCase):
         self.assertEqual(captured["body"]["reasoning_effort"], "max")
         self.assertIn("charles2ke/jarvis", captured["url"])
         self.assertEqual(captured["auth"], "Bearer " + "t0ken")
+
+    def test_spawn_session_prefers_session_url(self):
+        env = {"JARVIS_GITHUB_REPO": "charles2ke/jarvis", "JARVIS_GITHUB_TOKEN": "t0ken"}
+        with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+            "urllib.request.urlopen",
+            lambda request, timeout=None: FakeResponse(
+                {
+                    "session_id": "abc123",
+                    "session_url": "https://example.test/session/abc123",
+                    "html_url": "https://example.test/1",
+                }
+            ),
+        ):
+            session = spawn_session("why is the sky blue?")
+
+        self.assertEqual(session.url, "https://example.test/session/abc123")
 
     def test_spawn_session_requires_a_query(self):
         with self.assertRaises(CloudSessionError):
