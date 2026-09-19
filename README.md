@@ -54,13 +54,23 @@ Useful flags:
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
 | clear-notes | `clear my notes` |
+| psychiatrist | `I feel anxious about work` |
+| mood-history | `how have I been feeling` |
+| clear-mood-history | `clear my mood history` |
+| love-support | `my girlfriend and I keep fighting` |
+| emotional-support | `I need some emotional support` |
 | help | `help` |
 | farewell | `goodbye` |
 
 The wellbeing skills are registered first so that a message such as
 `hi, I want to kill myself` reaches `crisis-support` rather than `greeting`.
 Jarvis is a companion, not a substitute for professional help: `crisis-support`
-always points to real help lines.
+always points to real help lines. The `psychiatrist` skill offers reflective,
+empathetic listening and keeps an in-session mood log that is not written to
+persistent memory; it is not a substitute for professional care.
+`emotional-support` answers direct requests for comfort with validation and a
+rotating coping suggestion, and `love-support` talks through relationships,
+heartbreak, conflict and new feelings.
 
 ## Adding a skill
 
