@@ -58,9 +58,9 @@ class WorldDataTests(unittest.TestCase):
         self.assertEqual(
             names,
             [
+                "Decolonisation of Africa and Asia",
                 "The Cold War",
                 "The Apollo 11 Moon landing",
-                "Decolonisation of Africa and Asia",
             ],
         )
         self.assertTrue(atlas.events_in_year(1943))

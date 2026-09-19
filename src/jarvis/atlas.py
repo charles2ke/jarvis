@@ -1010,7 +1010,14 @@ def events_in_year(year: int) -> List[HistoricalEvent]:
             continue
         if min(bounds) <= year <= max(bounds):
             matches.append(event)
-    return matches
+    return sorted(
+        matches,
+        key=lambda event: min(
+            bound
+            for bound in (event.start_year, event.end_year, event.year)
+            if bound is not None
+        ),
+    )
 
 
 def describe_event(event: HistoricalEvent) -> str:
