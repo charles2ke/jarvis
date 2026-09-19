@@ -16,8 +16,6 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 NUMBER = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
 
-_TOLERANCE = 1e-9
-
 
 def _fmt(value: float) -> str:
     """Format a number for display without noisy floating point tails."""
