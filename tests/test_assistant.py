@@ -228,6 +228,25 @@ class AssistantTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertIn("988", self.assistant.respond(message))
 
+    def test_gmdss_explains_the_system_and_its_equipment(self):
+        overview = self.assistant.respond("what is gmdss")
+        self.assertIn("Global Maritime Distress and Safety System", overview)
+        self.assertIn("1999", overview)
+        self.assertIn("406 MHz", self.assistant.respond("what is an EPIRB?"))
+        self.assertIn("channel 70", self.assistant.respond("explain dsc"))
+        self.assertIn("A4", self.assistant.respond("gmdss sea areas"))
+        self.assertIn("MAYDAY", self.assistant.respond("how do I send a distress alert"))
+
+    def test_gmdss_topics_and_unknown_subject(self):
+        topics = self.assistant.respond("gmdss topics")
+        self.assertIn("NAVTEX", topics)
+        self.assertIn("SART", topics)
+        reply = self.assistant.respond("gmdss quantum submarine")
+        self.assertIn("do not have a GMDSS entry", reply)
+
+    def test_gmdss_does_not_shadow_crisis_support(self):
+        self.assertIn("988", self.assistant.respond("mayday, I want to kill myself"))
+
     def test_emotional_skills_do_not_shadow_others(self):
         self.assertEqual(self.assistant.respond("calculate 21 * 2"), "21 * 2 = 42")
         self.assertIn("Jarvis", self.assistant.respond("hello"))
@@ -237,6 +256,28 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(
             self.assistant.respond("tell me a joke"), other.respond("tell me a joke")
         )
+
+    def test_role_model_skill(self):
+        for message in ("be my role model", "I want to be a better person"):
+            with self.subTest(message=message):
+                self.assertIn("hold the bar high", self.assistant.respond(message))
+
+    def test_coach_skill_echoes_goal(self):
+        self.assertIn(
+            "'guitar'", self.assistant.respond("I want to get better at guitar")
+        )
+        self.assertIn("in your corner", self.assistant.respond("coach me"))
+
+    def test_self_care_skill(self):
+        for message in ("self care", "how do I take care of myself"):
+            with self.subTest(message=message):
+                self.assertIn(
+                    "Looking after yourself", self.assistant.respond(message)
+                )
+
+    def test_new_skills_do_not_shadow_wellbeing_skills(self):
+        self.assertIn("988", self.assistant.respond("I want to kill myself"))
+        self.assertIn("therapist", self.assistant.respond("I feel anxious"))
 
     def test_unknown_message_falls_back(self):
         self.assertEqual(
