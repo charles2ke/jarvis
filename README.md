@@ -47,6 +47,8 @@ Useful flags:
 | cua-actions | `computer use actions` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
+| poetry | `write a poem about the sea` |
+| poetry-forms | `what poems can you write` |
 | story | `tell me a story` |
 | joke | `tell me a joke` |
 | uplift | `cheer me up` |
@@ -123,6 +125,26 @@ job loss, career moves, job searches and pay conversations. `role-model` talks
 about character and the person you want to become, `coach` turns goals and
 habits into a concrete next step, and `self-care` suggests a practical way to
 look after yourself.
+
+## Poetry
+
+The `poetry` skill writes a new poem every time: it assembles lines from
+curated word banks rather than reading back a stored poem, so `write a poem
+about the sea` twice gives two different poems. Ask for a form by name, or
+leave it out for free verse:
+
+```
+write a poem about the sea      # four lines of free verse
+haiku about rain                # 5-7-5 syllables
+write a limerick about cats     # five lines rhyming A-A-B-B-A
+acrostic for Charles            # one line per letter
+a rhyming couplet about coffee  # two rhyming lines
+```
+
+`what poems can you write` lists the forms. A poem `about me` uses your
+remembered name when Jarvis knows it. The generator lives in
+`src/jarvis/poetry.py`; `poetry.write_poem(topic, form=..., seed=...)` takes an
+optional seed so a poem can be reproduced exactly.
 
 ## World knowledge
 
