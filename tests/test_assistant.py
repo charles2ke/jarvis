@@ -116,6 +116,10 @@ class AssistantTests(unittest.TestCase):
         reply = self.assistant.respond("help")
         self.assertIn("calculator", reply)
 
+    def test_help_triggers_on_new_patterns(self):
+        self.assertIn("calculator", self.assistant.respond("what are your skills"))
+        self.assertIn("calculator", self.assistant.respond("list your skills"))
+
     def test_story_skill_rotates(self):
         first = self.assistant.respond("tell me a story")
         second = self.assistant.respond("tell me another story")
