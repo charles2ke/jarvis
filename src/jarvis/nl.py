@@ -104,7 +104,9 @@ _OPERATOR_WORDS = (
 )
 
 _NUMBER_PHRASE = re.compile(
-    r"\b(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")"
+    r"\b(?:negative[\s-]+)?(?:"
+    + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
+    + r")"
     r"(?:[\s-]+(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"))*\b",
     re.IGNORECASE,
 )

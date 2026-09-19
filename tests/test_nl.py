@@ -75,6 +75,8 @@ class NormalizeTest(unittest.TestCase):
     def test_rewrites_numbers_and_operators(self) -> None:
         self.assertEqual(normalize("what is twenty one times two"), "what is 21 * 2")
         self.assertEqual(normalize("what is two hundred divided by four"), "what is 200 / 4")
+        self.assertEqual(normalize("what is negative three times two"), "what is -3 * 2")
+        self.assertEqual(normalize("what is three minus two"), "what is 3 - 2")
 
     def test_leaves_plain_commands_alone(self) -> None:
         self.assertEqual(normalize("calculate 21 * 2"), "calculate 21 * 2")
@@ -118,6 +120,7 @@ class AssistantNormalizationTest(unittest.TestCase):
 
     def test_worded_arithmetic(self) -> None:
         self.assertEqual(self.assistant.respond("what is twenty one times two"), "21 * 2 = 42")
+        self.assertEqual(self.assistant.respond("what is negative three times two"), "-3 * 2 = -6")
 
     def test_existing_routing_is_unchanged(self) -> None:
         self.assertIn("Gravity", self.assistant.respond("what is gravity?"))
