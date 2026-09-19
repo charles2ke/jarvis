@@ -200,7 +200,7 @@ SKETCHES: Tuple[Sketch, ...] = (
         subject="fish",
         art=r"""
            /\
-         ><  °>
+         ><  o>
            \/
         """,
         caption="One fish, swimming left to right.",
