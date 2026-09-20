@@ -76,10 +76,13 @@ Useful flags:
 
 ### Memory and privacy
 
-Memory is a single JSON file (`~/.jarvis/memory.json` by default) holding only
-what you asked Jarvis to keep: your name, your notes and your knowledge
-sources. Delete the file, or run with `--no-memory`, and nothing is written to
-disk. The in-session mood log used by `psychiatrist` is never persisted.
+Memory is a single JSON file (`~/.jarvis/memory.json` by default) holding what
+you asked Jarvis to keep — your name, your notes and your knowledge sources —
+plus one internal counter, `support_tip_index`, which `emotional-support` uses
+to rotate through its coping suggestions. Deleting the file clears what is
+stored, but a later normal run writes it again; run with `--no-memory` to keep
+memory in RAM so nothing is written to disk at all. The in-session mood log used
+by `psychiatrist` is never persisted.
 
 Only two skills use the network: `add-knowledge-website`, when it fetches a page
 you asked for, and `answer`, when you send a question to a cloud session.
