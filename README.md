@@ -1,16 +1,51 @@
 # jarvis
 
-Personal AI Companion — a small, dependency-free assistant you can run from your terminal.
+Personal AI Companion — a small, dependency-free assistant you can run from your
+terminal.
 
-## Install
+Jarvis matches what you type against a registry of skills and answers with the
+first one that fits. Everything is plain Python, so a request is answered in
+milliseconds and you can read exactly how the answer was produced.
+
+- **Offline by default** — every skill works without a network connection,
+  except the two that say otherwise (`add-knowledge-website` and `answer`).
+- **No runtime dependencies** — the standard library only, on Python 3.10+.
+- **Private** — memory is a JSON file you own, and you can turn it off entirely.
+- **Extensible** — a skill is a regular expression plus a handler
+  ([Adding a skill](#adding-a-skill)).
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Built-in skills](#built-in-skills)
+- [Poetry](#poetry)
+- [World knowledge](#world-knowledge)
+- [Traffic signs around the world](#traffic-signs-around-the-world)
+- [Solving science problems](#solving-science-problems)
+- [Economics and financial advice](#economics-and-financial-advice)
+- [Knowledge sources](#knowledge-sources)
+- [Text to speech](#text-to-speech)
+- [Natural language to text](#natural-language-to-text)
+- [Sign language](#sign-language)
+- [Maritime safety (GMDSS)](#maritime-safety-gmdss)
+- [The Bible as a knowledge source](#the-bible-as-a-knowledge-source)
+- [ASCII sketches](#ascii-sketches)
+- [Reading and writing braille](#reading-and-writing-braille)
+- [Answering any query with a cloud session](#answering-any-query-with-a-cloud-session)
+- [Computer use (CUA)](#computer-use-cua)
+- [Project layout](#project-layout)
+- [Adding a skill](#adding-a-skill)
+- [Development](#development)
+- [License](#license)
+
+## Quick start
 
 ```bash
 pip install -e .
+jarvis "calculate 21 * 2"
 ```
 
 Python 3.10+ is required. There are no runtime dependencies.
-
-## Usage
 
 Interactive session:
 
@@ -35,66 +70,80 @@ Useful flags:
 - `--memory PATH` — where to persist memory (default `~/.jarvis/memory.json`, override the directory with `JARVIS_HOME`).
 - `--no-memory` — keep everything in RAM for the session.
 - `--speak` — also read every reply aloud (see [Text to speech](#text-to-speech)).
+- `--version` — print the version and exit.
+
+### Memory and privacy
+
+Memory is a single JSON file (`~/.jarvis/memory.json` by default) holding only
+what you asked Jarvis to keep: your name, your notes and your knowledge
+sources. Delete the file, or run with `--no-memory`, and nothing is written to
+disk. The in-session mood log used by `psychiatrist` is never persisted.
+
+Only two skills use the network: `add-knowledge-website`, when it fetches a page
+you asked for, and `answer`, when you send a question to a cloud session.
+Everything else is answered from data shipped with the package.
 
 ## Built-in skills
+
+Say `help` at any time to see this list from inside a session. The tables below
+group the skills by theme; the order they are matched in is defined in
+`src/jarvis/skills.py`.
+
+### Wellbeing and companionship
 
 | Skill | Example |
 | --- | --- |
 | crisis-support | `I have been thinking about hurting myself` |
-| answer | `answer how does the skill registry work?` |
-| speak | `say out loud hello Charles` |
-| computer-use | `use the computer to open Safari then click on Sign in` |
-| cua-actions | `computer use actions` |
 | mental-health | `I feel anxious` |
 | console | `I am having a rough day` |
-| poetry | `write a poem about the sea` |
-| poetry-forms | `what poems can you write` |
-| story | `tell me a story` |
-| joke | `tell me a joke` |
-| uplift | `cheer me up` |
+| psychiatrist | `I feel anxious about work` |
+| mood-history | `how have I been feeling` |
+| clear-mood-history | `clear my mood history` |
+| emotional-support | `I need some emotional support` |
+| love-support | `my girlfriend and I keep fighting` |
+| couples-counseling | `we need couples counseling` |
+| midlife-counseling | `I think I am having a midlife crisis` |
+| career-counselling | `I am thinking about changing careers` |
 | role-model | `be my role model` |
 | coach | `coach me` |
 | self-care | `how do I take care of myself` |
+| uplift | `cheer me up` |
+
+### Conversation and creativity
+
+| Skill | Example |
+| --- | --- |
 | greeting | `hello` |
-| remember-name | `my name is Charles` |
-| recall-name | `what is my name?` |
-| time | `what is the time?` |
-| date | `what day is it` |
+| farewell | `goodbye` |
+| help | `help` |
+| joke | `tell me a joke` |
+| story | `tell me a story` |
+| poetry | `write a poem about the sea` |
+| poetry-forms | `what poems can you write` |
+| sketch | `draw a cat` |
+| sketch-topics | `what can you sketch?` |
+
+### Maths, science and units
+
+| Skill | Example |
+| --- | --- |
+| calculator | `calculate 21 * 2` |
+| science-solver | `solve 2x + 3 = 11` |
 | unit-conversion | `convert 10 km to miles` |
 | unit-list | `what units can you convert?` |
-| calculator | `calculate 21 * 2` |
 | number-words | `spell out 42` |
-| science-solver | `solve 2x + 3 = 11` |
-| braille | `read braille ⠓⠑⠇⠇⠕` |
-| braille-alphabet | `braille alphabet` |
+| money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
+
+### Reference knowledge
+
+| Skill | Example |
+| --- | --- |
 | atlas | `what is the capital of Japan?` |
 | cities | `what cities are in Japan?` |
 | time-zone | `what time zone is Japan in?` |
 | wonders | `what are the seven wonders of the world?` |
 | history | `what happened in 1969?` |
 | traffic-signs | `what does a give way sign mean?` |
-| money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
-| add-knowledge-website | `add https://example.com as a knowledge source` |
-| add-knowledge-file | `add the file notes.md as a knowledge source` |
-| list-knowledge-sources | `list my knowledge sources` |
-| clear-knowledge-sources | `clear my knowledge sources` |
-| add-note | `remember buy milk` |
-| list-notes | `list my notes` |
-| clear-notes | `clear my notes` |
-| psychiatrist | `I feel anxious about work` |
-| mood-history | `how have I been feeling` |
-| clear-mood-history | `clear my mood history` |
-| love-support | `my girlfriend and I keep fighting` |
-| couples-counseling | `we need couples counseling` |
-| midlife-counseling | `I think I am having a midlife crisis` |
-| career-counselling | `I am thinking about changing careers` |
-| emotional-support | `I need some emotional support` |
-| sketch-topics | `what can you sketch?` |
-| sketch | `draw a cat` |
-| sign-language-alphabet | `sign language alphabet` |
-| fingerspell | `fingerspell Charles` |
-| sign-language-topics | `what signs do you know` |
-| sign-language | `how do I sign thank you?` |
 | encyclopedia | `what is gravity?` |
 | encyclopedia-topics | `encyclopedia topics` |
 | bible | `what does the bible say about hope?` |
@@ -102,13 +151,50 @@ Useful flags:
 | bible-books | `books of the bible` |
 | gmdss | `what is an EPIRB?` |
 | gmdss-topics | `gmdss topics` |
-| financial-advisor | `financial advice on investing` |
 | economics | `what is inflation?` |
 | economics-topics | `economics topics` |
-| help | `help` |
-| farewell | `goodbye` |
+| financial-advisor | `financial advice on investing` |
 
-The wellbeing skills are registered first so that a message such as
+### Accessibility
+
+| Skill | Example |
+| --- | --- |
+| braille | `read braille ⠓⠑⠇⠇⠕` |
+| braille-alphabet | `braille alphabet` |
+| sign-language | `how do I sign thank you?` |
+| sign-language-alphabet | `sign language alphabet` |
+| sign-language-topics | `what signs do you know` |
+| fingerspell | `fingerspell Charles` |
+| speak | `say out loud hello Charles` |
+
+### Memory and personal data
+
+| Skill | Example |
+| --- | --- |
+| remember-name | `my name is Charles` |
+| recall-name | `what is my name?` |
+| add-note | `remember buy milk` |
+| list-notes | `list my notes` |
+| clear-notes | `clear my notes` |
+| add-knowledge-website | `add https://example.com as a knowledge source` |
+| add-knowledge-file | `add the file notes.md as a knowledge source` |
+| list-knowledge-sources | `list my knowledge sources` |
+| clear-knowledge-sources | `clear my knowledge sources` |
+
+### Everyday and system
+
+| Skill | Example |
+| --- | --- |
+| time | `what is the time?` |
+| date | `what day is it` |
+| answer | `answer how does the skill registry work?` |
+| computer-use | `use the computer to open Safari then click on Sign in` |
+| cua-actions | `computer use actions` |
+
+### How routing works
+
+The first skill whose pattern matches wins, so specific skills are registered
+before broad ones. The wellbeing skills are registered first so that a message such as
 `hi, I want to kill myself` reaches `crisis-support` rather than `greeting`.
 Jarvis is a companion, not a substitute for professional help: `crisis-support`
 always points to real help lines. The `psychiatrist` skill offers reflective,
@@ -336,6 +422,8 @@ the facial expressions and movement that carry much of the grammar: they are a
 starting point, not a substitute for learning from Deaf teachers and native
 signers.
 
+## Maritime safety (GMDSS)
+
 The `gmdss` skill is an offline reference for the Global Maritime Distress and
 Safety System: sea areas A1 to A4, DSC, EPIRB, SART, NAVTEX, Inmarsat, MMSI,
 the mayday/pan-pan/securite priorities, the Morse SOS it replaced in 1999 and
@@ -443,6 +531,22 @@ The planner understands `open`, `click`, `double_click`, `right_click`,
 with how much of the instruction it did understand, rather than guessed at.
 The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
+## Project layout
+
+```
+src/jarvis/
+  cli.py          command line entry point (jarvis)
+  assistant.py    ties a registry, memory and the normaliser together
+  skills.py       every built-in skill and the registry that routes to them
+  memory.py       JSON backed memory, or RAM only when no path is given
+  nl.py           natural language normalisation and number words
+  <topic>.py      the offline data and logic behind a family of skills
+                  (atlas, bible, braille, calculator, cloud, cua,
+                  encyclopedia, finance, knowledge, maritime, poetry,
+                  science, signlanguage, sketch, speech, traffic, units)
+tests/            one unittest module per topic
+```
+
 ## Adding a skill
 
 Skills are regular expressions paired with a handler. Register your own on top of
@@ -468,11 +572,18 @@ print(assistant.respond("flip a coin"))
 
 The first skill whose pattern matches wins, so register more specific skills first.
 
-## Tests
+## Development
+
+Run the test suite with the standard library test runner — there is nothing to
+install first:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests
 ```
+
+`pytest` works too, since `pyproject.toml` already points it at `tests/` and
+`src/`. New skills should come with a test in the matching `tests/test_*.py`
+module, and any new routing order should be covered there as well.
 
 ## License
 
