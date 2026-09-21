@@ -1436,9 +1436,11 @@ def _help_topic(match: Match[str]) -> str:
     """Return the topic typed after ``help``, ignoring filler words."""
 
     remainder = match.string[match.end() :].strip().strip("?!.,:;")
-    words = [word for word in remainder.lower().split() if word]
-    while words and words[0] in HELP_FILLER_WORDS:
-        words.pop(0)
+    words = [
+        word
+        for word in remainder.lower().split()
+        if word and word not in HELP_FILLER_WORDS
+    ]
     return " ".join(words)
 
 
