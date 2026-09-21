@@ -55,11 +55,25 @@ Interactive session:
 jarvis
 ```
 
+In a session, type `help` for the full skill list, `help <topic>` (for example
+`help money`) to see only the skills that match, and `exit`, `quit` or Ctrl-D to
+leave.
+
 One-shot question:
 
 ```bash
 jarvis "calculate 21 * 2"
 ```
+
+Piped from another command or a script:
+
+```bash
+echo "what is the time?" | jarvis
+printf 'my name is Ada\nwhat is my name\n' | jarvis
+```
+
+A single piped line is answered like a one-shot question; several lines are
+replayed as a session, one line per turn.
 
 Or without installing:
 
@@ -72,6 +86,7 @@ Useful flags:
 - `--memory PATH` — where to persist memory (default `~/.jarvis/memory.json`, override the directory with `JARVIS_HOME`).
 - `--no-memory` — keep everything in RAM for the session.
 - `--speak` — also read every reply aloud (see [Text to speech](#text-to-speech)).
+- `--list-skills` — print every skill with an example and exit.
 - `--version` — print the version and exit.
 
 ### Memory and privacy
@@ -90,9 +105,11 @@ Everything else is answered from data shipped with the package.
 
 ## Built-in skills
 
-Say `help` at any time to see this list from inside a session. The tables below
-group the skills by theme; the order they are matched in is defined in
-`src/jarvis/skills.py`.
+Say `help` at any time to see this list from inside a session, or `help <topic>`
+(for example `help braille`) to see only the skills whose name, description or
+example mentions that topic; `jarvis --list-skills` prints the same list from
+your shell. The tables below group the skills by theme; the order they are
+matched in is defined in `src/jarvis/skills.py`.
 
 ### Wellbeing and companionship
 

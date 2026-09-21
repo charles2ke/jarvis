@@ -33,7 +33,11 @@ class Assistant:
     def greet(self) -> str:
         user = self.memory.get("user_name")
         who = f" {user}" if user else ""
-        return f"{self.name} online.{who and ' Welcome back' + who + '.'} Type 'help' to see what I can do."
+        return (
+            f"{self.name} online.{who and ' Welcome back' + who + '.'}"
+            " Type 'help' to see what I can do, 'help <topic>' to narrow it down,"
+            " or 'exit' to leave."
+        )
 
     def respond(self, message: str) -> str:
         """Return the assistant reply for ``message``."""

@@ -1,10 +1,25 @@
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from jarvis.cli import main
 from jarvis.memory import Memory
+
+
+def run_cli(argv, stdin=None):
+    buffer = io.StringIO()
+    patched = io.StringIO(stdin) if stdin is not None else None
+    with redirect_stdout(buffer):
+        if patched is None:
+            exit_code = main(argv)
+        else:
+            with mock.patch("jarvis.cli.sys.stdin", patched):
+                exit_code = main(argv)
+    return exit_code, buffer.getvalue()
 
 
 class MemoryTests(unittest.TestCase):
@@ -36,14 +51,28 @@ class MemoryTests(unittest.TestCase):
 
 class CliTests(unittest.TestCase):
     def test_one_shot_message(self):
-        import io
-        from contextlib import redirect_stdout
-
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            exit_code = main(["--no-memory", "calculate", "2", "+", "2"])
+        exit_code, output = run_cli(["--no-memory", "calculate", "2", "+", "2"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("= 4", buffer.getvalue())
+        self.assertIn("= 4", output)
+
+    def test_single_piped_line_is_answered_like_one_shot(self):
+        exit_code, output = run_cli(["--no-memory"], stdin="calculate 2 + 2\n")
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output.strip(), "2 + 2 = 4")
+
+    def test_multiple_piped_lines_run_as_a_session(self):
+        exit_code, output = run_cli(
+            ["--no-memory"], stdin="calculate 2 + 2\ncalculate 3 + 3\nexit\n"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("jarvis> 2 + 2 = 4", output)
+        self.assertIn("jarvis> 3 + 3 = 6", output)
+        self.assertTrue(output.rstrip().endswith("jarvis> Goodbye."))
+
+    def test_list_skills(self):
+        exit_code, output = run_cli(["--list-skills"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("calculator:", output)
 
 
 if __name__ == "__main__":

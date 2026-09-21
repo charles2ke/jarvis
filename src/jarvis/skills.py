@@ -1427,13 +1427,49 @@ def _sketch(match: Match[str], context: SkillContext) -> str:
     )
 
 
-def _help(match: Match[str], context: SkillContext) -> str:
-    lines = ["Here is what I can do:"]
-    for skill in context.registry:
+HELP_FILLER_WORDS = frozenset(
+    {"me", "us", "with", "about", "on", "for", "please", "the", "a", "an", "your", "you"}
+)
+
+
+def _help_topic(match: Match[str]) -> str:
+    """Return the topic typed after ``help``, ignoring filler words."""
+
+    remainder = match.string[match.end() :].strip().strip("?!.,:;")
+    words = [word for word in remainder.lower().split() if word]
+    while words and words[0] in HELP_FILLER_WORDS:
+        words.pop(0)
+    return " ".join(words)
+
+
+def _skill_mentions(skill: Skill, topic: str) -> bool:
+    haystack = " ".join([skill.name, skill.description, *skill.examples]).lower()
+    return all(word in haystack for word in topic.split())
+
+
+def _describe_skills(skills: Iterable[Skill], header: str) -> str:
+    lines = [header]
+    for skill in skills:
         lines.append(f"- {skill.name}: {skill.description}")
         if skill.examples:
             lines.append(f"    e.g. {skill.examples[0]}")
     return "\n".join(lines)
+
+
+def _help(match: Match[str], context: SkillContext) -> str:
+    skills = list(context.registry)
+    topic = _help_topic(match)
+    prefix = ""
+    if topic:
+        found = [skill for skill in skills if _skill_mentions(skill, topic)]
+        if found:
+            return _describe_skills(found, f"Skills that match '{topic}':")
+        prefix = f"I have no skill for '{topic}' yet. "
+    header = (
+        f"{prefix}Here is what I can do ({len(skills)} skills). "
+        "Ask 'help <topic>', for example 'help money', to narrow the list down:"
+    )
+    return _describe_skills(skills, header)
 
 
 def _farewell(match: Match[str], context: SkillContext) -> str:
@@ -2562,7 +2598,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             ),
             Skill(
                 name="help",
-                description="List everything I can do.",
+                description="List everything I can do, or filter it with a topic.",
                 patterns=[
                     r"^\s*(help|what can you do|what are your skills)\b",
                     r"\b(list|show)( me)? your skills\b",
