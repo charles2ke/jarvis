@@ -190,6 +190,16 @@ class AssistantTests(unittest.TestCase):
         reply = self.assistant.respond("help")
         self.assertIn("calculator", reply)
 
+    def test_help_with_topic_filters_the_list(self):
+        reply = self.assistant.respond("help braille")
+        self.assertIn("braille", reply)
+        self.assertNotIn("calculator", reply)
+
+    def test_help_with_unknown_topic_falls_back_to_full_list(self):
+        reply = self.assistant.respond("help quantum flux")
+        self.assertIn("quantum flux", reply)
+        self.assertIn("calculator", reply)
+
     def test_help_triggers_on_new_patterns(self):
         self.assertIn("calculator", self.assistant.respond("what are your skills"))
         self.assertIn("calculator", self.assistant.respond("list your skills"))
