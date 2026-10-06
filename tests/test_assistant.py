@@ -53,7 +53,30 @@ class AssistantTests(unittest.TestCase):
         self.assistant.respond("remember buy milk")
         self.assertIn("There is no note 5", self.assistant.respond("remove note 5"))
         self.assertIn("There is no note 0", self.assistant.respond("delete note 0"))
+        self.assertIn(
+            "There is no note 1000000",
+            self.assistant.respond("delete note 1000000"),
+        )
         self.assertIn("buy milk", self.assistant.respond("list my notes"))
+
+    def test_delete_note_handles_unbounded_numeric_input(self):
+        self.assistant.respond("remember buy milk")
+        huge_index = "9" * 5000
+        reply = self.assistant.respond(f"delete note {huge_index}")
+        self.assertTrue(reply.startswith(f"There is no note {huge_index}."))
+        self.assertIn("buy milk", self.assistant.respond("list my notes"))
+
+    def test_delete_note_does_not_duplicate_sentence_punctuation(self):
+        self.assistant.respond("remember call mum.")
+        self.assertEqual(
+            self.assistant.respond("delete note 1"),
+            "Deleted note 1: call mum. You now have 0 note(s).",
+        )
+        self.assistant.respond("remember stop!")
+        self.assertEqual(
+            self.assistant.respond("delete note 1"),
+            "Deleted note 1: stop! You now have 0 note(s).",
+        )
 
     def test_negated_clear_notes_request_preserves_notes(self):
         self.assistant.respond("remember buy milk")
