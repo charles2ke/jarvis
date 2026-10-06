@@ -97,7 +97,9 @@ plus one internal counter, `support_tip_index`, which `emotional-support` uses
 to rotate through its coping suggestions. Deleting the file clears what is
 stored, but a later normal run writes it again; run with `--no-memory` to keep
 memory in RAM so nothing is written to disk at all. The in-session mood log used
-by `psychiatrist` is never persisted.
+by `psychiatrist` is never persisted. Memory is written to a temporary file and
+then swapped into place, so an interrupted save never leaves a half-written
+`memory.json` behind.
 
 Only two skills use the network: `add-knowledge-website`, when it fetches a page
 you asked for, and `answer`, when you send a question to a cloud session.
@@ -197,6 +199,7 @@ matched in is defined in `src/jarvis/skills.py`.
 | recall-name | `what is my name?` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
+| delete-note | `delete note 2` |
 | clear-notes | `clear my notes` |
 | add-knowledge-website | `add https://example.com as a knowledge source` |
 | add-knowledge-file | `add the file notes.md as a knowledge source` |
