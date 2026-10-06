@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -44,6 +45,13 @@ class MemoryTests(unittest.TestCase):
             memory.set("user_name", "Charles")
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["memory.json"])
             self.assertEqual(Memory(path).get("user_name"), "Charles")
+
+    def test_save_syncs_file_and_directory(self):
+        with TemporaryDirectory() as tmp:
+            memory = Memory(Path(tmp) / "memory.json")
+            with mock.patch("jarvis.memory.os.fsync", wraps=os.fsync) as fsync:
+                memory.set("user_name", "Ada")
+            self.assertEqual(fsync.call_count, 2 if os.name == "posix" else 1)
 
     def test_failed_save_keeps_previous_file(self):
         with TemporaryDirectory() as tmp:

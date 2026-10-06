@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
@@ -50,7 +51,34 @@ class Memory:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(tmp_name, self.path)
+            if os.name == "posix":
+                try:
+                    directory_fd = os.open(
+                        self.path.parent,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                    )
+                except OSError as error:
+                    if error.errno not in (
+                        errno.EINVAL,
+                        errno.ENOTSUP,
+                        errno.EOPNOTSUPP,
+                    ):
+                        raise
+                else:
+                    try:
+                        os.fsync(directory_fd)
+                    except OSError as error:
+                        if error.errno not in (
+                            errno.EINVAL,
+                            errno.ENOTSUP,
+                            errno.EOPNOTSUPP,
+                        ):
+                            raise
+                    finally:
+                        os.close(directory_fd)
         except BaseException:
             try:
                 os.unlink(tmp_name)
