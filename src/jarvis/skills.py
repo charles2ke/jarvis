@@ -234,6 +234,21 @@ def _list_notes(match: Match[str], context: SkillContext) -> str:
     return "Your notes:\n" + "\n".join(lines)
 
 
+def _delete_note(match: Match[str], context: SkillContext) -> str:
+    notes = list(context.memory.get("notes", []))
+    if not notes:
+        return "You have no notes to delete."
+    index = int(match.group("index"))
+    if not 1 <= index <= len(notes):
+        return (
+            f"There is no note {index}. You have {len(notes)} note(s); "
+            "say 'list my notes' to see them."
+        )
+    removed = notes.pop(index - 1)
+    context.memory.set("notes", notes)
+    return f"Deleted note {index}: {removed}. You now have {len(notes)} note(s)."
+
+
 def _clear_notes(match: Match[str], context: SkillContext) -> str:
     context.memory.clear("notes")
     return "All notes cleared."
@@ -2504,6 +2519,16 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_clear_knowledge_sources,
                 examples=["clear my knowledge sources"],
+            ),
+            Skill(
+                name="delete-note",
+                description="Delete a single note by its number.",
+                patterns=[
+                    r"^\s*(delete|remove|forget|erase)( my)? note"
+                    r"(?: number)?\s*#?(?P<index>\d{1,6})\s*[.!]?\s*$"
+                ],
+                handler=_delete_note,
+                examples=["delete note 2"],
             ),
             Skill(
                 name="add-note",

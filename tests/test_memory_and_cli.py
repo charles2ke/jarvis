@@ -36,6 +36,26 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())["notes"], ["buy milk"])
             self.assertEqual(Memory(path).get("notes"), ["buy milk"])
 
+    def test_save_leaves_no_temporary_files(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.json"
+            memory = Memory(path)
+            memory.set("user_name", "Ada")
+            memory.set("user_name", "Charles")
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["memory.json"])
+            self.assertEqual(Memory(path).get("user_name"), "Charles")
+
+    def test_failed_save_keeps_previous_file(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.json"
+            memory = Memory(path)
+            memory.set("user_name", "Ada")
+            with mock.patch("jarvis.memory.os.replace", side_effect=OSError("disk")):
+                with self.assertRaises(OSError):
+                    memory.set("user_name", "Charles")
+            self.assertEqual(Memory(path).get("user_name"), "Ada")
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["memory.json"])
+
     def test_corrupt_file_is_ignored(self):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "memory.json"

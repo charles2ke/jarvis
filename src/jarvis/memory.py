@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -40,9 +41,22 @@ class Memory:
         if self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self._data, indent=2, sort_keys=True), encoding="utf-8"
+        payload = json.dumps(self._data, indent=2, sort_keys=True)
+        # Write to a sibling temporary file and swap it in, so an interrupted
+        # write never leaves a truncated memory file behind.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp"
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            os.replace(tmp_name, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
