@@ -6,7 +6,8 @@ terminal.
 Jarvis matches what you type against a registry of skills and answers with the
 first one that fits. Everything is plain Python, so most offline requests are
 answered in milliseconds and you can read exactly how the answer was produced.
-Skills that reach the network or call out to an external tool (speech, CUA)
+Skills that reach the network or call out to an external tool (speech, CUA,
+opening phone and email links)
 take as long as that service or subprocess does.
 
 - **Offline by default** — every skill works without a network connection,
@@ -30,6 +31,7 @@ take as long as that service or subprocess does.
 - [Natural language to text](#natural-language-to-text)
 - [Sign language](#sign-language)
 - [Maritime safety (GMDSS)](#maritime-safety-gmdss)
+- [Emergency numbers](#emergency-numbers)
 - [The Bible as a knowledge source](#the-bible-as-a-knowledge-source)
 - [ASCII sketches](#ascii-sketches)
 - [Reading and writing braille](#reading-and-writing-braille)
@@ -214,6 +216,10 @@ matched in is defined in `src/jarvis/skills.py`.
 | date | `what day is it` |
 | answer | `answer how does the skill registry work?` |
 | computer-use | `use the computer to open Safari then click on Sign in` |
+| emergency-numbers | `what are the emergency numbers in Japan?` |
+| emergency-call | `call the police in Kenya` |
+| emergency-text | `text the police in the United States: there is a break-in` |
+| emergency-share | `email the emergency numbers for Kenya to me@example.com` |
 | cua-actions | `computer use actions` |
 
 ### How routing works
@@ -457,6 +463,44 @@ the distress alert procedure. It is registered before `encyclopedia` so that
 that a message such as `mayday, I want to kill myself` still reaches the help
 lines. Say `gmdss topics` to list every entry.
 
+## Emergency numbers
+
+`emergency-numbers` knows the police, ambulance and fire numbers of all 193 UN
+member states plus Kosovo, Palestine, Taiwan, Vatican City, Hong Kong and Macau
+(`list emergency countries` shows them all):
+
+```bash
+jarvis "what are the emergency numbers in Japan?"
+jarvis "ambulance number in India"
+jarvis "call the police in Kenya"
+jarvis "call an ambulance in Germany"
+jarvis "text the police in the United States: there is a break-in at 12 Main St"
+jarvis "email the emergency numbers for Kenya to me@example.com"
+jarvis "dm the emergency numbers for Japan to +81 90 1234 5678"
+```
+
+Jarvis cannot place a call or send a message by itself. `emergency-call`,
+`emergency-text` and `emergency-share` build a standard `tel:`, `sms:` or
+`mailto:` link with the number and message filled in, and reply with it. A DM
+is sent as a text message. Handing the link to your phone, messages or email
+app is opt-in:
+
+- `JARVIS_DIAL_ENABLED` — set to `1` (or `true`/`yes`) to let Jarvis open the
+  link. You still press call or send in that app yourself.
+- `JARVIS_DIAL_COMMAND` — optional command that opens a link, for example
+  `kdeconnect-cli -n "My phone" --share` to pass it to a paired phone. The default is `open`
+  on macOS, `xdg-open` on Linux and the URL protocol handler on Windows.
+
+The numbers are an offline, hand-curated snapshot and can be wrong or out of
+date, and some countries route calls differently by region, so confirm them
+locally. On a mobile phone, 112 works across Europe and in many other
+countries, and 911 works across North America and in many others. Text messages
+to emergency services work in only some places, and some need you to register
+first. If you can speak, call. `crisis-support` is registered before these
+skills, so a message that mentions self-harm still gets the crisis help lines.
+The helpers live in `jarvis.emergency` (`find`, `tel_link`, `sms_link`,
+`mailto_link`, `handoff`).
+
 ## The Bible as a knowledge source
 
 The `bible` skill answers questions from an offline, hand-curated Bible
@@ -567,7 +611,7 @@ src/jarvis/
   nl.py           natural language normalisation and number words
   <topic>.py      the offline data and logic behind a family of skills
                   (atlas, bible, braille, calculator, cloud, cua,
-                  encyclopedia, finance, knowledge, maritime, poetry,
+                  emergency, encyclopedia, finance, knowledge, maritime, poetry,
                   science, signlanguage, sketch, speech, traffic, units)
 tests/            one unittest module per topic
 ```
