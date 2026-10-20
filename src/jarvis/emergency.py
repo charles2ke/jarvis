@@ -331,7 +331,7 @@ NUMBERS: Tuple[EmergencyNumbers, ...] = (
     _all("Cyprus", "112", note="199 also works"),
     _n("Czechia", "158", "155", "150", general="112", aliases=("czech republic",)),
     _all("Denmark", "112"),
-    _n("Estonia", "110", "112", "112", general="112"),
+    _n("Estonia", "112", "112", "112", general="112"),
     _all("Finland", "112"),
     _n("France", "17", "15", "18", general="112", note="114 accepts text messages for deaf callers"),
     _n("Germany", "110", "112", "112", general="112"),

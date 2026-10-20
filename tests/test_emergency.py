@@ -47,6 +47,13 @@ class EmergencyDataTests(unittest.TestCase):
     def test_missing_service_falls_back_to_main_number(self):
         self.assertEqual(emergency.find("Namibia").number_for("ambulance"), "112")
 
+    def test_estonia_uses_112_for_all_services(self):
+        entry = emergency.find("Estonia")
+        for service in emergency.SERVICES:
+            with self.subTest(service=service):
+                self.assertEqual(getattr(entry, service), "112")
+                self.assertEqual(entry.number_for(service), "112")
+
     def test_links(self):
         self.assertEqual(emergency.tel_link("10 111"), "tel:10111")
         self.assertEqual(emergency.tel_link("+254 700-000-000"), "tel:+254700000000")
@@ -165,6 +172,15 @@ class EmergencySkillTests(unittest.TestCase):
         )
         opener.assert_called_once_with("tel:112")
         self.assertIn("I opened tel:112", reply)
+
+    def test_call_police_in_estonia_uses_112(self):
+        opener = mock.Mock()
+        match = self.assistant.registry.resolve("call the police in Estonia")[1]
+        reply = _emergency_call(
+            match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": "1"}
+        )
+        opener.assert_called_once_with("tel:112")
+        self.assertIn("Dial 112 for police in Estonia", reply)
 
     def test_call_reports_opener_errors(self):
         opener = mock.Mock(side_effect=emergency.EmergencyError("boom"))
