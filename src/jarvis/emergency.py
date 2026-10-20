@@ -64,6 +64,33 @@ class EmergencyError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class EmergencySMS:
+    """A verified emergency SMS destination, separate from voice numbers."""
+
+    number: str
+    requirements: str
+    source: str
+
+
+SMS_DESTINATIONS: Dict[str, EmergencySMS] = {
+    "France": EmergencySMS(
+        "114",
+        "114 is for people with difficulty hearing or speaking, even temporarily, including "
+        "when it is unsafe to speak aloud.",
+        "https://www.service-public.gouv.fr/particuliers/vosdroits/F33954",
+    ),
+    "United Kingdom": EmergencySMS(
+        "999",
+        "999 emergencySMS is for people who are deaf, hard of hearing or have "
+        "speech difficulties. You must register your mobile first: text 'register' "
+        "to 999, follow the instructions and wait for registration confirmation "
+        "before relying on this service.",
+        "https://www.relayuk.bt.com/how-to-use-relay-uk/contact-999-using-relay-uk.html",
+    ),
+}
+
+
+@dataclass(frozen=True)
 class EmergencyNumbers:
     """The emergency numbers of one country."""
 

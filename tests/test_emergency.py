@@ -54,6 +54,16 @@ class EmergencyDataTests(unittest.TestCase):
                 self.assertEqual(getattr(entry, service), "112")
                 self.assertEqual(entry.number_for(service), "112")
 
+    def test_verified_sms_destinations(self):
+        for country, sms in emergency.SMS_DESTINATIONS.items():
+            with self.subTest(country=country):
+                self.assertIsNotNone(emergency.find(country))
+                self.assertEqual(emergency.dial_digits(sms.number), sms.number)
+                self.assertTrue(sms.requirements)
+                self.assertTrue(sms.source.startswith("https://"))
+        self.assertEqual(emergency.SMS_DESTINATIONS["France"].number, "114")
+        self.assertEqual(emergency.find("France").number_for("police"), "17")
+
     def test_links(self):
         self.assertEqual(emergency.tel_link("10 111"), "tel:10111")
         self.assertEqual(emergency.tel_link("+254 700-000-000"), "tel:+254700000000")
@@ -162,6 +172,7 @@ class EmergencySkillTests(unittest.TestCase):
         self.assertIn("Dial 999 for police in Kenya", reply)
         self.assertIn("tel:999", reply)
         self.assertIn("JARVIS_DIAL_ENABLED", reply)
+        self.assertIn(emergency.DISCLAIMER, reply)
         self.assertIn("Which country", self.assistant.respond("call an ambulance"))
 
     def test_call_with_opt_in_opens_tel_link(self):
@@ -172,6 +183,26 @@ class EmergencySkillTests(unittest.TestCase):
         )
         opener.assert_called_once_with("tel:112")
         self.assertIn("I opened tel:112", reply)
+        self.assertIn(emergency.DISCLAIMER, reply)
+
+    def test_call_missing_service_identifies_fallback(self):
+        for enabled in ("0", "1"):
+            with self.subTest(enabled=enabled):
+                opener = mock.Mock()
+                match = self.assistant.registry.resolve("call the fire service in Libya")[1]
+                reply = _emergency_call(
+                    match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": enabled}
+                )
+                self.assertIn("no single national fire number", reply)
+                self.assertIn("dial 1515 as a fallback", reply)
+                self.assertIn("ask the operator for the fire", reply)
+                self.assertNotIn("Dial 1515 for fire", reply)
+                self.assertIn(emergency.DISCLAIMER, reply)
+                if enabled == "1":
+                    opener.assert_called_once_with("tel:1515")
+                else:
+                    opener.assert_not_called()
+                    self.assertIn("tel:1515", reply)
 
     def test_call_police_in_estonia_uses_112(self):
         opener = mock.Mock()
@@ -188,17 +219,62 @@ class EmergencySkillTests(unittest.TestCase):
         reply = _emergency_call(match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": "1"})
         self.assertIn("Dial 110", reply)
         self.assertIn("could not open your phone app: boom", reply)
+        self.assertIn(emergency.DISCLAIMER, reply)
 
     def test_text_emergency_services(self):
         opener = mock.Mock()
         match = self.assistant.registry.resolve(
-            "text the police in the United States: there is a break-in"
+            "text the police in France: there is a break-in"
         )[1]
         reply = _emergency_text(match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": "1"})
-        opener.assert_called_once_with("sms:911?body=there%20is%20a%20break-in")
-        self.assertIn("call 911 instead", reply)
+        opener.assert_called_once_with("sms:114?body=there%20is%20a%20break-in")
+        self.assertIn("difficulty hearing or speaking", reply)
+        self.assertIn("unsafe to speak aloud", reply)
+        self.assertIn("call 17 instead", reply)
+        self.assertIn(emergency.DISCLAIMER, reply)
         default = self.assistant.respond("sms emergency services in UK")
         self.assertIn("sms:999?body=Emergency%3A%20I%20need%20help", default)
+        self.assertIn("deaf, hard of hearing", default)
+        self.assertIn("register your mobile first", default)
+        self.assertIn("registration confirmation", default)
+        self.assertIn("call 999 instead", default)
+        self.assertIn(emergency.DISCLAIMER, default)
+
+    def test_text_uses_verified_destination_for_each_service(self):
+        for service, voice_number in (("police", "17"), ("ambulance", "15"), ("fire", "18")):
+            with self.subTest(service=service):
+                reply = self.assistant.respond(f"text the {service} in France: help & hurry")
+                self.assertIn("sms:114?body=help%20%26%20hurry", reply)
+                self.assertNotIn(f"sms:{voice_number}?", reply)
+                self.assertIn(f"call {voice_number} instead", reply)
+                self.assertIn(emergency.DISCLAIMER, reply)
+
+    def test_text_declines_unverified_destinations(self):
+        for country, number in (("US", "911"), ("Japan", "110"), ("Kenya", "999")):
+            for enabled in ("0", "1"):
+                with self.subTest(country=country, enabled=enabled):
+                    opener = mock.Mock()
+                    match = self.assistant.registry.resolve(f"text the police in {country}: help")[1]
+                    reply = _emergency_text(
+                        match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": enabled}
+                    )
+                    opener.assert_not_called()
+                    self.assertIn("cannot prepare an emergency text", reply)
+                    self.assertNotIn("sms:", reply)
+                    self.assertIn(f"call {number} instead", reply)
+                    self.assertIn(emergency.DISCLAIMER, reply)
+
+    def test_text_reports_opener_errors_with_warning(self):
+        opener = mock.Mock(side_effect=emergency.EmergencyError("boom"))
+        match = self.assistant.registry.resolve("text the police in France: help")[1]
+        reply = _emergency_text(
+            match, None, opener=opener, environ={"JARVIS_DIAL_ENABLED": "1"}
+        )
+        opener.assert_called_once_with("sms:114?body=help")
+        self.assertIn("could not open your messages app: boom", reply)
+        self.assertIn("difficulty hearing or speaking", reply)
+        self.assertIn("call 17 instead", reply)
+        self.assertIn(emergency.DISCLAIMER, reply)
 
     def test_share_by_email_and_text(self):
         opener = mock.Mock()

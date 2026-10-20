@@ -1945,7 +1945,7 @@ def _emergency_numbers(match: Match[str], context: SkillContext) -> str:
         return (
             "I know the police, ambulance and fire numbers of every country. "
             f"{emergency.UNIVERSAL_HINT} Ask 'emergency numbers in Kenya', "
-            "'call the police in France', 'text the ambulance in the United States' "
+            "'call the police in France', 'text the ambulance in France' "
             "or 'email the emergency numbers for Japan to me@example.com'."
         )
     entry = emergency.find(country)
@@ -1991,13 +1991,20 @@ def _emergency_call(
         return _emergency_unknown(country)
     number = entry.number_for(service)
     name = emergency.display_name(entry.country)
+    if service and not getattr(entry, service):
+        answer = (
+            f"{_capitalised(name)} has no single national {service} number; "
+            f"dial {number} as a fallback and ask the operator for the {service}."
+        )
+    else:
+        answer = f"Dial {number} for {label} in {name}."
     try:
         handed_off = emergency.handoff(
             emergency.tel_link(number), opener=opener, environ=environ
         )
     except emergency.EmergencyError as exc:
         handed_off = f"I could not open your phone app: {exc}"
-    return f"Dial {number} for {label} in {name}. {handed_off}"
+    return f"{answer} {handed_off} {emergency.DISCLAIMER}"
 
 
 def _emergency_text(
@@ -2015,19 +2022,25 @@ def _emergency_text(
     entry = emergency.find(country)
     if entry is None:
         return _emergency_unknown(country)
-    number = entry.number_for(service)
-    message = (match.groupdict().get("message") or "").strip() or DEFAULT_EMERGENCY_MESSAGE
+    voice_number = entry.number_for(service)
     name = emergency.display_name(entry.country)
+    sms = emergency.SMS_DESTINATIONS.get(entry.country)
+    if sms is None:
+        return (
+            f"I do not have a verified emergency SMS destination for {name}, so "
+            f"I cannot prepare an emergency text. If you can speak, call {voice_number} "
+            f"instead. {emergency.DISCLAIMER}"
+        )
+    message = (match.groupdict().get("message") or "").strip() or DEFAULT_EMERGENCY_MESSAGE
     try:
         handed_off = emergency.handoff(
-            emergency.sms_link(number, message), opener=opener, environ=environ
+            emergency.sms_link(sms.number, message), opener=opener, environ=environ
         )
     except emergency.EmergencyError as exc:
         handed_off = f"I could not open your messages app: {exc}"
     return (
-        f"Texting {number} for {label} in {name}. {handed_off} "
-        "Emergency text messages only work in some countries and some need you to "
-        f"register first — if you can speak, call {number} instead."
+        f"{sms.requirements} Texting {sms.number} for {label} in {name}. {handed_off} "
+        f"If you can speak, call {voice_number} instead. {emergency.DISCLAIMER}"
     )
 
 
@@ -2122,7 +2135,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"(?:\s*(?::|\bsaying\b|\bthat\b)\s*(?P<message>.+?))?\s*[.!]?\s*$",
                 ],
                 handler=_emergency_text,
-                examples=["text the police in the United States: there is a break-in"],
+                examples=["text the police in France: there is a break-in"],
             ),
             Skill(
                 name="emergency-call",

@@ -218,7 +218,7 @@ matched in is defined in `src/jarvis/skills.py`.
 | computer-use | `use the computer to open Safari then click on Sign in` |
 | emergency-numbers | `what are the emergency numbers in Japan?` |
 | emergency-call | `call the police in Kenya` |
-| emergency-text | `text the police in the United States: there is a break-in` |
+| emergency-text | `text the police in France: there is a break-in` |
 | emergency-share | `email the emergency numbers for Kenya to me@example.com` |
 | cua-actions | `computer use actions` |
 
@@ -474,7 +474,7 @@ jarvis "what are the emergency numbers in Japan?"
 jarvis "ambulance number in India"
 jarvis "call the police in Kenya"
 jarvis "call an ambulance in Germany"
-jarvis "text the police in the United States: there is a break-in at 12 Main St"
+jarvis "text the police in France: there is a break-in at 12 Main St"
 jarvis "email the emergency numbers for Kenya to me@example.com"
 jarvis "dm the emergency numbers for Japan to +81 90 1234 5678"
 ```
@@ -494,9 +494,21 @@ app is opt-in:
 The numbers are an offline, hand-curated snapshot and can be wrong or out of
 date, and some countries route calls differently by region, so confirm them
 locally. On a mobile phone, 112 works across Europe and in many other
-countries, and 911 works across North America and in many others. Text messages
-to emergency services work in only some places, and some need you to register
-first. If you can speak, call. `crisis-support` is registered before these
+countries, and 911 works across North America and in many others. Emergency SMS
+destinations are stored separately from voice numbers. Jarvis only prepares
+emergency SMS for these verified services and includes their eligibility rules:
+
+- France: [114](https://www.service-public.gouv.fr/particuliers/vosdroits/F33954),
+  for people unable to hear or speak, even temporarily, including when speaking
+  aloud would be unsafe.
+- United Kingdom: [999 emergencySMS](https://www.relayuk.bt.com/how-to-use-relay-uk/contact-999-using-relay-uk.html),
+  for people who are deaf, hard of hearing or have speech difficulties.
+  Register your mobile first by texting `register` to 999, following the
+  instructions and waiting for confirmation before relying on the service.
+
+For other countries, including places where SMS availability varies locally,
+Jarvis declines emergency SMS hand-offs and gives the voice number instead.
+If you can speak, call. `crisis-support` is registered before these
 skills, so a message that mentions self-harm still gets the crisis help lines.
 The helpers live in `jarvis.emergency` (`find`, `tel_link`, `sms_link`,
 `mailto_link`, `handoff`).
