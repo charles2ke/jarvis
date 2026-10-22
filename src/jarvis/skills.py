@@ -10,6 +10,7 @@ from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
 
 from jarvis import (
     bible,
+    emergency,
     encyclopedia,
     finance,
     knowledge,
@@ -1896,6 +1897,188 @@ def _traffic(match: Match[str], context: SkillContext) -> str:
     return _traffic_overview()
 
 
+_EVERY_COUNTRY = re.compile(
+    r"^(?:(?:every|each|all|all the|any) )?(?:countr(?:y|ies)|nations?)$|^(?:the )?world$",
+    re.IGNORECASE,
+)
+
+_EMERGENCY_SERVICE = (
+    r"(?P<service>police|cops|ambulance|paramedics|fire brigade|fire department|"
+    r"fire service|firefighters|fire|emergency services|emergency number|emergency)"
+)
+
+DEFAULT_EMERGENCY_MESSAGE = "Emergency: I need help. My location is: "
+
+
+def _emergency_country(match: Match[str]) -> str:
+    return (match.groupdict().get("country") or "").strip().strip(".,!?;:\"'").strip()
+
+
+def _emergency_service_label(match: Match[str]) -> str:
+    return emergency.service_key(match.groupdict().get("service") or "")
+
+
+def _emergency_unknown(country: str) -> str:
+    return (
+        f"I do not have emergency numbers for '{country}'. {emergency.UNIVERSAL_HINT} "
+        "Say 'list emergency countries' to see every country I know."
+    )
+
+
+def _emergency_ask_country(action: str) -> str:
+    return (
+        f"Which country are you in? {emergency.UNIVERSAL_HINT} "
+        f"Then say, for example, '{action} in Kenya'."
+    )
+
+
+def _emergency_numbers(match: Match[str], context: SkillContext) -> str:
+    country = _emergency_country(match)
+    if country and _EVERY_COUNTRY.match(country):
+        names = emergency.countries()
+        return (
+            f"I know the emergency numbers of {len(names)} countries and territories: "
+            + ", ".join(names)
+            + ". Ask 'emergency numbers in Japan' for one of them."
+        )
+    if not country:
+        return (
+            "I know the police, ambulance and fire numbers of every country. "
+            f"{emergency.UNIVERSAL_HINT} Ask 'emergency numbers in Kenya', "
+            "'call the police in France', 'text the ambulance in France' "
+            "or 'email the emergency numbers for Japan to me@example.com'."
+        )
+    entry = emergency.find(country)
+    if entry is None:
+        return _emergency_unknown(country)
+    service = _emergency_service_label(match)
+    if service:
+        value = getattr(entry, service)
+        name = emergency.display_name(entry.country)
+        if value:
+            answer = f"The {service} number in {name} is {value}."
+        else:
+            answer = (
+                f"{_capitalised(name)} has no single national {service} number; "
+                f"dial {entry.main_number()} and ask for the {service}."
+            )
+        number = entry.number_for(service)
+    else:
+        answer = entry.describe()
+        number = entry.main_number()
+        uniform = entry.police == entry.ambulance == entry.fire
+        service = "emergency number" if uniform or number != entry.police else "police"
+    return (
+        f"{answer} Say 'call the {service} in {emergency.display_name(entry.country)}' "
+        f"to dial {number}. {emergency.DISCLAIMER}"
+    )
+
+
+def _emergency_call(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    opener: Optional[Callable[[str], object]] = None,
+    environ: Optional[dict] = None,
+) -> str:
+    service = _emergency_service_label(match)
+    country = _emergency_country(match)
+    label = service or "emergency services"
+    if not country:
+        return _emergency_ask_country(f"call the {label}")
+    entry = emergency.find(country)
+    if entry is None:
+        return _emergency_unknown(country)
+    number = entry.number_for(service)
+    name = emergency.display_name(entry.country)
+    if service and not getattr(entry, service):
+        answer = (
+            f"{_capitalised(name)} has no single national {service} number; "
+            f"dial {number} as a fallback and ask the operator for the {service}."
+        )
+    else:
+        answer = f"Dial {number} for {label} in {name}."
+    try:
+        handed_off = emergency.handoff(
+            emergency.tel_link(number), opener=opener, environ=environ
+        )
+    except emergency.EmergencyError as exc:
+        handed_off = f"I could not open your phone app: {exc}"
+    return f"{answer} {handed_off} {emergency.DISCLAIMER}"
+
+
+def _emergency_text(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    opener: Optional[Callable[[str], object]] = None,
+    environ: Optional[dict] = None,
+) -> str:
+    service = _emergency_service_label(match)
+    country = _emergency_country(match)
+    label = service or "emergency services"
+    if not country:
+        return _emergency_ask_country(f"text the {label}")
+    entry = emergency.find(country)
+    if entry is None:
+        return _emergency_unknown(country)
+    voice_number = entry.number_for(service)
+    name = emergency.display_name(entry.country)
+    sms = emergency.SMS_DESTINATIONS.get(entry.country)
+    if sms is None:
+        return (
+            f"I do not have a verified emergency SMS destination for {name}, so "
+            f"I cannot prepare an emergency text. If you can speak, call {voice_number} "
+            f"instead. {emergency.DISCLAIMER}"
+        )
+    message = (match.groupdict().get("message") or "").strip() or DEFAULT_EMERGENCY_MESSAGE
+    try:
+        handed_off = emergency.handoff(
+            emergency.sms_link(sms.number, message), opener=opener, environ=environ
+        )
+    except emergency.EmergencyError as exc:
+        handed_off = f"I could not open your messages app: {exc}"
+    return (
+        f"{sms.requirements} Texting {sms.number} for {label} in {name}. {handed_off} "
+        f"If you can speak, call {voice_number} instead. {emergency.DISCLAIMER}"
+    )
+
+
+def _emergency_share(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    opener: Optional[Callable[[str], object]] = None,
+    environ: Optional[dict] = None,
+) -> str:
+    country = _emergency_country(match)
+    recipient = (match.group("recipient") or "").strip().strip(",;!?\"'").rstrip(".")
+    channel = match.group("channel").lower()
+    entry = emergency.find(country)
+    if entry is None:
+        return _emergency_unknown(country)
+    body = emergency.share_text(entry)
+    subject = f"Emergency numbers for {entry.country}"
+    try:
+        if emergency.is_email(recipient):
+            if channel in {"text", "sms", "dm", "message"}:
+                return (
+                    f"'{recipient}' is an email address. Say 'email the emergency "
+                    f"numbers for {entry.country} to {recipient}' instead."
+                )
+            link = emergency.mailto_link(recipient, subject, body)
+            what = f"an email to {recipient}"
+        elif channel in {"email", "e-mail", "mail"}:
+            return f"'{recipient}' does not look like an email address."
+        else:
+            link = emergency.sms_link(recipient, body)
+            what = f"a text message to {emergency.dial_digits(recipient)}"
+        handed_off = emergency.handoff(link, opener=opener, environ=environ)
+    except emergency.EmergencyError as exc:
+        return f"I could not prepare that message: {exc}"
+    return f"I prepared {what} with the emergency numbers for {entry.country}. {handed_off}"
+
+
 def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     """Return a registry populated with the built-in Jarvis skills."""
 
@@ -1926,6 +2109,64 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_crisis_support,
                 examples=["I have been thinking about hurting myself"],
+            ),
+            Skill(
+                name="emergency-share",
+                description=(
+                    "Send a country's emergency numbers to someone by email or "
+                    "text message (DM)."
+                ),
+                patterns=[
+                    r"^\s*(?:please\s+)?(?P<channel>e-?mail|mail|text|sms|dm|message|send)\s+"
+                    r"(?:me\s+)?(?:the\s+)?emergency (?:phone |contact )?(?:numbers?|contacts?)\s+"
+                    r"(?:for|in|of)\s+(?P<country>.+?)\s+to\s+(?P<recipient>\S.*?)\s*$",
+                ],
+                handler=_emergency_share,
+                examples=["email the emergency numbers for Kenya to me@example.com"],
+            ),
+            Skill(
+                name="emergency-text",
+                description="Text (SMS or DM) a country's emergency services.",
+                patterns=[
+                    r"^\s*(?:please\s+|can you\s+|could you\s+)?"
+                    r"(?:text|sms|message|dm|send (?:an? )?(?:text|sms|message|dm)(?: message)? to)\s+"
+                    r"(?:the |an? )?" + _EMERGENCY_SERVICE
+                    + r"(?:\s+(?:in|for)\s+(?P<country>[^:?!]+?))?"
+                    r"(?:\s*(?::|\bsaying\b|\bthat\b)\s*(?P<message>.+?))?\s*[.!]?\s*$",
+                ],
+                handler=_emergency_text,
+                examples=["text the police in France: there is a break-in"],
+            ),
+            Skill(
+                name="emergency-call",
+                description="Call a country's police, ambulance or fire service.",
+                patterns=[
+                    r"^\s*(?:please\s+|can you\s+|could you\s+|jarvis,?\s+)*"
+                    r"(?:call|dial|phone|ring)\s+(?:for\s+)?(?:the |an? |my local )?"
+                    + _EMERGENCY_SERVICE
+                    + r"(?:\s+(?:number\s+)?(?:in|for)\s+(?P<country>[^?!]+?))?\s*[?.!]*\s*$",
+                ],
+                handler=_emergency_call,
+                examples=["call the police in Kenya"],
+            ),
+            Skill(
+                name="emergency-numbers",
+                description=(
+                    "Know the police, ambulance and fire numbers of every country."
+                ),
+                patterns=[
+                    r"\bemergency (?:phone |telephone |contact )?(?:numbers?|contacts?|hotlines?|lines?)\b"
+                    r"(?:\s+(?:in|for|of|at)\s+(?P<country>[^?!]+?))?\s*[?.!]*$",
+                    r"\blist (?:the |all )?emergency (?P<country>countries)\b",
+                    r"\b(?P<service>police|ambulance|fire brigade|fire department|fire|paramedics?) "
+                    r"(?:phone |telephone |emergency )?(?:number|hotline)\b"
+                    r"(?:\s+(?:in|for|of)\s+(?P<country>[^?!]+?))?\s*[?.!]*$",
+                    r"\bwhat (?:number )?do (?:i|you) (?:dial|call) (?:to (?:call|reach|get) |for )?"
+                    r"(?:the |an? )?" + _EMERGENCY_SERVICE
+                    + r"(?:\s+(?:in|for)\s+(?P<country>[^?!]+?))?\s*[?.!]*$",
+                ],
+                handler=_emergency_numbers,
+                examples=["what are the emergency numbers in Japan?"],
             ),
             Skill(
                 name="couples-counseling",
