@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <title>Page not found · Jarvis</title>
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="{{base_path}}assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="{{base_path}}assets/style.css">
+  <script src="{{base_path}}assets/theme.js"></script>
+</head>
+<body>
+  <main class="hero not-found" id="main">
+    <div class="aurora" aria-hidden="true">
+      <span class="blob blob-1"></span>
+      <span class="blob blob-2"></span>
+      <span class="blob blob-3"></span>
+    </div>
+    <div class="hero-grid" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <a class="brand" href="{{base_path}}">
+        <img src="{{base_path}}assets/favicon.svg" width="36" height="36" alt="">
+        <span class="brand-name">Jarvis</span>
+      </a>
+      <p class="kicker">Error 404</p>
+      <h1>This page wandered <span class="gradient-text">off the map.</span></h1>
+      <p class="lead">The link may be old or mistyped. Search the skills instead, or head back to the home page.</p>
+      <form class="search" role="search" action="{{base_path}}" method="get">
+        <label class="visually-hidden" for="q">Search skills and topics</label>
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" name="q" type="search" placeholder="Search Jarvis skills…" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      </form>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="{{base_path}}">Back to Jarvis</a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
