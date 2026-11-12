@@ -16,7 +16,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5.5"
 DEFAULT_REASONING_EFFORT = "max"
 DEFAULT_API_BASE = "https://api.githubcopilot.com"
 DEFAULT_TIMEOUT = 30.0

@@ -2216,7 +2216,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 name="answer",
                 description=(
                     "Answer any query by spawning a GitHub cloud session on this "
-                    "repository with the Opus 5 max model."
+                    "repository with the Opus 5.5 max model."
                 ),
                 patterns=[
                     r"^\s*answer (?:in (?:plain )?text|as text)[:,]?\s+(?P<query>.+)$",

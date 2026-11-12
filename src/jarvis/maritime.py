@@ -36,7 +36,10 @@ ENTRIES: Tuple[Entry, ...] = (
             "by the 1988 amendments to the SOLAS convention and became fully "
             "effective on 1 February 1999, replacing manual Morse watchkeeping "
             "with automatic alerting by satellite and digital selective "
-            "calling."
+            "calling. A modernised SOLAS chapter IV entered into force on 1 "
+            "January 2024, opening GMDSS to any recognised mobile satellite "
+            "service and dropping obsolete equipment such as mandatory "
+            "radiotelex."
         ),
         aliases=(
             "global maritime distress and safety system",
@@ -50,10 +53,14 @@ ENTRIES: Tuple[Entry, ...] = (
             "GMDSS carriage requirements depend on where a ship trades. Area A1 "
             "is within VHF range of a coast station with DSC watch (roughly 20 "
             "to 30 nautical miles), A2 within MF DSC range (about 100 to 150 "
-            "nautical miles), A3 within the footprint of a recognised "
-            "geostationary satellite service (broadly 76 degrees north to 76 "
-            "degrees south), and A4 is everything else, in practice the polar "
-            "regions, where HF is the primary link."
+            "nautical miles), and A3 within the coverage of a recognised "
+            "mobile satellite service with continuous alerting. Since 1 "
+            "January 2024 that coverage depends on the ship's own satellite "
+            "terminal: broadly 76 degrees north to 76 degrees south for "
+            "Inmarsat's geostationary satellites, and pole to pole for "
+            "Iridium. A4 is everything else, in practice the polar regions "
+            "for ships without polar satellite coverage, where HF is the "
+            "primary link."
         ),
         aliases=(
             "sea area",
@@ -129,12 +136,14 @@ ENTRIES: Tuple[Entry, ...] = (
     Entry(
         title="Inmarsat",
         summary=(
-            "Inmarsat provides the geostationary satellite leg of GMDSS, "
-            "covering sea area A3 with ship earth stations that carry distress "
-            "priority calls, distress alerts and Enhanced Group Call traffic "
-            "such as SafetyNET. Iridium was recognised as a second GMDSS "
-            "satellite provider in 2020, extending satellite service into sea "
-            "area A4."
+            "Inmarsat, part of Viasat since May 2023, provides the "
+            "geostationary satellite leg of GMDSS, covering sea area A3 with "
+            "ship earth stations that carry distress priority calls, distress "
+            "alerts and Enhanced Group Call traffic such as SafetyNET. The IMO "
+            "recognised Iridium as a second GMDSS satellite provider in May "
+            "2018 and its service went live in December 2020; because its "
+            "satellites cross the poles, sea area A3 for Iridium-equipped "
+            "ships reaches the polar regions."
         ),
         aliases=("inmarsat c", "safetynet", "enhanced group call", "iridium"),
     ),
