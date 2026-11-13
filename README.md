@@ -21,6 +21,9 @@ take as long as that service or subprocess does.
 
 - [Quick start](#quick-start)
 - [Built-in skills](#built-in-skills)
+- [Time, dates and world clocks](#time-dates-and-world-clocks)
+- [Everyday maths and percentages](#everyday-maths-and-percentages)
+- [Small talk, names and notes](#small-talk-names-and-notes)
 - [Poetry](#poetry)
 - [World knowledge](#world-knowledge)
 - [Traffic signs around the world](#traffic-signs-around-the-world)
@@ -140,6 +143,10 @@ matched in is defined in `src/jarvis/skills.py`.
 | Skill | Example |
 | --- | --- |
 | greeting | `hello` |
+| small-talk | `how are you?` |
+| thanks | `thank you` |
+| about-jarvis | `who are you?` |
+| repeat | `say that again` |
 | farewell | `goodbye` |
 | help | `help` |
 | joke | `tell me a joke` |
@@ -154,6 +161,7 @@ matched in is defined in `src/jarvis/skills.py`.
 | Skill | Example |
 | --- | --- |
 | calculator | `calculate 21 * 2` |
+| percentages | `what is 15% of 80?` |
 | science-solver | `solve 2x + 3 = 11` |
 | unit-conversion | `convert 10 km to miles` |
 | unit-list | `what units can you convert?` |
@@ -199,8 +207,11 @@ matched in is defined in `src/jarvis/skills.py`.
 | --- | --- |
 | remember-name | `my name is Charles` |
 | recall-name | `what is my name?` |
+| forget-name | `forget my name` |
 | add-note | `remember buy milk` |
 | list-notes | `list my notes` |
+| search-notes | `search my notes for milk` |
+| edit-note | `change note 2 to call dad` |
 | delete-note | `delete note 2` |
 | clear-notes | `clear my notes` |
 | add-knowledge-website | `add https://example.com as a knowledge source` |
@@ -214,6 +225,8 @@ matched in is defined in `src/jarvis/skills.py`.
 | --- | --- |
 | time | `what is the time?` |
 | date | `what day is it` |
+| date-calculator | `how many days until Christmas?` |
+| world-clock | `what time is it in Tokyo?` |
 | answer | `answer how does the skill registry work?` |
 | computer-use | `use the computer to open Safari then click on Sign in` |
 | emergency-numbers | `what are the emergency numbers in Japan?` |
@@ -242,6 +255,102 @@ job loss, career moves, job searches and pay conversations. `role-model` talks
 about character and the person you want to become, `coach` turns goals and
 habits into a concrete next step, and `self-care` suggests a practical way to
 look after yourself.
+
+The same rule keeps everyday skills apart. `small-talk` and `thanks` come after
+the wellbeing skills, so `not great, I want to die` still reaches
+`crisis-support`, and `world-clock` and `date-calculator` come before `time` and
+`date`, so `what time is it in Tokyo?` gets the world clock while
+`what time is it?` still reads your own clock.
+
+## Time, dates and world clocks
+
+`time` and `date` read your computer's clock: `what time is it?`, `what's the
+date`, `what year is it?` and `what week number is it` (ISO 8601 weeks).
+`date-calculator` answers the questions you would otherwise count out on a
+calendar, offline:
+
+```bash
+jarvis "how many days until Christmas?"            # a countdown in days and weeks
+jarvis "how long since 1 January 2000"             # the time since a date
+jarvis "how many days between 1 Jan and 31 Dec"    # the gap between two dates
+jarvis "what day of the week is 1 January 2027?"   # the weekday of any date
+jarvis "what's the date in 3 weeks"                # add or subtract days, weeks, months or years
+jarvis "what date is 90 days after 1 March 2027"   # ... from any date
+jarvis "how old am I if I was born on 5 May 1990"  # an age and the next birthday
+jarvis "is 2028 a leap year?"                      # leap years and month lengths
+```
+
+It reads dates such as `25 December 2026`, `Dec 25th`, `2027-01-01`,
+`tomorrow` and `next Friday`, and the holidays that fall on the same day every
+year (New Year's Day, Valentine's Day, St Patrick's Day, April Fools' Day,
+Halloween, Christmas Eve, Christmas, Boxing Day and New Year's Eve). Holidays
+that move from year to year, such as Easter, are not known. A date without a
+year means its next occurrence, or its most recent one when you ask how long it
+has been. Impossible dates such as `31 February` are reported rather than
+guessed, and adding a month keeps the day of the month where it can: 31 January
+plus one month is 28 February, or 29 February in a leap year.
+
+`world-clock` tells the time in a major city, a country (which keeps its
+capital's time) or a time zone (`UTC`, `Asia/Tokyo`), and the time difference
+between two places:
+
+```bash
+jarvis "what time is it in Tokyo?"                  # local time, zone and offset from you
+jarvis "time difference between London and Tokyo"   # how far apart, and the time in each
+```
+
+"Ahead of you" and "behind you" compare with your computer's own clock.
+Daylight saving time comes from Python's `zoneinfo` database; where there is
+none (for example on Windows without the `tzdata` package) Jarvis uses the
+standard offset from its atlas and says that daylight saving time was not
+applied.
+
+## Everyday maths and percentages
+
+`calculator` accepts sums the way people type them: `^` and `**`, `x`, `×` and
+`÷`, `mod`, thousands separators (`1,000,000 / 4`), `squared`, `cubed`, `²` and
+`³`, `2 to the power of 10`, `square root of 144`, `cube root of 27`, `√81` and
+`∛64`. Whole-number roots stay exact (`sqrt(10 ** 40)` is exactly `10 ** 20`),
+floating-point noise is trimmed (`0.1 + 0.2 = 0.3`), and a question with no
+real-number answer, such as `sqrt(-4)`, says so instead of returning a complex
+number.
+
+`percentages` works out a percentage of an amount, what percentage one number is
+of another, increases and decreases, discounts, tips and percentage changes,
+and keeps the currency symbol you used:
+
+```bash
+jarvis "what is 15% of 80?"               # 15% of 80 is 12.
+jarvis "what is 1 as a percentage of 3"   # 1 is about 33.33% of 3.
+jarvis "increase 80 by 15%"               # 80 increased by 15% is 92 (a change of 12).
+jarvis 'what is 20% off $50'              # 20% off $50 is $40, a saving of $10.
+jarvis '18% tip on $45.50'                # A tip of 18% on $45.50 is $8.19, making $53.69 in total.
+jarvis "percentage change from 80 to 60"  # From 80 to 60 is a decrease of 25%.
+```
+
+Use single quotes around a `$` amount in the shell, or `$50` is read as a shell
+variable. The reply says "about" whenever it had to round.
+
+## Small talk, names and notes
+
+- `small-talk` answers `how are you?` and replies to how you say you are
+  (`fine thanks, and you?`). A low mood such as `not great` or `could be better`
+  gets an offer to talk instead of a cheerful reply, and the wellbeing skills are
+  still matched first.
+- `thanks` replies to `thank you`, `cheers` and the like, using your name if you
+  shared one. A thank-you with a request attached (`thanks, what is the capital
+  of France?`) is answered as the request.
+- `about-jarvis` says who Jarvis is, how it works and which version is running
+  (`who are you?`, `what version are you?`), `repeat` says the last reply again
+  (`say that again`, `pardon?`), and `farewell` also answers `good night`.
+- Names: `my name is Ada`, `call me Chuck` or `change my name to Ada`, and
+  `forget my name` to stop using it.
+- Notes: `remember buy milk` (or `note to self: ...`, `jot down ...`),
+  `list my notes`, `how many notes do I have?`, `search my notes for milk`,
+  `change note 2 to call dad`, `delete note 2` or `delete the last note`, and
+  `clear my notes`. A search finds the notes that contain every word you give,
+  ignoring case, so `milk` finds `buy oat milk` but `parking` does not find
+  `parked`.
 
 ## Poetry
 
@@ -622,9 +731,10 @@ src/jarvis/
   memory.py       JSON backed memory, or RAM only when no path is given
   nl.py           natural language normalisation and number words
   <topic>.py      the offline data and logic behind a family of skills
-                  (atlas, bible, braille, calculator, cloud, cua,
-                  emergency, encyclopedia, finance, knowledge, maritime, poetry,
-                  science, signlanguage, sketch, speech, traffic, units)
+                  (atlas, bible, braille, calculator, clock, cloud, cua,
+                  dates, emergency, encyclopedia, finance, knowledge, maritime,
+                  percentages, poetry, science, signlanguage, sketch, speech,
+                  traffic, units)
 tests/            one unittest module per topic
 ```
 

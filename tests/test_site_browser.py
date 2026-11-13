@@ -66,7 +66,7 @@ class _SiteHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def setUpModule():
-    global server, base_url, playwright, browser, _tmp
+    global server, base_url, playwright, browser, _tmp, TOTAL
     if sync_playwright is None:
         _skip_or_fail("Playwright is not installed")
     _tmp = tempfile.TemporaryDirectory()
@@ -74,7 +74,9 @@ def setUpModule():
     handler = functools.partial(_SiteHandler, directory=str(site))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     base_url = f"http://127.0.0.1:{server.server_address[1]}/"
-    _load_builder().build(site, base_url)
+    builder = _load_builder()
+    TOTAL = len(builder.build_default_registry())
+    builder.build(site, base_url)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     playwright = sync_playwright().start()
     try:
@@ -133,7 +135,7 @@ class SiteBrowserTests(unittest.TestCase):
             with self.subTest(width=width):
                 page = self.open(width=width, height=height)
                 expect(page.locator(CARDS)).to_have_count(len(page.locator("[data-featured]").all()))
-                expect(page.locator("#result-count")).to_contain_text("featured skills of 72")
+                expect(page.locator("#result-count")).to_contain_text(f"featured skills of {TOTAL}")
                 overflow = page.evaluate("document.documentElement.scrollWidth - innerWidth")
                 self.assertLessEqual(overflow, 0, "the page scrolls sideways")
                 self.shot(page, name, full_page=True)
@@ -145,7 +147,7 @@ class SiteBrowserTests(unittest.TestCase):
         expect(page.locator("#skill-braille")).to_be_visible()
         expect(page.locator("#skill-braille-alphabet")).to_be_visible()
         expect(page.locator(f"{CARDS} mark").first).to_have_text("braille", ignore_case=True)
-        self.assertLess(page.locator(CARDS).count(), 72)
+        self.assertLess(page.locator(CARDS).count(), TOTAL)
         expect(page).to_have_url(base_url + "?q=braille")
         self.shot(page, "search-braille.png")
         self.assert_clean(page)
@@ -207,7 +209,7 @@ class SiteBrowserTests(unittest.TestCase):
     def test_show_all_and_links_to_hidden_skills(self):
         page = self.open()
         page.click("#show-all")
-        expect(page.locator(CARDS)).to_have_count(72)
+        expect(page.locator(CARDS)).to_have_count(TOTAL)
         expect(page.locator("#show-all-wrap")).to_be_hidden()
 
         linked = self.open("#skill-gmdss-topics")
