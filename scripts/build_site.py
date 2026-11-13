@@ -85,9 +85,13 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
         "creativity",
         "Creativity",
-        "Conversation, poems, stories, jokes and ASCII sketches.",
+        "Conversation, small talk, poems, stories, jokes and ASCII sketches.",
         (
             "greeting",
+            "small-talk",
+            "thanks",
+            "about-jarvis",
+            "repeat",
             "farewell",
             "help",
             "joke",
@@ -101,9 +105,10 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
         "maths",
         "Maths & science",
-        "Arithmetic, equations, physics, chemistry and conversions.",
+        "Arithmetic, percentages, equations, physics, chemistry and conversions.",
         (
             "calculator",
+            "percentages",
             "science-solver",
             "unit-conversion",
             "unit-list",
@@ -155,8 +160,11 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
         (
             "remember-name",
             "recall-name",
+            "forget-name",
             "add-note",
             "list-notes",
+            "search-notes",
+            "edit-note",
             "delete-note",
             "clear-notes",
             "add-knowledge-website",
@@ -168,10 +176,12 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
         "everyday",
         "Everyday",
-        "Time, emergency numbers, cloud answers and computer use.",
+        "Time, dates, world clocks, emergency numbers, cloud answers and computer use.",
         (
             "time",
             "date",
+            "date-calculator",
+            "world-clock",
             "answer",
             "computer-use",
             "cua-actions",

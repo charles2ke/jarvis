@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import calendar
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence
+from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence, Tuple
 
 from jarvis import (
     bible,
+    clock,
+    dates,
     emergency,
     encyclopedia,
     finance,
     knowledge,
+    percentages,
     signlanguage,
     sketch,
     traffic,
@@ -48,7 +52,7 @@ from jarvis.braille import (
     read_braille,
     write_braille,
 )
-from jarvis.calculator import CalculationError, calculate
+from jarvis.calculator import CalculationError, calculate, format_number
 from jarvis.cloud import CloudSessionError, ask_cloud
 from jarvis.cua import CuaError, actions_chart as cua_actions_chart, execute as cua_execute
 from jarvis import maritime
@@ -72,6 +76,8 @@ class SkillContext:
     memory: Memory
     registry: "SkillRegistry"
     now: Callable[[], datetime] = datetime.now
+    #: Earlier ``(message, reply)`` pairs in this conversation, oldest first.
+    history: List[Tuple[str, str]] = field(default_factory=list)
 
 
 SkillHandler = Callable[[Match[str], SkillContext], str]
@@ -140,8 +146,19 @@ def _greeting(match: Match[str], context: SkillContext) -> str:
 
 
 def _remember_name(match: Match[str], context: SkillContext) -> str:
-    name = match.group("name").strip().rstrip(".!")
+    name = re.sub(r"\s+", " ", match.group("name")).strip().rstrip(".!,")
+    name = re.sub(
+        r"\s+(?:please|thanks|thank\s+you|from\s+now\s+on|instead)$", "", name,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not name:
+        return "What would you like me to call you?"
+    if name.islower():
+        name = " ".join(part[:1].upper() + part[1:] for part in name.split(" "))
+    previous = context.memory.get("user_name")
     context.memory.set("user_name", name)
+    if previous and previous.lower() != name.lower():
+        return f"Got it. I will call you {name} from now on."
     return f"Pleased to meet you, {name}. I will remember that."
 
 def _recall_name(match: Match[str], context: SkillContext) -> str:
@@ -151,23 +168,131 @@ def _recall_name(match: Match[str], context: SkillContext) -> str:
     return "I do not know your name yet. Tell me: 'my name is ...'."
 
 
+def _forget_name(match: Match[str], context: SkillContext) -> str:
+    name = context.memory.get("user_name")
+    if not name:
+        return "I do not know your name, so there is nothing to forget."
+    context.memory.clear("user_name")
+    return (
+        f"Done. I have forgotten that your name is {name}. Say 'call me ...' "
+        "whenever you would like me to use a name again."
+    )
+
+
 def _current_time(match: Match[str], context: SkillContext) -> str:
     return f"It is {context.now().strftime('%H:%M')}."
 
 
 def _current_date(match: Match[str], context: SkillContext) -> str:
-    return f"Today is {context.now().strftime('%A, %d %B %Y')}."
+    today = context.now().date()
+    asked = {name for name, value in match.groupdict().items() if value}
+    if "year_asked" in asked:
+        return f"It is {today.year}."
+    if "month_asked" in asked:
+        return f"It is {dates.MONTH_NAMES[today.month]} {today.year}."
+    if "week_asked" in asked:
+        iso_year, week, _ = today.isocalendar()
+        return f"It is week {week} of {iso_year}, counting weeks the ISO 8601 way."
+    if "day_of_year" in asked:
+        number = today.timetuple().tm_yday
+        left = (366 if calendar.isleap(today.year) else 365) - number
+        if left == 0:
+            return f"Today is day {number} of {today.year}, the last day of the year."
+        rest = "1 day" if left == 1 else f"{left} days"
+        return f"Today is day {number} of {today.year}, with {rest} left in the year."
+    return f"Today is {dates.format_date(today)}."
+
+
+def _world_clock(match: Match[str], context: SkillContext) -> str:
+    other = match.groupdict().get("other")
+    try:
+        if other:
+            return clock.describe_difference(match.group("place"), other, context.now())
+        return clock.describe_time(match.group("place"), context.now())
+    except clock.ClockError as exc:
+        return str(exc)
+
+
+_DATE_BACKWARDS = ("ago", "before", "subtract", "take", "minus")
+
+
+def _date_calculator(match: Match[str], context: SkillContext) -> str:
+    found = {name: value for name, value in match.groupdict().items() if value is not None}
+    today = context.now().date()
+    try:
+        if "until" in found:
+            return dates.countdown(found["until"], today)
+        if "left_in" in found:
+            return dates.countdown(f"end of the {found['left_in'].lower()}", today)
+        if "since" in found:
+            return dates.time_since(found["since"], today)
+        if "first" in found:
+            first = "today" if found["first"].strip().lower() == "now" else found["first"]
+            return dates.days_between(first, found["second"], today)
+        if "unit" in found:
+            direction = (found.get("direction") or "").lower().split()
+            return dates.shifted(
+                found["amount"],
+                found["unit"],
+                today,
+                backwards=bool(direction) and direction[0] in _DATE_BACKWARDS,
+                base=found.get("base"),
+            )
+        if "weekday" in found:
+            tense = (found.get("tense") or "").lower()
+            return dates.weekday_of(found["weekday"], today, past=tense in ("was", "did"))
+        if "born" in found:
+            you = re.search(r"\b(?:am\s+i|i\s+am|i'?m|im|i\s+was)\b", match.group(0), re.I)
+            return dates.age(found["born"], today, you=you is not None)
+        if "next_leap" in found:
+            return dates.leap_year(None, today, next_one=True)
+        if "leap" in found:
+            return dates.leap_year(found.get("leap_year"), today)
+        if "month" in found:
+            return dates.month_length(found["month"], found.get("month_year"), today)
+        if "year_days" in found:
+            asked = found["year_days"].lower()
+            if asked == "year":
+                return "A year has 365 days, or 366 in a leap year."
+            if asked.startswith("leap"):
+                return "A leap year has 366 days; the extra one is 29 February."
+            return dates.year_length(asked)
+    except dates.DateError as exc:
+        return str(exc)
+    return dates.DATE_HELP
 
 
 def _calculate(match: Match[str], context: SkillContext) -> str:
-    expression = match.group("expression").strip().rstrip("?")
+    expression = " ".join(match.group("expression").split()).rstrip("?=.").strip()
+    expression = re.sub(r"^the\s+", "", expression, flags=re.IGNORECASE)
     try:
         result = calculate(expression)
     except CalculationError as exc:
         return str(exc)
-    if isinstance(result, float) and result.is_integer():
-        result = int(result)
-    return f"{expression} = {result}"
+    return f"{expression} = {format_number(result)}"
+
+
+_PERCENT_DECREASE = ("decrease", "reduce", "lower", "cut", "drop", "-", "minus", "less")
+
+
+def _percentages(match: Match[str], context: SkillContext) -> str:
+    found = {name: value for name, value in match.groupdict().items() if value is not None}
+    currency = found.get("cur") or found.get("cur2") or ""
+    try:
+        if "part" in found:
+            return percentages.what_percent(found["part"], found["whole"], currency)
+        if "start" in found:
+            return percentages.percent_change(found["start"], found["end"], currency)
+        if "tip" in found:
+            return percentages.tip(found["rate"], found["amount"], currency)
+        if "off" in found:
+            return percentages.discount(found["rate"], found["amount"], currency)
+        if "direction" in found:
+            increase = not found["direction"].lower().startswith(_PERCENT_DECREASE)
+            return percentages.change_by(found["amount"], found["rate"], increase, currency)
+        return percentages.percent_of(found["rate"], found["amount"], currency)
+    except percentages.PercentError as exc:
+        return str(exc)
 
 
 _UNIT_PATTERN = "|".join(re.escape(name) for name in UNIT_NAMES)
@@ -227,29 +352,49 @@ def _add_note(match: Match[str], context: SkillContext) -> str:
     return f"Noted. You now have {len(notes)} note(s)."
 
 
+def _note_count(count: int) -> str:
+    return "1 note" if count == 1 else f"{count} notes"
+
+
+def _numbered(entries: Iterable[tuple[int, str]]) -> str:
+    return "\n".join(f"{index}. {note}" for index, note in entries)
+
+
 def _list_notes(match: Match[str], context: SkillContext) -> str:
     notes = context.memory.get("notes", [])
     if not notes:
         return "You have no notes yet."
-    lines = [f"{index}. {note}" for index, note in enumerate(notes, start=1)]
-    return "Your notes:\n" + "\n".join(lines)
+    if match.groupdict().get("count"):
+        return f"You have {_note_count(len(notes))}. Say 'list my notes' to read them."
+    return f"You have {_note_count(len(notes))}:\n" + _numbered(enumerate(notes, start=1))
 
 
-def _delete_note(match: Match[str], context: SkillContext) -> str:
-    notes = list(context.memory.get("notes", []))
-    if not notes:
-        return "You have no notes to delete."
+def _note_number(match: Match[str], notes: Sequence[str]) -> tuple[Optional[int], str]:
+    """Return the 1-based note a request refers to, or ``None`` and a reply."""
+
+    which = (match.groupdict().get("which") or "").lower()
+    if which:
+        return (1 if which in ("first", "oldest") else len(notes)), ""
     index_text = match.group("index")
     normalized_index = index_text.lstrip("0") or "0"
     max_index = str(len(notes))
     if normalized_index == "0" or len(normalized_index) > len(max_index) or (
         len(normalized_index) == len(max_index) and normalized_index > max_index
     ):
-        return (
+        return None, (
             f"There is no note {normalized_index}. You have {len(notes)} note(s); "
             "say 'list my notes' to see them."
         )
-    index = int(normalized_index)
+    return int(normalized_index), ""
+
+
+def _delete_note(match: Match[str], context: SkillContext) -> str:
+    notes = list(context.memory.get("notes", []))
+    if not notes:
+        return "You have no notes to delete."
+    index, problem = _note_number(match, notes)
+    if index is None:
+        return problem
     removed = notes.pop(index - 1)
     context.memory.set("notes", notes)
     separator = "" if removed.endswith((".", "!", "?")) else "."
@@ -257,6 +402,41 @@ def _delete_note(match: Match[str], context: SkillContext) -> str:
         f"Deleted note {index}: {removed}{separator} "
         f"You now have {len(notes)} note(s)."
     )
+
+
+def _edit_note(match: Match[str], context: SkillContext) -> str:
+    notes = list(context.memory.get("notes", []))
+    if not notes:
+        return "You have no notes to change. Say 'remember ...' to add one."
+    index, problem = _note_number(match, notes)
+    if index is None:
+        return problem
+    text = match.group("text").strip()
+    previous = notes[index - 1]
+    notes[index - 1] = text
+    context.memory.set("notes", notes)
+    return f"Updated note {index} from '{previous}' to '{text}'."
+
+
+def _search_notes(match: Match[str], context: SkillContext) -> str:
+    notes = context.memory.get("notes", [])
+    query = match.group("query").strip().strip("'\"“”‘’").strip()
+    if not notes:
+        return "You have no notes yet."
+    words = re.findall(r"\w+", query.lower())
+    if not words:
+        return "What should I look for in your notes?"
+    found = [
+        (index, note)
+        for index, note in enumerate(notes, start=1)
+        if all(word in note.lower() for word in words)
+    ]
+    if not found:
+        if len(notes) == 1:
+            return f"Your only note does not mention '{query}'."
+        return f"None of your {len(notes)} notes mention '{query}'."
+    verb = "mentions" if len(found) == 1 else "mention"
+    return f"{_note_count(len(found))} {verb} '{query}':\n" + _numbered(found)
 
 
 def _clear_notes(match: Match[str], context: SkillContext) -> str:
@@ -1500,7 +1680,79 @@ def _help(match: Match[str], context: SkillContext) -> str:
 
 
 def _farewell(match: Match[str], context: SkillContext) -> str:
+    if "night" in match.group(0).lower():
+        name = context.memory.get("user_name")
+        return f"Good night{', ' + name if name else ''}. Sleep well."
     return "Goodbye. Call on me whenever you need."
+
+
+THANKS_REPLIES: Sequence[str] = (
+    "You are welcome{name}.",
+    "Happy to help{name}.",
+    "Any time{name}.",
+    "My pleasure{name}.",
+)
+
+
+def _with_name(template: str, context: SkillContext) -> str:
+    name = context.memory.get("user_name")
+    return template.format(name=f", {name}" if name else "")
+
+
+def _thanks(match: Match[str], context: SkillContext, reply: Callable[[], str]) -> str:
+    return _with_name(reply(), context)
+
+
+def _small_talk(match: Match[str], context: SkillContext) -> str:
+    groups = match.groupdict()
+    if groups.get("low"):
+        return _with_name("I am sorry to hear that{name}.", context) + (
+            " Would you like to talk about it? Tell me how you are feeling, or say "
+            "'I need some emotional support'. I am here to listen."
+        )
+    if groups.get("mood"):
+        follow = " I am running smoothly too." if groups.get("ask_back") else ""
+        return _with_name("Glad to hear it{name}.", context) + follow + (
+            " What can I do for you?"
+        )
+    return _with_name(
+        "I am running smoothly, thank you for asking{name}. How are you?", context
+    )
+
+
+def _about_jarvis(match: Match[str], context: SkillContext) -> str:
+    from jarvis import __version__  # Imported here: the package imports this module.
+
+    groups = match.groupdict()
+    count = len(context.registry)
+    how = (
+        f"I match what you type against {count} skills written in plain Python and "
+        "answer with the first one that fits"
+    )
+    if groups.get("version"):
+        return f"I am Jarvis version {__version__}, with {count} skills."
+    if groups.get("nature"):
+        return (
+            f"I am a computer program, not a person. {how}, using built-in rules "
+            "and offline reference data; only the 'answer' and "
+            "'add-knowledge-website' skills go online."
+        )
+    if groups.get("maker"):
+        return (
+            "I am a small, dependency-free Python project. Every answer comes from "
+            "a skill defined in jarvis/skills.py, so you can read exactly how I "
+            "work. Say 'help' to see my skills."
+        )
+    return (
+        f"I am Jarvis, a personal assistant that runs in your terminal. {how}. "
+        "Say 'help' to see them all."
+    )
+
+
+def _repeat(match: Match[str], context: SkillContext) -> str:
+    if not context.history:
+        return "I have not said anything yet."
+    return context.history[-1][1]
 
 
 STORIES: Sequence[str] = (
@@ -2079,6 +2331,103 @@ def _emergency_share(
     return f"I prepared {what} with the emergency numbers for {entry.country}. {handed_off}"
 
 
+_END = r"\s*[?!.]*\s*$"
+
+_NAME_WORD = r"[^\W\d_][\w.'-]*"
+_NAME_STOPWORDS = (
+    r"(?:later|back|again|tomorrow|tonight|soon|now|when|whenever|if|after|before|"
+    r"at|on|in|by|for|to|from|about|a|an|the|maybe|sometime|anytime|away|out|up|"
+    r"off|please|instead|that|this|it|you|me|him|her|them|what|whatever)\b"
+)
+_NAME_VALUE = (
+    rf"(?P<name>(?!{_NAME_STOPWORDS}){_NAME_WORD}"
+    rf"(?:\s+(?!(?:please|instead|from|thanks|thank)\b){_NAME_WORD}){{0,2}})"
+)
+_NAME_TAIL = r"(?:,?\s+(?:please|instead|from\s+now\s+on|thanks|thank\s+you))*\s*[.!]*\s*$"
+
+_GREETING_PREFIX = (
+    r"(?:(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+(?:there|jarvis))?[,!.]*\s+)?"
+)
+_MOODS = (
+    r"(?P<mood>good|great|fine|well|ok|okay|alright|all\s+right|not\s+(?:too\s+)?bad"
+    r"|fantastic|excellent|wonderful|amazing|brilliant|super|awesome)"
+)
+_MOOD_THANKS = r"(?:[,.!]?\s+(?:thanks|thank\s+you|thx|cheers)(?:\s+for\s+asking)?)"
+# Short low-mood answers to "how are you?"; fuller statements such as "I'm sad"
+# reach the psychiatrist skill first.
+_LOW_MOODS = (
+    r"(?P<low>not\s+(?:so\s+|too\s+|very\s+|that\s+|feeling\s+)?(?:good|great|well|fine|ok"
+    r"|okay|alright|all\s+right|amazing|brilliant)|(?:pretty\s+|really\s+|very\s+|quite\s+)?"
+    r"(?:bad|terrible|awful|horrible|rubbish|lousy)|meh|so-so|so\s+so|could\s+be\s+better"
+    r"|(?:i'?ve|i\s+have)\s+been\s+better|not\s+the\s+best|not\s+(?:a\s+)?(?:good|great)\s+day)"
+)
+_ASK_BACK_REQUIRED = (
+    r"[,.!]?\s+(?P<ask_back>(?:and|how\s+about|what\s+about)\s+(?:you|yourself)"
+    r"|you|yourself)"
+)
+_ASK_BACK = r"(?:" + _ASK_BACK_REQUIRED + r")?"
+_INTENSIFIER = r"(?:(?:really|very|pretty|quite|so|just|all|super|doing)\s+)?"
+
+# "How long until <date>" must not swallow "how long to boil an egg", so the
+# looser phrasings only match when what follows starts like a date.
+_DATE_START = (
+    r"(?=(?:the\s+|next\s+|this\s+|last\s+|coming\s+)?(?:"
+    + dates.DATE_WORD_HINT
+    + r"|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:"
+    + dates.MONTH_PATTERN
+    + r")\b|\d{4}[-/.]\d))"
+)
+_DATE_SHIFT = r"(?P<amount>\d{1,7}|an?)\s+(?P<unit>days?|weeks?|fortnights?|months?|years?)"
+_DATE_FROM_NOW = r"(?:\s+(?:from\s+(?:now|today)|time|hence))?"
+_DATE_ASK = (
+    r"(?:what(?:'s|\s+is|\s+was|\s+will\s+be)\s+(?:the\s+)?(?:date\s+|day\s+)?"
+    r"|what\s+(?:date|day)\s+(?:is|was|will\s+(?:it\s+)?be|would\s+(?:it\s+)?be|is\s+it"
+    r"|was\s+it)\s+)"
+)
+_UNTIL_WORDS = r"until|till|til|'til|before"
+_UNTIL = r"(?:" + _UNTIL_WORDS + r")"
+_DAY_TAIL = r"(?:\s+(?:be|fall\s+on|fall|land\s+on|land|be\s+on|on))?"
+_PLACE = (
+    r"(?P<place>(?![^?!]*\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?"
+    r"|fortnights?|months?|years?)\b)[^?!]+)"
+)
+
+_CALC_TOKEN = (
+    r"(?:[-+*/%^().,\d\s×÷·−²³√∛]"
+    r"|(?<![a-z])(?:squared|cubed|mod(?:ulo)?|sqrt|cbrt|to\s+the\s+power\s+of"
+    r"|to\s+the\s+\d+(?:st|nd|rd|th)\s+power|raised\s+to(?:\s+the\s+power\s+of)?"
+    r"|(?:the\s+)?(?:square|cube)\s+root\s+of)(?![a-z])"
+    r"|(?<=[\d\s)])x(?=[\s\d(]))"
+)
+_CALC_EXPRESSION = r"(?P<expression>(?=[^?!=]*\d)" + _CALC_TOKEN + r"+)"
+_CALC_HAS_OPERATOR = (
+    r"(?=[^?!]*\d[^?!]*(?:[-+*/%^×÷·−²³]|\b(?:squared|cubed|power|mod(?:ulo)?)\b"
+    r"|\d\s*x\s*\d)|[^?!]*(?:[√∛]|\b(?:sqrt|cbrt|square\s+root|cube\s+root)\b))"
+)
+_CALC_END = r"\s*=?\s*\??\s*$"
+
+_RATE = r"(?P<rate>" + percentages.NUMBER + r")\s*(?:%|per\s*cent\b)"
+_PERCENT_WORD = r"(?:percent(?:age)?|%)"
+_PERCENT_ASK = (
+    r"(?:(?:what(?:'s|\s+is)|calculate|compute|work\s+out|how\s+much\s+is|find|express)\s+)?"
+)
+_PERCENT_END = r"\s*[?!.=]*\s*$"
+
+
+def _amount(name: str, currency: str = "cur") -> str:
+    """Return a pattern for an amount with an optional currency symbol."""
+
+    return (
+        rf"(?P<{currency}>{percentages.CURRENCY})?\s*"
+        rf"(?P<{name}>{percentages.NUMBER})"
+    )
+
+
+_NOTE_POSITION = r"(?P<which>last|latest|newest|most\s+recent|first|oldest)"
+_NOTE_NEW_TEXT = r"\s+(?:to\s+say|so\s+it\s+says|to\s+read|to|with|into)[:,]?\s+(?P<text>.+)$"
+
+
 def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     """Return a registry populated with the built-in Jarvis skills."""
 
@@ -2090,6 +2439,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
     next_role_model = _rotator(ROLE_MODEL_LINES)
     next_coach_prompt = _rotator(COACH_PROMPTS)
     next_self_care = _rotator(SELF_CARE_IDEAS)
+    next_thanks = _rotator(THANKS_REPLIES)
     return SkillRegistry(
         [
             Skill(
@@ -2464,6 +2814,86 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["I need some emotional support"],
             ),
             Skill(
+                name="thanks",
+                description="Reply when you say thank you.",
+                patterns=[
+                    r"^\s*(?:(?:ok(?:ay)?|oh|great|cool|perfect|brilliant|awesome|nice"
+                    r"|lovely|wonderful|excellent|right)[,!.]?\s+)?"
+                    r"(?:many\s+thanks|thanks|thank\s+you|thank\s+u|thanx|thx|ty|cheers|ta"
+                    r"|much\s+appreciated|i\s+appreciate\s+(?:it|that|your\s+help))"
+                    r"(?:\s+(?:so|very)\s+much|\s+a\s+(?:lot|bunch|million|ton)|\s+again"
+                    r"|\s+anyway)*(?:,?\s+(?:jarvis|mate|buddy|pal))?"
+                    r"(?:\s+for\s+(?:the|your|that|this|all|everything|helping)\b[^?]{0,40})?"
+                    r"\s*[.!]*\s*$",
+                ],
+                handler=partial(_thanks, reply=next_thanks),
+                examples=["thank you"],
+            ),
+            Skill(
+                name="small-talk",
+                description="Answer 'how are you?' and similar small talk.",
+                patterns=[
+                    r"^\s*" + _GREETING_PREFIX + r"(?P<how>how\s+(?:are|r)\s+(?:you|u|ya)"
+                    r"(?:\s+(?:doing|feeling|today|tonight|this\s+(?:morning|afternoon|evening)))*"
+                    r"|how(?:'s|\s+is)\s+(?:it\s+going|life|things|your\s+day(?:\s+going)?"
+                    r"|everything(?:\s+going)?)|how\s+have\s+you\s+been|how\s+do\s+you\s+do"
+                    r"|how\s+(?:you|ya)\s+doing|how\s+are\s+things|what'?s\s+up|sup|wassup"
+                    r"|(?:are\s+)?you\s+(?:ok|okay|alright|all\s+right|well))"
+                    r"(?:,?\s+jarvis)?\s*[?!.]*\s*$",
+                    r"^\s*(?:i'?m|i\s+am|im|i\s+feel|feeling|all\s+is|everything(?:'s|\s+is)"
+                    r"|things\s+are)\s+" + _INTENSIFIER + _MOODS + _MOOD_THANKS + r"?"
+                    + _ASK_BACK + r"\s*[.!?]*\s*$",
+                    r"^\s*" + _INTENSIFIER + _MOODS + _MOOD_THANKS + _ASK_BACK
+                    + r"\s*[.!?]*\s*$",
+                    r"^\s*" + _INTENSIFIER + _MOODS + _ASK_BACK_REQUIRED + r"\s*[.!?]*\s*$",
+                    r"^\s*(?:(?:honestly|to\s+be\s+honest|tbh|well|um+|hmm+)[,.]?\s+)?"
+                    r"(?:(?:i'?m|i\s+am|im|doing|feeling|things\s+are|it'?s\s+been|been)\s+)?"
+                    r"(?:(?:doing|feeling)\s+)?" + _LOW_MOODS
+                    + r"(?:,?\s+(?:tbh|to\s+be\s+honest|honestly|really|today|lately))*"
+                    + _MOOD_THANKS + r"?" + _ASK_BACK + r"\s*[.!?]*\s*$",
+                ],
+                handler=_small_talk,
+                examples=["how are you?"],
+            ),
+            Skill(
+                name="about-jarvis",
+                description="Say who Jarvis is, how it works and which version is running.",
+                patterns=[
+                    r"^\s*(?:(?:and|so)\s+)?(?:who|what)\s+(?:are|r)\s+(?:you|u)"
+                    r"(?:,?\s+jarvis)?" + _END,
+                    r"^\s*(?:what(?:'s|\s+is)\s+your\s+name|tell\s+me\s+(?:about\s+)?yourself"
+                    r"|introduce\s+yourself|who\s+am\s+i\s+(?:talking|speaking|chatting)"
+                    r"\s+(?:to|with)|what\s+should\s+i\s+call\s+you)" + _END,
+                    r"^\s*are\s+you\s+(?:an?\s+)?(?P<nature>robot|bot|ai|a\.i\.?"
+                    r"|artificial\s+intelligence|human|real|(?:real\s+)?person|machine"
+                    r"|computer|program|chat\s?bot|alive|sentient|conscious|chatgpt"
+                    r"|llm|(?:large\s+)?language\s+model)" + _END,
+                    r"^\s*(?P<maker>who\s+(?:made|created|built|wrote|programmed|designed"
+                    r"|developed)\s+you|where\s+(?:do|did)\s+you\s+come\s+from"
+                    r"|how\s+do\s+you\s+work|how\s+were\s+you\s+made)" + _END,
+                    r"^\s*(?P<version>what\s+version\s+(?:are\s+you|is\s+this"
+                    r"|of\s+jarvis\s+is\s+(?:this|running))|(?:jarvis\s+)?version"
+                    r"|what(?:'s|\s+is)\s+your\s+version)" + _END,
+                ],
+                handler=_about_jarvis,
+                examples=["who are you?"],
+            ),
+            Skill(
+                name="repeat",
+                description="Repeat my last reply.",
+                patterns=[
+                    r"^\s*(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
+                    r"(?:repeat|say)\s+(?:that|it|this)(?:\s+again)?(?:,?\s+please)?" + _END,
+                    r"^\s*(?:please\s+)?repeat(?:\s+(?:yourself|your\s+last\s+"
+                    r"(?:answer|reply|response)|the\s+last\s+(?:answer|reply|response)))?"
+                    r"(?:,?\s+please)?" + _END,
+                    r"^\s*(?:sorry,?\s+)?what\s+did\s+you\s+(?:just\s+)?say" + _END,
+                    r"^\s*(?:pardon(?:\s+me)?|come\s+again|say\s+again)" + _END,
+                ],
+                handler=_repeat,
+                examples=["say that again"],
+            ),
+            Skill(
                 name="greeting",
                 description="Greet Jarvis and start a conversation.",
                 patterns=[r"^\s*(hello|hi|hey|good (morning|afternoon|evening))\b"],
@@ -2473,9 +2903,16 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             Skill(
                 name="remember-name",
                 description="Remember how you would like to be addressed.",
-                patterns=[r"\bmy name is (?P<name>[\w .'-]+)"],
+                patterns=[
+                    r"\bmy name is (?P<name>[\w .'-]+)",
+                    r"^\s*(?:(?:you\s+can|please|just)\s+)?call\s+me\s+" + _NAME_VALUE
+                    + _NAME_TAIL,
+                    r"^\s*(?:please\s+)?(?:change|set|update|switch)\s+my\s+name\s+to\s+"
+                    + _NAME_VALUE + _NAME_TAIL,
+                    r"^\s*(?:i'?m|i\s+am)\s+called\s+" + _NAME_VALUE + _NAME_TAIL,
+                ],
                 handler=_remember_name,
-                examples=["my name is Charles"],
+                examples=["my name is Charles", "call me Chuck"],
             ),
             Skill(
                 name="recall-name",
@@ -2483,6 +2920,18 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 patterns=[r"\b(what('s| is) my name|who am i)\b"],
                 handler=_recall_name,
                 examples=["what is my name?"],
+            ),
+            Skill(
+                name="forget-name",
+                description="Forget the name you asked me to use.",
+                patterns=[
+                    r"^\s*(?:please\s+)?(?:forget|delete|erase|remove|clear|reset)\s+my\s+name"
+                    + _END,
+                    r"^\s*(?:please\s+)?(?:stop\s+calling\s+me|(?:don'?t|do\s+not)\s+call\s+me)"
+                    r"(?:\s+(?:that|by\s+(?:my\s+)?name|" + _NAME_WORD + r"))?" + _END,
+                ],
+                handler=_forget_name,
+                examples=["forget my name"],
             ),
             Skill(
                 name="traffic-signs",
@@ -2552,18 +3001,157 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["what cities are in Japan?"],
             ),
             Skill(
+                name="date-calculator",
+                description=(
+                    "Count days until or since a date, find the weekday of any date, "
+                    "add or subtract days, weeks, months or years, work out ages and "
+                    "check leap years."
+                ),
+                patterns=[
+                    # Countdowns.
+                    r"\bhow\s+many\s+(?:more\s+)?(?:days|weeks|sleeps)\s+(?:are\s+(?:there\s+)?"
+                    r"|is\s+it\s+|do\s+(?:i|we)\s+have\s+)?(?:left\s+|remaining\s+|to\s+go\s+)?"
+                    + _UNTIL + r"\s+(?P<until>[^?!]+)",
+                    r"\bhow\s+many\s+(?:more\s+)?(?:days|weeks|sleeps)\s+(?:are\s+)?(?:left\s+)?"
+                    r"to\s+" + _DATE_START + r"(?P<until>[^?!]+)",
+                    r"\bhow\s+long\s+(?:is\s+(?:it|there)\s+|do\s+(?:i|we)\s+have\s+"
+                    r"|have\s+(?:i|we)\s+got\s+|left\s+|to\s+go\s+)*(?:" + _UNTIL_WORDS
+                    + r"|to)\s+" + _DATE_START + r"(?P<until>[^?!]+)",
+                    r"^\s*(?:days|weeks|sleeps)\s+(?:left\s+)?(?:" + _UNTIL_WORDS
+                    + r"|to)\s+(?P<until>[^?!]+?)" + _END,
+                    r"\bcount\s*down\s+(?:to|until|till)\s+(?P<until>[^?!]+)",
+                    r"\bhow\s+many\s+days\s+(?:are\s+|is\s+it\s+)?(?:left|remaining)\s+"
+                    r"(?:in|of)\s+(?:the|this)\s+(?P<left_in>year|month)" + _END,
+                    # Time since a date and between two dates.
+                    r"\bhow\s+many\s+(?:days|weeks)\s+(?:has\s+it\s+been\s+|have\s+passed\s+"
+                    r"|has\s+passed\s+|is\s+it\s+|are\s+there\s+|have\s+gone\s+by\s+)?since\s+"
+                    r"(?P<since>[^?!]+)",
+                    r"\bhow\s+long\s+(?:(?:has\s+it\s+been|is\s+it)\s+)?since\s+" + _DATE_START
+                    + r"(?P<since>[^?!]+)",
+                    r"^\s*(?:days|weeks)\s+since\s+(?P<since>[^?!]+?)" + _END,
+                    r"\bhow\s+many\s+(?:days|weeks)\s+ago\s+(?:was|is)\s+(?P<since>[^?!]+)",
+                    r"\bhow\s+long\s+ago\s+(?:was|is)\s+" + _DATE_START + r"(?P<since>[^?!]+)",
+                    r"\bhow\s+many\s+(?:days|weeks)\s+(?:are\s+(?:there\s+)?|is\s+it\s+)?"
+                    r"between\s+(?P<first>[^?!]+?)\s+and\s+(?P<second>[^?!]+)",
+                    r"^\s*(?:days|weeks)\s+between\s+(?P<first>[^?!]+?)\s+and\s+"
+                    r"(?P<second>[^?!]+?)" + _END,
+                    r"\bhow\s+many\s+days\s+(?:are\s+(?:there\s+)?|is\s+it\s+)?from\s+"
+                    r"(?P<first>[^?!]+?)\s+(?:to|until|till)\s+(?P<second>[^?!]+)",
+                    # Adding and subtracting days, weeks, months and years.
+                    r"^\s*what(?:'s|\s+is|\s+will\s+be)\s+(?:the\s+)?(?:date|day)\s+"
+                    r"(?:in|after)\s+" + _DATE_SHIFT + _DATE_FROM_NOW + _END,
+                    r"^\s*what\s+(?:date|day)\s+(?:will\s+it\s+be|would\s+it\s+be|is\s+it)\s+"
+                    r"in\s+" + _DATE_SHIFT + _DATE_FROM_NOW + _END,
+                    r"^\s*what\s+will\s+(?:the\s+)?(?:date|day)\s+be\s+in\s+" + _DATE_SHIFT
+                    + _DATE_FROM_NOW + _END,
+                    r"^\s*" + _DATE_ASK + r"?" + _DATE_SHIFT
+                    + r"\s+(?P<direction>from\s+(?:now|today)|ago|hence)" + _END,
+                    r"^\s*" + _DATE_ASK + r"?" + _DATE_SHIFT
+                    + r"\s+(?P<direction>from|after|before)\s+(?P<base>[^?!]+?)" + _END,
+                    r"^\s*(?:please\s+)?(?P<direction>add|subtract|take(?:\s+away)?|minus)\s+"
+                    + _DATE_SHIFT + r"\s+(?:to|from|on\s+to|onto)\s+(?P<base>[^?!]+?)" + _END,
+                    # Leap years come before 'when is ...' countdowns.
+                    r"\b(?:when(?:'s|\s+is)|what(?:'s|\s+is))\s+the\s+next\s+"
+                    r"(?P<next_leap>leap\s+year)\b",
+                    r"^\s*(?:the\s+)?next\s+(?P<next_leap>leap\s+year)" + _END,
+                    r"\b(?:is|was|will)\s+(?P<leap_year>\d{1,4})\s+(?:be\s+)?a\s+"
+                    r"(?P<leap>leap\s+year)\b",
+                    r"\bis\s+(?:it|this\s+year)\s+a\s+(?P<leap>leap\s+year)(?:\s+this\s+year)?"
+                    + _END,
+                    r"^\s*(?P<leap>leap\s+year)\s+(?P<leap_year>\d{1,4})" + _END,
+                    r"^\s*when\s+is\s+" + _DATE_START + r"(?P<until>[^?!]+?)" + _END,
+                    # Weekdays of dates.
+                    r"\b(?:what|which)\s+day\s+(?:of\s+the\s+week\s+)?(?P<tense>is|was|will\s+be"
+                    r"|did|does|will|would\s+be)\s+(?!(?:it|today)\b)(?P<weekday>[^?!]+?)"
+                    + _DAY_TAIL + _END,
+                    r"\bwhat\s+date\s+(?P<tense>is|was|will\s+be|does|did)\s+"
+                    r"(?!(?:it|today)\b)(?P<weekday>[^?!]+?)" + _DAY_TAIL + _END,
+                    r"\bwhat(?:'s|\s+is|\s+was)\s+the\s+(?:date|day)\s+(?:of|on|for)\s+"
+                    r"(?P<weekday>[^?!]+?)" + _END,
+                    r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?date\s+(?P<weekday>tomorrow|yesterday)"
+                    + _END,
+                    r"\bwhat(?:'s|\s+is|\s+was|\s+will\s+be)\s+(?P<weekday>tomorrow|yesterday)"
+                    r"(?:'s|s)\s+date\b",
+                    r"\bwhat\s+(?:day|date)\s+(?P<tense>was|is|will)\s+it(?:\s+be)?\s+"
+                    r"(?P<weekday>yesterday|tomorrow|the\s+day\s+after\s+tomorrow"
+                    r"|the\s+day\s+before\s+yesterday)" + _END,
+                    r"\bday\s+of\s+the\s+week\s+(?:for|of|on)\s+(?P<weekday>[^?!]+?)" + _END,
+                    r"^\s*(?P<weekday>\d{4}-\d{2}-\d{2})" + _END,
+                    # Ages, month lengths and year lengths.
+                    r"\bhow\s+old\b[^?!]*?\bborn\s+(?:on|in)\s+(?P<born>[^?!]+?)" + _END,
+                    r"\bage\s+of\s+(?:someone|somebody|a\s+person|a\s+child|a\s+baby)\s+born\s+"
+                    r"(?:on|in)\s+(?P<born>[^?!]+?)" + _END,
+                    r"\b(?:i\s+was|i'?m|im)\s+born\s+(?:on|in)\s+(?P<born>[^?!,;]+?)[,.;]?\s+"
+                    r"(?:so\s+)?how\s+old\s+am\s+i" + _END,
+                    r"\bhow\s+many\s+days\s+(?:are\s+(?:there\s+)?|does\s+|has\s+)?(?:in\s+)?"
+                    r"(?P<month>" + dates.MONTH_PATTERN + r")\.?(?:\s+(?P<month_year>\d{4}))?"
+                    r"(?:\s+(?:have|got))?" + _END,
+                    r"\bhow\s+many\s+days\s+(?:are\s+(?:there\s+)?|does\s+|has\s+)?(?:in\s+)?"
+                    r"(?:(?:a|one|the)\s+)?(?P<year_days>(?:leap\s+)?year|\d{4})"
+                    r"(?:\s+(?:have|got))?" + _END,
+                ],
+                handler=_date_calculator,
+                examples=["how many days until Christmas?", "what day of the week is 1 January 2027?"],
+            ),
+            Skill(
+                name="world-clock",
+                description=(
+                    "Tell the current time in a city, country or time zone, or the "
+                    "time difference between two places."
+                ),
+                patterns=[
+                    r"\btime\s+difference\s+(?:between|from|of)\s+(?P<place>[^?!]+?)\s+"
+                    r"(?:and|to)\s+(?P<other>[^?!]+?)" + _END,
+                    r"\bhow\s+(?:many\s+hours|far)\s+(?:ahead|behind)\s+is\s+"
+                    r"(?P<place>[^?!]+?)\s+(?:of|from|than)\s+(?P<other>[^?!]+?)" + _END,
+                    r"\btime\s+difference\s+(?:with|to|in|for)\s+" + _PLACE,
+                    r"\bwhat\s+time\s+is\s+it\s+(?:now\s+|right\s+now\s+|currently\s+)?"
+                    r"(?:in|at)\s+" + _PLACE,
+                    r"\bwhat(?:'s|\s+is)\s+the\s+(?:current\s+|local\s+|exact\s+)?time\s+"
+                    r"(?:now\s+|right\s+now\s+)?(?:in|at)\s+" + _PLACE,
+                    r"\b(?:current|local)\s+time\s+(?:in|at|for)\s+" + _PLACE,
+                    r"\b(?:tell|give|show)\s+me\s+the\s+(?:current\s+|local\s+)?time\s+"
+                    r"(?:in|at|for)\s+" + _PLACE,
+                    r"\bwhat\s+(?:day|date)\s+is\s+it\s+(?:now\s+)?in\s+" + _PLACE,
+                    r"^\s*(?:the\s+)?time\s+(?:now\s+)?in\s+" + _PLACE,
+                ],
+                handler=_world_clock,
+                examples=["what time is it in Tokyo?", "time difference between London and Tokyo"],
+            ),
+            Skill(
                 name="time",
                 description="Report the current time.",
-                patterns=[r"\bwhat('s| is)? ?the time\b", r"\bcurrent time\b"],
+                patterns=[
+                    r"\bwhat('s| is)? ?the time\b",
+                    r"\bcurrent time\b",
+                    r"^\s*what\s+time\s+is\s+it(?:\s+(?:now|right\s+now|here))?" + _END,
+                    r"^\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:tell|give)\s+me\s+"
+                    r"the\s+time(?:,?\s+please)?" + _END,
+                    r"^\s*(?:the\s+)?time(?:,?\s+please)?" + _END,
+                    r"^\s*(?:do\s+you\s+(?:have|know)\s+the\s+time|what\s+time\s+do\s+you\s+have)"
+                    + _END,
+                ],
                 handler=_current_time,
                 examples=["what is the time?"],
             ),
             Skill(
                 name="date",
-                description="Report today's date.",
+                description="Report today's date, the year, month, week number or day of the year.",
                 patterns=[
                     r"\bwhat('s| is)? ?(today'?s )?date\b",
                     r"\bwhat day is it\b",
+                    r"^\s*(?:(?:what(?:'s|\s+is)|tell\s+me|give\s+me)\s+)?(?:the\s+)?"
+                    r"(?:current\s+|today'?s\s+)?date(?:\s+today)?(?:,?\s+please)?" + _END,
+                    r"^\s*what(?:'s|\s+is)\s+today" + _END,
+                    r"^\s*what\s+day\s+(?:of\s+the\s+week\s+)?is\s+(?:it|today)(?:\s+today)?"
+                    + _END,
+                    r"^\s*what\s+(?P<year_asked>year)\s+is\s+it(?:\s+now)?" + _END,
+                    r"^\s*what\s+(?P<month_asked>month)\s+is\s+it(?:\s+now)?" + _END,
+                    r"^\s*what\s+(?P<week_asked>week)(?:\s+number)?\s+is\s+it" + _END,
+                    r"^\s*what(?:'s|\s+is)\s+the\s+(?:current\s+)?(?P<week_asked>week)\s+number"
+                    + _END,
+                    r"^\s*what\s+(?P<day_of_year>day\s+of\s+the\s+year)\s+is\s+it(?:\s+today)?"
+                    + _END,
                 ],
                 handler=_current_date,
                 examples=["what is today's date?"],
@@ -2634,7 +3222,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"\btranslate\b[^\n]*\b(dna|rna|codon|sequence|protein)\b",
                     r"\b(punnett|monohybrid)\b",
                     r"\b(genotype|phenotype|offspring)\b[^\n]*\bcross\b",
-                    r"\b(?:find|calculate|compute|work out|what(?:'s| is)|how (?:fast|far|long|much))\b[^\n]*\b(force|weight|kinetic energy|potential energy|momentum|density|voltage|current|resistance|pressure|acceleration|velocity|speed|work done|power)\b[^\n]*\d",
+                    r"\b(?:find|calculate|compute|work out|what(?:'s| is)|how (?:fast|far|long|much))\b[^\n]*\b(force|weight|kinetic energy|potential energy|momentum|density|voltage|current|resistance|pressure|acceleration|velocity|speed|work done|(?<!to the )(?<!\d(?:st|nd|rd|th) )power)\b[^\n]*\d",
                     r"\bhow (?:fast|far|long)\b[^\n]*\d",
                 ],
                 handler=_science,
@@ -2708,14 +3296,66 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["convert 10 km to miles", "how many pounds is 70 kg"],
             ),
             Skill(
-                name="calculator",
-                description="Evaluate basic arithmetic expressions.",
+                name="percentages",
+                description=(
+                    "Work out percentages, percentage changes, discounts, tips and "
+                    "increases or decreases by a percentage."
+                ),
                 patterns=[
-                    r"^\s*(calculate|compute|what is|what's)\s+(?P<expression>[-+*/%(). \d]+)\s*\??\s*$",
-                    r"^\s*(?P<expression>[-+*/%(). \d]*\d[-+*/%(). \d]*[-+*/%][-+*/%(). \d]*)\s*$",
+                    r"^\s*" + _amount("part") + r"\s+is\s+what\s+" + _PERCENT_WORD + r"\s+of\s+"
+                    + _amount("whole", "cur2") + _PERCENT_END,
+                    r"^\s*what\s+" + _PERCENT_WORD + r"\s+of\s+" + _amount("whole")
+                    + r"\s+is\s+" + _amount("part", "cur2") + _PERCENT_END,
+                    r"^\s*what\s+" + _PERCENT_WORD + r"\s+is\s+" + _amount("part")
+                    + r"\s+(?:out\s+)?of\s+" + _amount("whole", "cur2") + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _amount("part") + r"\s+(?:out\s+)?of\s+"
+                    + _amount("whole", "cur2") + r"\s+(?:as\s+an?|in)\s+" + _PERCENT_WORD
+                    + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _amount("part") + r"\s+as\s+an?\s+" + _PERCENT_WORD
+                    + r"\s+of\s+" + _amount("whole", "cur2") + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + r"(?:the\s+)?" + _PERCENT_WORD
+                    + r"\s+(?:change|increase|decrease|difference|rise|drop|growth|fall)\s+"
+                    r"(?:from\s+|between\s+)?" + _amount("start") + r"\s+(?:to|and)\s+"
+                    + _amount("end", "cur2") + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + r"(?:an?\s+|the\s+)?" + _RATE
+                    + r"\s+(?P<tip>tip|gratuity|service\s+charge)\s+(?:on|for|of)\s+(?:an?\s+)?"
+                    + _amount("amount") + r"(?:\s+(?:bill|meal|check|cheque|tab))?"
+                    + _PERCENT_END,
+                    r"^\s*(?:calculate\s+)?(?:an?\s+|the\s+)?(?P<tip>tip|gratuity)\s+(?:of\s+)?"
+                    + _RATE + r"\s+(?:on|for)\s+(?:an?\s+)?" + _amount("amount")
+                    + r"(?:\s+(?:bill|meal|check|cheque|tab))?" + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _RATE + r"\s+(?P<off>off|discount\s+on)\s+"
+                    r"(?:of\s+)?(?:an?\s+)?" + _amount("amount") + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _amount("amount") + r"\s+(?:with|after)\s+(?:an?\s+)?"
+                    + _RATE + r"\s+(?P<off>off|discount)" + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + r"(?P<direction>increase|raise|grow|decrease"
+                    r"|reduce|lower|cut|drop)\s+" + _amount("amount") + r"\s+by\s+" + _RATE
+                    + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _amount("amount") + r"\s+(?P<direction>increased"
+                    r"|raised|grown|decreased|reduced|lowered|cut|dropped)\s+by\s+" + _RATE
+                    + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _amount("amount")
+                    + r"\s*(?P<direction>\+|-|plus|minus|less)\s*" + _RATE + _PERCENT_END,
+                    r"^\s*" + _PERCENT_ASK + _RATE + r"\s+of\s+(?:an?\s+)?" + _amount("amount")
+                    + _PERCENT_END,
+                ],
+                handler=_percentages,
+                examples=["what is 15% of 80?", "increase 80 by 15%"],
+            ),
+            Skill(
+                name="calculator",
+                description=(
+                    "Evaluate arithmetic, including powers, square and cube roots, "
+                    "and symbols such as ^, × and ÷."
+                ),
+                patterns=[
+                    r"^\s*(?:please\s+)?(?:calculate|compute|evaluate|work\s+out|what\s+is"
+                    r"|what's|whats|how\s+much\s+is)\s+(?:the\s+)?" + _CALC_EXPRESSION
+                    + _CALC_END,
+                    r"^\s*" + _CALC_HAS_OPERATOR + _CALC_EXPRESSION + _CALC_END,
                 ],
                 handler=_calculate,
-                examples=["calculate 21 * 2"],
+                examples=["calculate 21 * 2", "what is the square root of 144?"],
             ),
             Skill(
                 name="add-knowledge-website",
@@ -2772,29 +3412,72 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             ),
             Skill(
                 name="delete-note",
-                description="Delete a single note by its number.",
+                description="Delete a single note by its number, or the first or last one.",
                 patterns=[
                     r"^\s*(delete|remove|forget|erase)( my)? note"
-                    r"(?: number)?\s*#?(?P<index>\d+)\s*[.!]?\s*$"
+                    r"(?: number)?\s*#?(?P<index>\d+)\s*[.!]?\s*$",
+                    r"^\s*(?:delete|remove|forget|erase)\s+(?:the|my)\s+" + _NOTE_POSITION
+                    + r"\s+note\s*[.!]?\s*$",
                 ],
                 handler=_delete_note,
-                examples=["delete note 2"],
+                examples=["delete note 2", "delete the last note"],
+            ),
+            Skill(
+                name="edit-note",
+                description="Change the text of a note.",
+                patterns=[
+                    r"^\s*(?:edit|change|update|replace|correct|fix|rewrite)\s+(?:my\s+)?note"
+                    r"(?:\s+number)?\s*#?(?P<index>\d+)" + _NOTE_NEW_TEXT,
+                    r"^\s*(?:edit|change|update|replace|correct|fix|rewrite)\s+(?:the|my)\s+"
+                    + _NOTE_POSITION + r"\s+note" + _NOTE_NEW_TEXT,
+                ],
+                handler=_edit_note,
+                examples=["change note 2 to call dad"],
             ),
             Skill(
                 name="add-note",
                 description="Store a note for later.",
                 patterns=[
-                    r"^\s*(remember|note|take a note)(?: that)?[:,]?\s+(?P<note>.+)$"
+                    r"^\s*(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
+                    r"|jot\s+down)(?:\s+(?:that|to)\b)?[:,]?\s+(?P<note>.+)$"
                 ],
                 handler=_add_note,
                 examples=["remember buy milk"],
             ),
             Skill(
+                name="search-notes",
+                description="Find the notes that mention something.",
+                patterns=[
+                    r"^\s*(?:search|check|look\s+through|go\s+through)\s+(?:in\s+|through\s+)?"
+                    r"(?:my\s+)?notes\s+(?:for|about)\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:find|look\s+for|search\s+for|look\s+up)\s+(?P<query>.+?)\s+in\s+"
+                    r"my\s+notes" + _END,
+                    r"^\s*(?:show|list|find)\s+(?:me\s+)?(?:my\s+|the\s+)?notes\s+(?:about|on"
+                    r"|mentioning|containing|with|that\s+mention)\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:do\s+i\s+have\s+(?:a|any)\s+notes?|is\s+there\s+a\s+note"
+                    r"|are\s+there\s+(?:any\s+)?notes)\s+(?:about|on|for|mentioning|containing"
+                    r"|with|that\s+mentions?)\s+(?P<query>.+?)" + _END,
+                    r"^\s*which\s+notes?\s+(?:mentions?|contains?|(?:is|are)\s+about)\s+"
+                    r"(?P<query>.+?)" + _END,
+                ],
+                handler=_search_notes,
+                examples=["search my notes for milk"],
+            ),
+            Skill(
                 name="list-notes",
-                description="List the notes you asked me to keep.",
-                patterns=[r"\b(list|show|read)( me)?( my)? notes\b"],
+                description="List the notes you asked me to keep, or count them.",
+                patterns=[
+                    r"\b(list|show|read)( me)?( my)? notes\b",
+                    r"\b(?:list|show|read|give)(?:\s+me)?\s+(?:all\s+(?:of\s+)?)?(?:my\s+|the\s+)?"
+                    r"notes\b",
+                    r"^\s*(?:what\s+are|what's\s+in|what\s+is\s+in)\s+my\s+notes" + _END,
+                    r"^\s*(?:my\s+)?notes" + _END,
+                    r"^\s*do\s+i\s+have\s+any\s+notes" + _END,
+                    r"^\s*how\s+many\s+(?P<count>notes)\s+(?:do\s+i\s+have|have\s+i\s+got"
+                    r"|are\s+there|did\s+i\s+(?:make|take|save))" + _END,
+                ],
                 handler=_list_notes,
-                examples=["list my notes"],
+                examples=["list my notes", "how many notes do I have?"],
             ),
             Skill(
                 name="clear-notes",
@@ -2885,10 +3568,13 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             ),
             Skill(
                 name="farewell",
-                description="Say goodbye.",
-                patterns=[r"^\s*(bye|goodbye|see you)\b"],
+                description="Say goodbye or good night.",
+                patterns=[
+                    r"^\s*(bye|goodbye|see you)\b",
+                    r"^\s*(?:good\s*night|night\s+night|nighty\s+night|farewell)\b",
+                ],
                 handler=_farewell,
-                examples=["goodbye"],
+                examples=["goodbye", "good night"],
             ),
             Skill(
                 name="gmdss-topics",

@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from jarvis.assistant import FALLBACK_RESPONSE, Assistant
 from jarvis.memory import Memory
+from jarvis.skills import THANKS_REPLIES
 
 
 FIXED_NOW = datetime(2026, 9, 18, 14, 30)
@@ -358,6 +359,118 @@ class AssistantTests(unittest.TestCase):
     def test_history_records_exchanges(self):
         self.assistant.respond("hello")
         self.assertEqual(len(self.assistant.history), 1)
+
+
+class EverydaySkillTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.assistant = make_assistant()
+
+    def skill_for(self, text):
+        resolved = self.assistant._resolve(text)
+        return resolved[0].name if resolved else None
+
+    def test_time_and_date_phrasings(self):
+        for text in ("what time is it", "what time is it now?", "time", "tell me the time please"):
+            with self.subTest(text=text):
+                self.assertEqual(self.assistant.respond(text), "It is 14:30.")
+        self.assertEqual(self.assistant.respond("what's the date"), "Today is Friday, 18 September 2026.")
+        self.assertEqual(self.assistant.respond("what year is it?"), "It is 2026.")
+        self.assertIn("week 38 of 2026", self.assistant.respond("what week number is it"))
+
+    def test_world_clock_routes(self):
+        self.assertTrue(self.assistant.respond("what time is it in Tokyo?").startswith("In Tokyo it is"))
+        self.assertIn("ahead of London", self.assistant.respond("time difference between Tokyo and London"))
+        self.assertIn("'Narnia'", self.assistant.respond("what time is it in Narnia?"))
+
+    def test_date_calculator(self):
+        self.assertEqual(
+            self.assistant.respond("how many days until Christmas?"),
+            "There are 98 days (14 weeks) until Christmas (Friday, 25 December 2026).",
+        )
+        self.assertEqual(
+            self.assistant.respond("what day of the week is 1 January 2027?"),
+            "1 January 2027 is a Friday.",
+        )
+        self.assertEqual(
+            self.assistant.respond("what's the date in 2 weeks"),
+            "2 weeks from today is Friday, 2 October 2026.",
+        )
+        self.assertIn("364 days", self.assistant.respond("how many days from 1 Jan to 31 Dec"))
+        self.assertTrue(self.assistant.respond("how long since 1 January 2000").startswith("It has been"))
+        self.assertIn("30 May 2026", self.assistant.respond("what date is 90 days after 1 March 2026"))
+        self.assertIn("16 September 2026", self.assistant.respond("what date was 2 days ago"))
+        self.assertTrue(self.assistant.respond("is 2028 a leap year?").startswith("Yes"))
+        self.assertTrue(
+            self.assistant.respond("how old am I if I was born on 5 May 1990").startswith("You were born on")
+        )
+
+    def test_date_calculator_leaves_other_questions_alone(self):
+        self.assertNotEqual(self.skill_for("how long to boil an egg"), "date-calculator")
+        self.assertNotEqual(self.skill_for("how long since I last ate"), "date-calculator")
+        self.assertEqual(self.skill_for("how long to travel 100 km at 50 km/h"), "science-solver")
+        self.assertEqual(self.skill_for("what is the time?"), "time")
+
+    def test_maths(self):
+        self.assertEqual(self.assistant.respond("what is 2 to the power of 10?"), "2 to the power of 10 = 1024")
+        self.assertEqual(self.assistant.respond("what's the square root of 144"), "square root of 144 = 12")
+        self.assertEqual(self.assistant.respond("calculate 2 + 2."), "2 + 2 = 4")
+        self.assertEqual(self.assistant.respond("what is 15% of 80?"), "15% of 80 is 12.")
+        self.assertEqual(self.assistant.respond("80 less 15%"), "80 decreased by 15% is 68 (a change of 12).")
+        self.assertEqual(self.assistant.respond("what is 20% off $50"), "20% off $50 is $40, a saving of $10.")
+        self.assertEqual(self.assistant.respond("what percent is 30 out of 120"), "30 is 25% of 120.")
+        self.assertEqual(self.assistant.respond("what is 1 as a percentage of 3?"), "1 is about 33.33% of 3.")
+        self.assertEqual(
+            self.assistant.respond("express 30 out of 120 as a percentage"), "30 is 25% of 120."
+        )
+
+    def test_small_talk(self):
+        self.assertIn("How are you?", self.assistant.respond("how are you?"))
+        self.assertIn("Glad to hear it", self.assistant.respond("not bad, how about you?"))
+        self.assertIn("sorry to hear that", self.assistant.respond("not great"))
+        self.assertIn(self.assistant.respond("thank you"), [reply.format(name="") for reply in THANKS_REPLIES])
+        self.assertIn("Paris", self.assistant.respond("thanks, what is the capital of France"))
+        self.assertIn(f"{len(self.assistant.registry)} skills", self.assistant.respond("who are you?"))
+        self.assertEqual(self.assistant.respond("good night"), "Good night. Sleep well.")
+
+    def test_small_talk_does_not_shadow_support_skills(self):
+        self.assertEqual(self.skill_for("not great, i want to die"), "crisis-support")
+        self.assertEqual(self.skill_for("i am not ok"), "emotional-support")
+        self.assertEqual(self.skill_for("i feel great"), "psychiatrist")
+
+    def test_repeat(self):
+        self.assertEqual(self.assistant.respond("say that again"), "I have not said anything yet.")
+        self.assistant.respond("what is the time?")
+        self.assertEqual(self.assistant.respond("pardon?"), "It is 14:30.")
+
+    def test_names(self):
+        self.assertIn("Chuck", self.assistant.respond("call me chuck please"))
+        self.assertEqual(self.assistant.respond("what is my name?"), "You are Chuck.")
+        self.assertIn(", Chuck.", self.assistant.respond("thanks"))
+        self.assertIn("call you Ada from now on", self.assistant.respond("change my name to Ada"))
+        self.assertIn("forgotten", self.assistant.respond("forget my name"))
+        self.assertIn("do not know your name", self.assistant.respond("what is my name?"))
+        self.assertIsNone(self.skill_for("call me later"))
+
+    def test_notes(self):
+        for note in ("buy milk", "call mum", "buy more milk"):
+            self.assistant.respond(f"remember {note}")
+        self.assertEqual(
+            self.assistant.respond("how many notes do I have?"),
+            "You have 3 notes. Say 'list my notes' to read them.",
+        )
+        self.assertEqual(
+            self.assistant.respond("search my notes for milk"),
+            "2 notes mention 'milk':\n1. buy milk\n3. buy more milk",
+        )
+        self.assertEqual(
+            self.assistant.respond("change note 2 to call dad"),
+            "Updated note 2 from 'call mum' to 'call dad'.",
+        )
+        self.assertIn("Deleted note 3: buy more milk", self.assistant.respond("delete the last note"))
+        self.assertEqual(
+            self.assistant.respond("list my notes"), "You have 2 notes:\n1. buy milk\n2. call dad"
+        )
+        self.assertIn("None of your 2 notes", self.assistant.respond("search my notes for bread"))
 
 
 if __name__ == "__main__":

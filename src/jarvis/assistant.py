@@ -28,7 +28,9 @@ class Assistant:
         self.memory = memory if memory is not None else Memory()
         self.registry = registry if registry is not None else build_default_registry()
         self.history: List[tuple[str, str]] = []
-        self._context = SkillContext(memory=self.memory, registry=self.registry, now=now)
+        self._context = SkillContext(
+            memory=self.memory, registry=self.registry, now=now, history=self.history
+        )
 
     def greet(self) -> str:
         user = self.memory.get("user_name")
