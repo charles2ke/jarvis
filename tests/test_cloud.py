@@ -79,7 +79,7 @@ class CloudSessionTests(unittest.TestCase):
         self.assertEqual(session.session_id, "abc123")
         self.assertEqual(session.url, "https://example.test/1")
         self.assertEqual(captured["body"]["problem_statement"], "why is the sky blue?")
-        self.assertEqual(captured["body"]["model"], "claude-opus-5")
+        self.assertEqual(captured["body"]["model"], "claude-opus-5.5")
         self.assertEqual(captured["body"]["reasoning_effort"], "max")
         self.assertIn("charles2ke/jarvis", captured["url"])
         self.assertEqual(captured["auth"], "Bearer " + "t0ken")
@@ -121,12 +121,12 @@ class CloudSessionTests(unittest.TestCase):
     def test_summary_mentions_model_and_link(self):
         summary = CloudSession(
             repository="charles2ke/jarvis",
-            model="claude-opus-5",
+            model="claude-opus-5.5",
             query="what is this repo?",
             session_id="abc",
             url="https://example.test/1",
         ).summary()
-        self.assertIn("claude-opus-5", summary)
+        self.assertIn("claude-opus-5.5", summary)
         self.assertIn("max", summary)
         self.assertIn("https://example.test/1", summary)
 

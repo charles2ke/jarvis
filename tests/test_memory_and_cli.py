@@ -9,6 +9,7 @@ from unittest import mock
 
 from jarvis.cli import main
 from jarvis.memory import Memory
+from jarvis.style import strip_ansi
 
 
 def run_cli(argv, stdin=None):
@@ -101,6 +102,22 @@ class CliTests(unittest.TestCase):
         exit_code, output = run_cli(["--list-skills"])
         self.assertEqual(exit_code, 0)
         self.assertIn("calculator:", output)
+
+    def test_color_always_styles_session_without_changing_text(self):
+        exit_code, output = run_cli(
+            ["--no-memory", "--color", "always"], stdin="calculate 2 + 2\nexit\n"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("\x1b[1;36mjarvis>\x1b[0m 2 + 2 = 4", output)
+        plain = strip_ansi(output)
+        self.assertIn("jarvis> 2 + 2 = 4", plain)
+        self.assertIn("Jarvis v", plain.splitlines()[0])
+
+    def test_color_never_beats_force_color(self):
+        with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            _, output = run_cli(["--no-memory", "--color", "never", "help", "calc"])
+        self.assertNotIn("\x1b[", output)
+        self.assertIn("- calculator:", output)
 
 
 if __name__ == "__main__":

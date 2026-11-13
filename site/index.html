@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>{{title}}</title>
+  <meta name="description" content="{{description}}">
+  <link rel="canonical" href="{{base_url}}">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <meta name="author" content="charles2ke">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#070b18" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f7ff" media="(prefers-color-scheme: light)">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Jarvis">
+  <meta property="og:locale" content="en_GB">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <meta property="og:url" content="{{base_url}}">
+  <meta property="og:image" content="{{og_image}}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Jarvis: a private, offline-first AI companion for your terminal">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{title}}">
+  <meta name="twitter:description" content="{{description}}">
+  <meta name="twitter:image" content="{{og_image}}">
+  <meta name="twitter:image:alt" content="Jarvis: a private, offline-first AI companion for your terminal">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="manifest" href="assets/site.webmanifest">
+  <link rel="alternate" type="application/json" href="skills.json" title="Every Jarvis skill as JSON">
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="assets/theme.js"></script>
+  <script src="assets/app.js" defer></script>
+  <script type="application/ld+json">{{structured_data}}</script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <nav class="nav wrap" aria-label="Main">
+      <a class="brand" href="./">
+        <svg class="logo" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="logo-gradient-nav" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#22d3ee"/>
+              <stop offset=".55" stop-color="#8b5cf6"/>
+              <stop offset="1" stop-color="#f472b6"/>
+            </linearGradient>
+          </defs>
+          <rect x="12" y="12" width="40" height="40" rx="11" transform="rotate(45 32 32)" fill="url(#logo-gradient-nav)"/>
+          <path d="M37 21v14.5a6 6 0 0 1-12 0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Jarvis</span>
+        <span class="brand-version">v{{version}}</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#skills">Skills</a></li>
+        <li><a href="#demo">Demo</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#data">Data</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a class="btn btn-small btn-ghost" href="{{repo_url}}">
+          GitHub
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
+        <button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch to light theme" title="Switch to light theme" hidden>
+          <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.6 6.6 0 0 0 10.6 10.6z"/></svg>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="aurora" aria-hidden="true">
+        <span class="blob blob-1"></span>
+        <span class="blob blob-2"></span>
+        <span class="blob blob-3"></span>
+      </div>
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="wrap hero-inner">
+        <a class="pill" href="#data">
+          <span class="pill-tag">v{{version}}</span>
+          <span>Fresh world data and a colourful new terminal</span>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <h1 id="hero-title">Your private AI companion, <span class="gradient-text">right in your terminal.</span></h1>
+        <p class="lead">Jarvis brings {{skill_count}} skills to your command line, from wellbeing check-ins and poems to unit conversions, braille and sign language. It runs on plain Python, works offline and keeps your data in a file you own.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#install">
+            Get started
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="#demo">See it in action</a>
+        </div>
+        <ul class="stats" aria-label="Jarvis at a glance">
+          <li><strong>{{skill_count}}</strong><span>skills</span></li>
+          <li><strong>{{topic_count}}</strong><span>searchable topics</span></li>
+          <li><strong>{{country_count}}</strong><span>places with emergency numbers</span></li>
+          <li><strong>0</strong><span>dependencies</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="skills" class="explorer" aria-labelledby="skills-title">
+      <div class="dock-sentinel" id="dock-sentinel" aria-hidden="true"></div>
+      <div class="search-dock" id="search-dock">
+        <div class="wrap">
+          <form class="search" id="search-form" role="search" action="./" method="get">
+            <label class="visually-hidden" for="q">Search skills and topics</label>
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" name="q" type="search" placeholder="Search {{skill_count}} skills and {{topic_count}} topics…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-controls="skill-grid" aria-describedby="result-count">
+            <kbd class="search-key" title="Press / to search">/</kbd>
+            <button type="button" class="search-clear" data-action="clear" aria-label="Clear search">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </form>
+          <div class="chips" id="chips" role="group" aria-label="Filter by category">{{chips}}</div>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="explorer-head">
+          <h2 id="skills-title">Explore every skill</h2>
+          <p class="result-count" id="result-count">Showing all {{skill_count}} skills</p>
+          <p class="visually-hidden" id="result-status" role="status"></p>
+        </div>
+        <p class="suggestions" id="suggestions"><span class="suggestions-label">Try</span> {{suggestions}}</p>
+        <p class="notice" id="did-you-mean" hidden></p>
+        <div class="grid" id="skill-grid">
+{{cards}}
+        </div>
+        <div class="empty" id="empty-state" hidden>
+          <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8.5 11h5"/></svg>
+          <p class="empty-title" id="empty-title">No skills match your search</p>
+          <p>Try a broader word, choose another category, or <button type="button" class="link-button" data-action="clear">clear the search</button>.</p>
+          <p id="empty-elsewhere" hidden><button type="button" class="btn btn-small btn-ghost" data-action="all-categories">Search every category</button></p>
+        </div>
+        <div class="show-all" id="show-all-wrap" hidden>
+          <button type="button" class="btn btn-ghost" id="show-all">
+            Show all {{skill_count}} skills
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="demo" class="section" aria-labelledby="demo-title">
+      <div class="wrap demo-layout">
+        <div class="demo-copy reveal">
+          <p class="kicker">Live demo</p>
+          <h2 id="demo-title">Real answers, straight from Jarvis</h2>
+          <p>Each reply below was produced by the assistant itself when this page was built. Pick a prompt to replay it.</p>
+          <ul class="demo-tabs" aria-label="Example prompts">{{demo_tabs}}</ul>
+        </div>
+        <div class="terminal reveal">
+          <div class="terminal-bar" aria-hidden="true">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="terminal-title">jarvis — interactive session</span>
+          </div>
+          <div class="terminal-body" id="terminal-body" role="region" aria-label="Terminal output" tabindex="0">{{demo_intro}}<div class="term-log" id="terminal-log" aria-live="polite">{{demo_first}}</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section" aria-labelledby="features-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="kicker">Why Jarvis</p>
+          <h2 id="features-title">Small, private and made for everyone</h2>
+        </div>
+        <div class="features">
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><path d="M12 3l8 3v6c0 5-3.4 8.1-8 9-4.6-.9-8-4-8-9V6l8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <h3>Private by design</h3>
+            <p>Memory is a single JSON file you own, or RAM only with <code>--no-memory</code>. Mood check-ins are never written to disk.</p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/></svg></span>
+            <h3>Zero dependencies</h3>
+            <p>Just the Python 3.10+ standard library, with nothing to compile. You can read exactly how every answer was produced.</p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="4.5" r="1.6"/><path d="M5 8.5 12 10l7-1.5M12 10v4l-3 6.5M12 14l3 6.5"/></svg></span>
+            <h3>Accessible</h3>
+            <p>Read and write braille, learn ASL signs and fingerspelling, and hear replies aloud with <code>--speak</code>.</p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"/></svg></span>
+            <h3>Safety first</h3>
+            <p>Crisis support is checked before any other skill, so messages about self-harm get help lines first. Emergency numbers cover {{country_count}} countries and territories, and anything that acts in the real world is opt-in.</p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><path d="M7 18h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.3 9.6 4.2 4.2 0 0 0 7 18z"/></svg></span>
+            <h3>Cloud only when you ask</h3>
+            <p>Only two skills ever use the network. <code>answer</code> starts a GitHub Copilot cloud session (default model <code>{{cloud_model}}</code>), and only once you provide a token.</p>
+          </article>
+          <article class="feature reveal">
+            <span class="feature-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span>
+            <h3>A terminal that shines</h3>
+            <p>Colour, a banner and readline-safe prompts in a real terminal. Plain text in pipes, with <code>NO_COLOR</code> or with <code>--color never</code>.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section" aria-labelledby="install-title">
+      <div class="wrap install-layout">
+        <div class="section-head reveal">
+          <p class="kicker">Get started</p>
+          <h2 id="install-title">Install in one line</h2>
+          <p>You need Python 3.10 or newer. Nothing else.</p>
+        </div>
+        <ol class="steps reveal">
+          <li class="step">
+            <h3>Install from GitHub</h3>
+            <div class="codeblock"><code>pip install git+https://github.com/charles2ke/jarvis.git</code><button type="button" class="copy" data-copy="pip install git+https://github.com/charles2ke/jarvis.git" aria-label="Copy the install command">Copy</button></div>
+          </li>
+          <li class="step">
+            <h3>Start a session</h3>
+            <div class="codeblock"><code>jarvis</code><button type="button" class="copy" data-copy="jarvis" aria-label="Copy the session command">Copy</button></div>
+          </li>
+          <li class="step">
+            <h3>Or ask a single question</h3>
+            <div class="codeblock"><code>jarvis "what time zone is Japan in?"</code><button type="button" class="copy" data-copy="jarvis &quot;what time zone is Japan in?&quot;" aria-label="Copy the one-shot command">Copy</button></div>
+          </li>
+        </ol>
+        <p class="fine-print reveal">The <code>jarvis</code> package on PyPI is an unrelated project, so install from GitHub as shown. To work on Jarvis itself, clone the repository and run <code>pip install -e .</code></p>
+      </div>
+    </section>
+
+    <section id="data" class="section" aria-labelledby="data-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="kicker">Fresh and sourced</p>
+          <h2 id="data-title">Checked against trusted sources</h2>
+          <p>For v{{version}}, the built-in facts were reviewed against the references below. The data ships with Jarvis so it works offline, but it is a snapshot, so confirm anything critical locally.</p>
+        </div>
+        <ul class="sources">
+          <li class="source reveal"><h3>Population</h3><p>UN World Population Prospects 2024, medium-variant figures for mid-2026.</p></li>
+          <li class="source reveal"><h3>City notes</h3><p>Lagos and São Paulo descriptions corrected using UN World Urbanization Prospects 2025.</p></li>
+          <li class="source reveal"><h3>Time zones</h3><p>Every zone and offset checked against the IANA Time Zone Database 2026f.</p></li>
+          <li class="source reveal"><h3>Currencies</h3><p>Checked against Unicode CLDR 49.</p></li>
+          <li class="source reveal"><h3>Maritime safety</h3><p>IMO SOLAS chapter IV, as modernised on 1 January 2024.</p></li>
+          <li class="source reveal"><h3>Emergency numbers</h3><p>Compared with Google's libphonenumber v9.0.43. Where they disagreed, checked against current UK, US, Australian and Irish government travel advice.</p></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <a class="brand" href="./">
+        <svg class="logo" viewBox="0 0 64 64" width="28" height="28" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="logo-gradient-footer" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#22d3ee"/>
+              <stop offset=".55" stop-color="#8b5cf6"/>
+              <stop offset="1" stop-color="#f472b6"/>
+            </linearGradient>
+          </defs>
+          <rect x="12" y="12" width="40" height="40" rx="11" transform="rotate(45 32 32)" fill="url(#logo-gradient-footer)"/>
+          <path d="M37 21v14.5a6 6 0 0 1-12 0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Jarvis</span>
+      </a>
+      <p class="disclaimer">Jarvis is not a substitute for professional medical, mental health, legal or financial advice. In an emergency, call your local emergency number.</p>
+      <nav aria-label="Footer">
+        <ul class="footer-links">
+          <li><a href="{{repo_url}}">Source code</a></li>
+          <li><a href="{{repo_url}}/releases/latest">Latest release</a></li>
+          <li><a href="{{repo_url}}/issues">Report an issue</a></li>
+          <li><a href="skills.json">skills.json</a></li>
+          <li><a href="{{repo_url}}/blob/main/LICENSE">AGPL-3.0 licence</a></li>
+        </ul>
+      </nav>
+      <p class="built">v{{version}} · Built on <time datetime="{{built}}">{{built_human}}</time> from the live skill registry.</p>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="application/json" id="demo-data">{{demo_json}}</script>
+</body>
+</html>
