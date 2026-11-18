@@ -84,7 +84,7 @@ def _cbrt(value: Number) -> Number:
 _FUNCTIONS: Dict[str, Callable[[Number], Number]] = {"sqrt": _sqrt, "cbrt": _cbrt}
 
 _ORDINAL_POWER = r"(?P<power>\d+)(?:st|nd|rd|th)"
-_OPERAND = r"(-?\d+(?:\.\d+)?|\([^()]*\))"
+_OPERAND = r"(-?(?:\d+(?:\.\d+)?|\.\d+)|\([^()]*\))"
 _REWRITES = (
     (re.compile(r"(?<=\d),(?=\d{3}(?!\d))"), ""),
     (re.compile(r"[×✕✖⋅·]"), "*"),

@@ -62,7 +62,9 @@ class CalculatorTests(unittest.TestCase):
     def test_square_and_cube_roots(self):
         cases = {
             "square root of 144": 12,
+            "square root of .25": 0.5,
             "the cube root of 27": 3,
+            "cube root of .125": 0.5,
             "cube root of -8": -2,
             "√81": 9,
             "∛64": 4,
