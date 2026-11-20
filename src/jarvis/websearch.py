@@ -19,8 +19,8 @@ Providers:
 ``JARVIS_SEARCH_PROVIDER`` picks one explicitly. Otherwise Brave is used when a
 key is set, then SearXNG when a URL is set, and Wikipedia when neither is. For
 SearXNG and Brave the top result pages are read so the summary can quote them;
-a page that cannot be read, or that lives on a private network, falls back to
-its search snippet.
+a page that cannot be read in time, or that lives on a private network, falls
+back to its search snippet.
 """
 
 from __future__ import annotations
@@ -33,10 +33,11 @@ import math
 import os
 import re
 import socket
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -49,6 +50,8 @@ PROVIDERS = ("wikipedia", "searxng", "brave")
 PROVIDER_NAMES = {"wikipedia": "Wikipedia", "searxng": "SearXNG", "brave": "Brave Search"}
 DEFAULT_TIMEOUT = 10.0
 PAGE_TIMEOUT = 8.0
+#: Seconds to wait for the result pages in all before using their snippets.
+PAGE_DEADLINE = 15.0
 MAX_RESULTS = 3
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_QUERY_CHARS = 250
@@ -207,6 +210,36 @@ _NUMBERED = frozenset(
     """act article book category chapter class grade level part phase schedule
     season section series stage tier type volume""".split()
 )
+# After the pronoun these read as "I am" or "I pay". A name would take "is" or
+# "pays", so they only follow one in a question such as "What does Stage I
+# mean?" or "When did World War I end?".
+_PRONOUN_VERBS = frozenset(
+    """am do don't dont have haven't havent need want pay owe rent earn live
+    work feel think know believe hope wish mean guess suppose wonder worry like
+    love hate get take go make see buy own eat drink smoke keep spend send
+    suffer notice remember forget understand start stop end begin""".split()
+)
+# These follow names as well as the pronoun ("World War I was", "I was"), so
+# the words before the name decide.
+_SHARED_VERBS = frozenset(
+    """was wasn't wasnt had hadn't hadnt did didn't didnt can can't cant cannot
+    could couldn't couldnt will won't wont would wouldn't wouldnt shall should
+    shouldn't shouldnt may might must went got took felt lost bought paid made
+    saw met left kept found heard told said gave came became began spent sent
+    thought knew ate drank wrote ran fell broke chose drove flew forgot grew
+    meant sold held sat stood slept spoke understood woke wore""".split()
+)
+_ADVERBS = frozenset(
+    """also just still never always often usually sometimes really actually
+    already recently once only even now currently mostly rarely seldom probably
+    definitely certainly personally then later finally""".split()
+)
+_AUXILIARIES = frozenset(
+    """is are was were do does did has have had can could will would shall
+    should may might must""".split()
+)
+_WH_WORDS = frozenset("who whom whose what which when where why how".split())
+_NEXT_WORD = re.compile(r"\s+([a-z]+(?:['’][a-z]+)?)(?![\w'’])", re.IGNORECASE)
 _TIMELY = re.compile(
     r"\b(?:today|tonight|tomorrow|yesterday|now|current(?:ly)?|latest|this\s+"
     r"(?:week|month|year)|weather|forecast|news|prices?|scores?|stocks?|exchange\s+rate)\b",
@@ -278,21 +311,73 @@ def strip_lead_ins(text: str) -> str:
     return _LEAD_INS.sub("", _one_line(text), count=1).strip()
 
 
+def _verb_after(after: str) -> Optional[str]:
+    """``"pronoun"`` or ``"shared"`` when ``after`` opens with a verb.
+
+    ``"pronoun"`` for a verb only "I" takes ("I pay"), ``"shared"`` for one a
+    name takes too ("I was", "World War I was").
+    """
+
+    position = 0
+    while True:
+        found = _NEXT_WORD.match(after, position)
+        if found is None:
+            return None
+        word = found.group(1).lower().replace("’", "'")
+        if word not in _ADVERBS:
+            break
+        position = found.end()
+    if word in _PRONOUN_VERBS:
+        return "pronoun"
+    if word in _SHARED_VERBS or (len(word) > 3 and word.endswith("ed")):
+        return "shared"
+    return None
+
+
+def _name_lead(before: List[str]) -> str:
+    """What introduces the capitalised name that ends ``before``.
+
+    ``"start"`` when the name opens the text or a clause, ``"wh"`` after a
+    question word ("when World War I ended"), ``"aux"`` after an auxiliary
+    ("did World War I end") and ``""`` otherwise ("during the Second World War").
+    """
+
+    index = len(before)
+    while index and before[index - 1][:1].isupper() and before[index - 1].lower() not in _STOPWORDS:
+        index -= 1
+    if index and before[index - 1].lower() in {"the", "a", "an"}:
+        index -= 1
+    if not index or before[index - 1][-1:] in {",", ";", ":"}:
+        return "start"
+    word = before[index - 1].lower()
+    if word in _AUXILIARIES:
+        return "aux"
+    return "wh" if word in _WH_WORDS else ""
+
+
 def _is_numeral(text: str, found: "re.Match[str]") -> bool:
     """True for the "I" in "Elizabeth I" or "World War I", which is not a person.
 
     A capitalised word before it is not enough, since "In January I moved" is
     the pronoun: the "I" must follow a numbered noun ("Type I") or end the name
-    ("Who was Elizabeth I?", "Elizabeth I of England").
+    ("Who was Elizabeth I?", "Elizabeth I of England"). When a verb follows, as
+    in "During the Second World War I was ill" or "Under this Act I pay", it is
+    the pronoun unless a question introduces the name ("When did World War I
+    end?"); anything still ambiguous counts as the pronoun.
     """
 
     if found.group(0) != "I":
         return False
     before = text[: found.start()].split()
-    if [word.lower() for word in before[-2:]] == ["world", "war"]:
-        return True
     if not before:
         return False
+    verb = _verb_after(text[found.end() :])
+    if verb is not None:
+        lead = _name_lead(before)
+        if lead != "aux" and not (verb == "shared" and lead in {"start", "wh"}):
+            return False
+    if [word.lower() for word in before[-2:]] == ["world", "war"]:
+        return True
     previous = before[-1]
     if not (previous[:1].isupper() and previous[-1:].isalpha()):
         return False
@@ -698,8 +783,30 @@ def _read_pages(
         # The snippet leads: it is the search engine's own summary of the match.
         return _document(title, address, "\n".join(part for part in (snippet, page) if part.strip()))
 
-    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
-        documents = list(pool.map(read, chosen))
+    # Socket timeouts only end idle waits, so a page that trickles in could take
+    # forever. Each page is read on a daemon thread instead: one still loading
+    # at the deadline is left behind and its snippet used, and neither Ctrl-C
+    # nor quitting Jarvis has to wait for it.
+    pages: List[Optional[Document]] = [None] * len(chosen)
+
+    def work(index: int) -> None:
+        try:
+            pages[index] = read(chosen[index])
+        except Exception:  # Any other failure also falls back to the snippet.
+            pass
+
+    threads = [threading.Thread(target=work, args=(index,), daemon=True) for index in range(len(chosen))]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + PAGE_DEADLINE
+    for thread in threads:
+        # Short waits, so that Ctrl-C is noticed promptly on every platform.
+        while thread.is_alive() and time.monotonic() < deadline:
+            thread.join(min(0.1, max(0.0, deadline - time.monotonic())))
+    documents = [
+        page if page is not None else _document(title, address, snippet)
+        for page, (title, address, snippet) in zip(pages, chosen)
+    ]
     return [document for document in documents if document is not None]
 
 

@@ -1,10 +1,13 @@
+import _thread
 import http.client
 import http.server
 import io
 import json
 import os
+import signal
 import socket
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -267,6 +270,31 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(websearch.WebSearchError, "json format"):
             websearch.search("bell", opener=web, environ={"JARVIS_SEARXNG_URL": "https://search.example"})
 
+    def test_slow_pages_fall_back_to_snippets_and_do_not_block_ctrl_c(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def slow(request, timeout=None):
+            release.wait(5)
+            raise urllib.error.URLError("too slow")
+
+        hits = [("Slow", "https://slow.example/", "Snippet.")]
+        started = time.monotonic()
+        with mock.patch.object(websearch, "PAGE_DEADLINE", 0.3):
+            documents = websearch._read_pages(hits, limit=3, opener=slow)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual([document.text for document in documents], ["Snippet."])
+
+        previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+        self.addCleanup(signal.signal, signal.SIGINT, previous)
+        timer = threading.Timer(0.2, _thread.interrupt_main)
+        self.addCleanup(timer.cancel)
+        started = time.monotonic()
+        with self.assertRaises(KeyboardInterrupt):
+            timer.start()
+            websearch._read_pages(hits, limit=3, opener=slow)
+        self.assertLess(time.monotonic() - started, 2)
+
     def test_private_addresses_are_never_read(self):
         for url in (
             "http://localhost:8080/",
@@ -392,6 +420,11 @@ class TextTests(unittest.TestCase):
             "Tell me about Peter I of Russia",
             "When did World War I end?",
             "What is Stage I cancer?",
+            "Why was World War I called the Great War?",
+            "What does Stage I mean?",
+            "Do you know when World War I ended?",
+            "World War I ended in 1918; why did it start?",
+            "What is a Grade I listed building?",
             "who was the first U.S. president?",
             "can dogs eat grapes?",
         ):
@@ -410,8 +443,15 @@ class TextTests(unittest.TestCase):
             "how do you feel?",
             "what do u think?",
             "In January I moved to Paris, what is the best area?",
+            "In January I, like many people, moved to Paris; what is the best area?",
             "During the Vietnam War I was exposed to Agent Orange, what cancers does it cause?",
             "Under the Affordable Care Act I pay 500 dollars a month, is that normal?",
+            "While studying the Second World War I was diagnosed with diabetes; what causes it?",
+            "Under this Act I pay 500 dollars a month, is that normal?",
+            "Under this Act I also pay 500 dollars a month, is that normal?",
+            "During Stage I noticed a lump, what does it mean?",
+            "Since World War I have lived in London, what changed?",
+            "Which Stage I am in?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(websearch.is_lookup(text))
@@ -459,13 +499,33 @@ class AssistantWebTests(CleanEnvTestCase):
             self.assertIn("Early telephone lines", more)
             self.assertIn("I searched Wikipedia for 'invented the telephone' and found:", sources)
             self.assertIn("[2] Alexander Graham Bell - https://en.wikipedia.org/wiki/Alexander_Graham_Bell", sources)
-            self.assertIn("Learned 2 page(s)", learned)
+            self.assertIn("Learned the answer and 2 page(s)", learned)
             self.assertNotIn(WEB_STATE, path.read_text(encoding="utf-8"))
 
             offline = self.assistant(mode="off", memory=Memory(path))
             with mock.patch("jarvis.websearch.search", side_effect=AssertionError("went online")):
                 answer = offline.respond("who invented the telephone?")
-            self.assertTrue(answer.startswith("From Invention of the telephone (https://en.wikipedia.org/"))
+            self.assertTrue(answer.startswith("From what I learned searching Wikipedia for 'invented the telephone':"))
+            self.assertIn("Many inventors worked", answer)
+            self.assertIn("Early telephone lines", answer)
+
+    def test_learned_answers_survive_when_the_pages_do_not_mention_the_question(self):
+        sun = websearch.Document("Sun", "https://en.wikipedia.org/wiki/Sun", "It formed about 4.6 billion years ago.")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.json"
+            assistant = self.assistant(memory=Memory(path))
+            with mock.patch("jarvis.websearch.search", fake_search([sun])):
+                self.assertIn("4.6 billion", assistant.respond("How old is the Sun?"))
+                self.assertIn("Learned the answer and 1 page(s)", assistant.respond("learn that"))
+            offline = self.assistant(mode="off", memory=Memory(path))
+            with mock.patch("jarvis.websearch.search", side_effect=AssertionError("went online")):
+                self.assertIn("It formed about 4.6 billion years ago. [1]", offline.respond("how old is the sun"))
+                self.assertIn("1 answer(s) from web searches", offline.respond("list my knowledge sources"))
+                self.assertEqual(
+                    offline.respond("clear my knowledge sources"),
+                    "Forgot 1 knowledge source(s) and 1 saved web answer(s).",
+                )
+                self.assertEqual(offline.respond("how old is the sun"), FALLBACK_RESPONSE)
 
     def test_more_only_continues_right_after_a_web_answer(self):
         assistant = self.assistant(mode="manual")
@@ -503,6 +563,29 @@ class AssistantWebTests(CleanEnvTestCase):
             reply = assistant.respond("search the web for how to kill myself")
         self.assertNotIn("searched", reply)
         self.assertIn("988", reply)
+
+    def test_self_harm_questions_are_not_searched_even_when_asked_again(self):
+        for mode in ("auto", "manual"):
+            assistant = self.assistant(mode=mode)
+            with mock.patch("jarvis.websearch.search", side_effect=AssertionError("went online")):
+                for message in (
+                    "I want to end my life",
+                    "look it up",
+                    "is suicide painful?",
+                    "tell me more",
+                    "what is the most painless way to die?",
+                    "what is a lethal dose of paracetamol?",
+                    "how 2 kill urself",
+                    "look it up",
+                ):
+                    with self.subTest(mode=mode, message=message):
+                        reply = assistant.respond(message)
+                        self.assertIn("988", reply)
+                        self.assertNotIn("look it up", reply)
+        search = fake_search()
+        with mock.patch("jarvis.websearch.search", search):
+            self.assistant().respond("how did Hitler die?")
+        self.assertEqual(search.calls, ["Hitler die"])
 
     def test_encyclopedia_gaps_are_looked_up(self):
         with mock.patch("jarvis.websearch.search", fake_search()) as search:

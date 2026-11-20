@@ -119,8 +119,8 @@ answer, or when you ask it to ([Searching the web](#searching-the-web)); by
 `add-knowledge-website`, when it fetches a page you asked for; and by `answer`,
 when you send a question to a cloud session. Everything else is answered from
 data shipped with the package. The results of the last web search are kept in
-RAM for the session only; pages are written to memory only when you say
-`learn that`.
+RAM for the session only; the pages, and the answer with the question it
+answered, are written to memory only when you say `learn that`.
 
 ## Built-in skills
 
@@ -532,7 +532,8 @@ sources, and the reply quotes the matching passage and says where it came from
 web pages have their markup, scripts and styles stripped first — and anything
 that is not a text file, is empty or cannot be reached is reported rather than
 guessed at. Adding the same location twice replaces the earlier copy, and only
-fetching a website reaches the network.
+fetching a website reaches the network. `clear my knowledge sources` also
+forgets the web answers saved with `learn that`.
 
 ## Searching the web
 
@@ -565,9 +566,12 @@ jarvis "look up the Voyager probes online"
 - `tell me more` continues the summary with the next most relevant sentences.
 - `sources` or `where did you find that?` lists every page the search returned.
 - `look it up` searches the web for your previous question.
-- `learn that` saves the pages as knowledge sources, so the same question is
-  answered offline from then on, even after a restart
-  ([Knowledge sources](#knowledge-sources)).
+- `learn that` saves the answer, with the question it answered, and keeps the
+  pages as knowledge sources ([Knowledge sources](#knowledge-sources)). Asking
+  again with the same keywords and question word (`who invented the
+  telephone`) gets the saved answer offline, even after a restart or with web
+  search off; other questions are answered from the pages when they cover
+  them. `clear my knowledge sources` forgets both.
 
 ### When Jarvis goes online
 
@@ -585,10 +589,16 @@ Used as a library, `Assistant()` defaults to `manual`; pass
 Only messages that read like a factual question are searched automatically.
 Personal messages are never sent unless you ask: anything that mentions *me*,
 *my*, *we* or *you*, or *I* (other than in a how-to question such as
-`how do I tie a tie?`, or a name such as *Elizabeth I*). Crisis messages
-always reach `crisis-support` first. The reply starts with the words that were
-sent (`I searched Wikipedia for '...'`), and a progress note is printed on
-stderr while the search runs, so piped output stays clean.
+`how do I tie a tie?`, or in a name such as *Elizabeth I*, *World War I* or
+*Stage I* when no first-person wording follows: `Under this Act I pay...` is
+personal). This is a word-level check, not understanding, so use `manual` or
+`off` if a message must never be sent by mistake. Questions about suicide,
+self-harm or lethal doses are never searched or offered for search, even after
+`look it up` or `tell me more`; Jarvis shows the crisis help lines instead.
+This errs on the side of caution, so `what is a lethal dose of caffeine?` gets
+the help lines too. The reply starts with the words that were sent
+(`I searched Wikipedia for '...'`), and a progress note is printed on stderr
+while the search runs, so piped output stays clean.
 
 ### Search providers
 
@@ -614,8 +624,10 @@ read, Jarvis falls back to the search snippet.
   Check the sources.
 - Wikipedia is an encyclopedia, not a live feed. Questions about news, weather,
   prices or scores get a note suggesting Brave Search or SearXNG instead.
-- Requests time out after 10 seconds (8 for each result page); press Ctrl-C to
-  cancel a slow search in a session.
+- The search request gives up after 10 seconds without data. Result pages give
+  up after 8 seconds without data, and Jarvis stops waiting for them 15 seconds
+  after the search returns, using their search snippets instead. Press Ctrl-C
+  to cancel a slow search in a session.
 - Web search widens what Jarvis can answer, but Jarvis is still a rule-based
   assistant, not artificial general intelligence.
 
