@@ -21,6 +21,7 @@ from jarvis import (
     signlanguage,
     sketch,
     traffic,
+    websearch,
 )
 from jarvis.atlas import (
     City,
@@ -78,6 +79,10 @@ class SkillContext:
     now: Callable[[], datetime] = datetime.now
     #: Earlier ``(message, reply)`` pairs in this conversation, oldest first.
     history: List[Tuple[str, str]] = field(default_factory=list)
+    #: When the web may be searched: ``auto``, ``manual`` or ``off``.
+    web_search: str = "manual"
+    #: Shows a progress note, such as "searching...", while a skill works.
+    notify: Optional[Callable[[str], None]] = None
 
 
 SkillHandler = Callable[[Match[str], SkillContext], str]
@@ -550,6 +555,203 @@ def _answer_from_knowledge(context: SkillContext, subject: str) -> Optional[str]
     source, passages = found
     body = " ".join(passages)
     return f"From {source.title} ({source.location}): {body}"
+
+
+# --- Web search ----------------------------------------------------------------
+
+#: Session-only record of the last web search, used by "tell me more",
+#: "sources" and "learn that". It is never written to the memory file.
+WEB_STATE = "web_last"
+_WEB_MORE_STEP = 4
+_PRONOUNS = frozenset({"it", "that", "this", "them", "those", "these"})
+_WEB_SKILLS = frozenset({"web-search", "web-more", "web-sources", "learn-answer"})
+_LOOK_IT_UP = "Say 'look it up' to search the web for it."
+
+
+def _web_mode(context: SkillContext) -> str:
+    return context.web_search if context.web_search in websearch.MODES else "manual"
+
+
+def _previous_topic(context: SkillContext) -> Optional[str]:
+    """The latest recent message worth searching for, skipping web commands."""
+
+    for message, _ in reversed(context.history[-3:]):
+        resolved = context.registry.resolve(message)
+        if resolved is not None and resolved[0].name in _WEB_SKILLS:
+            continue
+        if websearch.content_words(message):
+            return message
+    return None
+
+
+def _web_state(context: SkillContext) -> Optional[dict]:
+    state = context.memory.get_session(WEB_STATE)
+    return state if isinstance(state, dict) else None
+
+
+def _web_answer(
+    context: SkillContext, question: str, terms: Optional[str] = None
+) -> Tuple[str, bool]:
+    """Search the web for ``question`` and return ``(reply, answered)``."""
+
+    query = (terms or websearch.search_terms(question) or question).strip()
+    try:
+        provider = websearch.PROVIDER_NAMES[websearch.choose_provider()]
+        if context.notify is not None:
+            context.notify(f"(searching {provider} for '{query}'...)")
+        results = websearch.search(query)
+    except websearch.WebSearchError as exc:
+        return f"I could not search the web. {exc}", False
+    sentences = websearch.summarize(question, results.documents)
+    if not sentences:
+        return (
+            f"I searched {results.provider} for '{results.query}' but found nothing "
+            "I could summarise.",
+            False,
+        )
+    context.memory.set_session(
+        WEB_STATE,
+        {
+            "question": question,
+            "results": results,
+            "shown": {(sentence.source, sentence.position) for sentence in sentences},
+            "turn": len(context.history),
+        },
+    )
+    return websearch.format_answer(question, results, sentences), True
+
+
+def _known_answer(context: SkillContext, question: str) -> Optional[str]:
+    """Answer from a knowledge source only when it covers most of the question."""
+
+    found = knowledge.search(_stored_sources(context), question)
+    if found is None:
+        return None
+    source, passages = found
+    body = " ".join(passages)
+    if websearch.coverage(question, body) < 0.5:
+        return None
+    return f"From {source.title} ({source.location}): {body}"
+
+
+def answer_unknown(text: str, context: SkillContext) -> Optional[str]:
+    """Answer a factual question that no skill matched.
+
+    Knowledge sources are tried first. Then, depending on the web search mode,
+    the question is looked up online (``auto``), the user is told how to look
+    it up (``manual``), or nothing happens (``off``). Personal messages and
+    small talk return None so the usual fallback reply is used.
+    """
+
+    if not websearch.is_lookup(text):
+        return None
+    from_sources = _known_answer(context, text)
+    if from_sources is not None:
+        return from_sources
+    mode = _web_mode(context)
+    if mode == "off":
+        return None
+    if mode == "manual":
+        return f"I do not know that offline. {_LOOK_IT_UP}"
+    reply, answered = _web_answer(context, text)
+    return reply if answered else f"I do not know that offline. {reply}"
+
+
+def _web_search(match: Match[str], context: SkillContext) -> str:
+    if _web_mode(context) == "off":
+        return (
+            "Web search is turned off. Start Jarvis with '--web-search manual' or "
+            "'--web-search auto', or set JARVIS_WEB_SEARCH, to let me search."
+        )
+    query = _clean_subject(match.groupdict().get("query") or "")
+    if not query or query.lower() in _PRONOUNS:
+        previous = _previous_topic(context)
+        if previous is None:
+            return (
+                "What should I search the web for? Try 'search the web for the "
+                "tallest building in Africa'."
+            )
+        query = previous
+    reply, _ = _web_answer(context, query, websearch.search_terms(query) or query)
+    return reply
+
+
+def _web_more(match: Match[str], context: SkillContext) -> str:
+    state = _web_state(context)
+    if state is not None and state["turn"] == len(context.history) - 1:
+        results = state["results"]
+        sentences = websearch.summarize(
+            state["question"], results.documents, limit=_WEB_MORE_STEP, exclude=state["shown"]
+        )
+        state["turn"] = len(context.history)
+        if not sentences:
+            return (
+                "That is everything I found. Say 'sources' to see the pages, or ask "
+                "me something else."
+            )
+        state["shown"] |= {(sentence.source, sentence.position) for sentence in sentences}
+        sources = (sentence.source for sentence in sentences)
+        return "\n".join(
+            [websearch.cite(sentences), "", "Sources:", *websearch.source_lines(results.documents, sources)]
+        )
+    previous = context.history[-1][0] if context.history else ""
+    if previous and websearch.is_lookup(previous):
+        mode = _web_mode(context)
+        if mode == "auto":
+            return _web_answer(context, previous)[0]
+        if mode == "manual":
+            return f"I do not know more about that offline. {_LOOK_IT_UP}"
+    return (
+        "Tell me what you would like to know more about, for example 'tell me more "
+        "about volcanoes'."
+    )
+
+
+def _web_sources(match: Match[str], context: SkillContext) -> str:
+    state = _web_state(context)
+    if state is None:
+        return (
+            "I have not searched the web in this session, so my answers so far come "
+            "from my built-in skills and offline data."
+        )
+    results = state["results"]
+    if state["turn"] == len(context.history) - 1:
+        state["turn"] = len(context.history)
+        lead = f"I searched {results.provider} for '{results.query}' and found:"
+    else:
+        lead = (
+            "My last answer did not come from the web. My last web search was "
+            f"{results.provider} for '{results.query}', which found:"
+        )
+    return "\n".join([lead, *websearch.source_lines(results.documents)])
+
+
+def _learn_answer(match: Match[str], context: SkillContext) -> str:
+    state = _web_state(context)
+    if state is None:
+        return (
+            "There is no web answer to learn yet. Ask me a question first, or say "
+            "'remember <note>' to save a note."
+        )
+    results = state["results"]
+    total = 0
+    for document in results.documents:
+        source = knowledge.Source(
+            kind="website",
+            title=document.title,
+            location=document.url,
+            text=document.text[: knowledge.MAX_TEXT_CHARS],
+        )
+        total = _remember_source(context, source)
+    if state["turn"] == len(context.history) - 1:
+        state["turn"] = len(context.history)
+    titles = ", ".join(f"'{document.title}'" for document in results.documents)
+    return (
+        f"Learned {len(results.documents)} page(s) from the {results.provider} search "
+        f"for '{results.query}': {titles}. I can now answer from them offline; you "
+        f"have {total} knowledge source(s). Say 'clear my knowledge sources' to "
+        "forget them."
+    )
 
 
 _MOOD_REFLECTIONS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -1242,11 +1444,20 @@ def _encyclopedia(match: Match[str], context: SkillContext) -> str:
     if from_sources is not None:
         return from_sources
     lines = [f"I do not have an encyclopedia entry for '{subject}' yet."]
+    mode = _web_mode(context)
+    searchable = mode != "off" and websearch.is_lookup(subject, require_question=False)
+    if searchable and mode == "auto":
+        reply, answered = _web_answer(context, match.string, subject)
+        if answered:
+            return reply
+        return " ".join([*lines, reply])
     close = encyclopedia.suggestions(subject)
     if close:
         lines.append("Did you mean: " + ", ".join(close) + "?")
     else:
         lines.append("Say 'encyclopedia topics' to see what I do know.")
+    if searchable:
+        lines.append(_LOOK_IT_UP)
     return " ".join(lines)
 
 
@@ -1732,10 +1943,24 @@ def _about_jarvis(match: Match[str], context: SkillContext) -> str:
     if groups.get("version"):
         return f"I am Jarvis version {__version__}, with {count} skills."
     if groups.get("nature"):
+        online = {
+            "auto": (
+                "I go online to search the web for factual questions my skills "
+                "cannot answer, and for the 'web-search', 'answer' and "
+                "'add-knowledge-website' skills."
+            ),
+            "manual": (
+                "I go online only when you ask, through the 'web-search', 'answer' "
+                "and 'add-knowledge-website' skills."
+            ),
+            "off": (
+                "Web search is turned off, so only the 'answer' and "
+                "'add-knowledge-website' skills go online."
+            ),
+        }[_web_mode(context)]
         return (
             f"I am a computer program, not a person. {how}, using built-in rules "
-            "and offline reference data; only the 'answer' and "
-            "'add-knowledge-website' skills go online."
+            f"and offline reference data. {online}"
         )
     if groups.get("maker"):
         return (
@@ -2578,6 +2803,78 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_answer,
                 examples=["answer how does the skill registry resolve matches?"],
+            ),
+            Skill(
+                name="web-search",
+                description=(
+                    "Search the web for anything I do not know and summarise the "
+                    "answer, with numbered sources."
+                ),
+                patterns=[
+                    r"^\s*(?:please\s+)?(?:search|look|check)(?: on| in)? (?:the )?(?:web|internet|net)"
+                    r"(?: for| about| on| up)?[:,]?\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:please\s+)?(?:search|look|check) online(?: for| about)?[:,]?\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:please\s+)?(?:web|internet|online|google) search(?: for)?[:,]?\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:please\s+)?(?:look|search|check|google) (?P<query>it|that|this) up"
+                    r"(?: online| on the (?:web|internet|net))?" + _END,
+                    r"^\s*(?:please\s+)?(?:search(?: for)?|look up|look for|find|check|google|research)\s+"
+                    r"(?P<query>.+?)\s+(?:online|on the (?:web|internet|net)|on (?:wikipedia|google))" + _END,
+                    r"^\s*(?:please\s+)?(?:google|search for|search) (?P<query>it|that|this)" + _END,
+                    r"^\s*(?:please\s+)?google\s+(?!(?:is|was|says|said|has|have|had|does|did|can|could|will"
+                    r"|would|should|may|might|and|or|but|to|for)\b)(?P<query>.+?)" + _END,
+                    r"^\s*what does the (?:web|internet|net) say (?:about|on)\s+(?P<query>.+?)" + _END,
+                    r"^\s*(?:please\s+)?research\s+(?!(?:shows|show|says|said|suggests|suggested|found|finds"
+                    r"|indicates|proves|proved|is|was|has|have)\b)(?P<query>.+?)" + _END,
+                ],
+                handler=_web_search,
+                examples=[
+                    "search the web for the tallest building in Africa",
+                    "google the speed of sound",
+                    "look it up online",
+                ],
+            ),
+            Skill(
+                name="web-more",
+                description="Carry on summarising the last web answer with more detail.",
+                patterns=[
+                    r"^\s*(?:please\s+)?(?:tell me more|say more|go on|keep going|continue|more please"
+                    r"|more (?:details?|info|information)|(?:give me |i want )?more(?: details?)?"
+                    r"|elaborate(?: on (?:that|this|it))?|expand on (?:that|this|it))(?:,?\s+please)?" + _END,
+                ],
+                handler=_web_more,
+                examples=["tell me more"],
+            ),
+            Skill(
+                name="web-sources",
+                description="List the pages my last web answer came from.",
+                patterns=[
+                    r"^\s*(?:what|which) (?:are|were|is|was) (?:your|the|its|those|these) sources?" + _END,
+                    r"^\s*(?:show|list|give|tell)(?: me)? (?:your|the) sources?" + _END,
+                    r"^\s*cite (?:your |the |those )?sources?" + _END,
+                    r"^\s*(?:your |the )?sources?(?:,? please)?" + _END,
+                    r"^\s*(?:where|how) did you (?:find|get|learn|read) (?:that|this|it)(?: from)?" + _END,
+                    r"^\s*what(?:'s|’s| is) (?:your|the) source(?: for (?:that|this))?" + _END,
+                ],
+                handler=_web_sources,
+                examples=["sources", "where did you find that?"],
+            ),
+            Skill(
+                name="learn-answer",
+                description=(
+                    "Save the pages from my last web answer as knowledge sources, so "
+                    "I can answer from them offline."
+                ),
+                patterns=[
+                    r"^\s*(?:please\s+)?(?:learn|memori[sz]e) (?:that|this|it|the (?:answer|results?|pages?|sources?))"
+                    r"(?: answer| result| one)?(?: for (?:next time|later|the future))?" + _END,
+                    r"^\s*(?:please\s+)?(?:remember|save|keep|store) (?:that|this|the) (?:answer|results?|search"
+                    r"|web (?:answer|results?|search|pages?)|pages?|sources?)(?: for (?:next time|later|the future))?" + _END,
+                    r"^\s*(?:please\s+)?(?:save|keep|store) (?:that|this|it)(?: for (?:next time|later|the future))?" + _END,
+                    r"^\s*(?:please\s+)?add (?:that|this|it|the answer|the (?:web )?results?) to (?:your|my|the) "
+                    r"knowledge(?: base| sources?)?" + _END,
+                ],
+                handler=_learn_answer,
+                examples=["learn that"],
             ),
             Skill(
                 name="cua-actions",

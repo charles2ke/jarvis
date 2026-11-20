@@ -35,6 +35,7 @@
   --c-accessibility: #34d399;
   --c-memory: #a78bfa;
   --c-everyday: #fb923c;
+  --c-research: #a3e635;
   --i-wellbeing: #f9a8d4;
   --i-creativity: #fcd34d;
   --i-maths: #67e8f9;
@@ -42,6 +43,7 @@
   --i-accessibility: #6ee7b7;
   --i-memory: #c4b5fd;
   --i-everyday: #fdba74;
+  --i-research: #bef264;
 
   --radius: 18px;
   --radius-sm: 11px;
@@ -85,6 +87,7 @@
   --i-accessibility: #047857;
   --i-memory: #6d28d9;
   --i-everyday: #c2410c;
+  --i-research: #3f6212;
   color-scheme: light;
 }
 
@@ -123,6 +126,7 @@
     --i-accessibility: #047857;
     --i-memory: #6d28d9;
     --i-everyday: #c2410c;
+    --i-research: #3f6212;
     color-scheme: light;
   }
 }
@@ -132,6 +136,7 @@
 [data-category="creativity"] { --cat: var(--c-creativity); --cat-ink: var(--i-creativity); }
 [data-category="maths"] { --cat: var(--c-maths); --cat-ink: var(--i-maths); }
 [data-category="reference"] { --cat: var(--c-reference); --cat-ink: var(--i-reference); }
+[data-category="research"] { --cat: var(--c-research); --cat-ink: var(--i-research); }
 [data-category="accessibility"] { --cat: var(--c-accessibility); --cat-ink: var(--i-accessibility); }
 [data-category="memory"] { --cat: var(--c-memory); --cat-ink: var(--i-memory); }
 [data-category="everyday"] { --cat: var(--c-everyday); --cat-ink: var(--i-everyday); }

@@ -102,6 +102,11 @@ class Memory:
     def get_session(self, key: str, default: Any = None) -> Any:
         return self._session_data.get(key, default)
 
+    def set_session(self, key: str, value: Any) -> None:
+        """Keep ``value`` for this session only; it is never written to disk."""
+
+        self._session_data[key] = value
+
     def append_session(self, key: str, value: Any) -> List[Any]:
         items = list(self._session_data.get(key, []))
         items.append(value)
