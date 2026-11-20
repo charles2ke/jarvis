@@ -140,6 +140,17 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "research",
+        "Web research",
+        "Search the web for anything Jarvis does not know, with sources.",
+        (
+            "web-search",
+            "web-more",
+            "web-sources",
+            "learn-answer",
+        ),
+    ),
+    (
         "accessibility",
         "Accessibility",
         "Braille, American Sign Language and text to speech.",
@@ -201,7 +212,7 @@ FEATURED: Tuple[str, ...] = (
     "calculator",
     "unit-conversion",
     "atlas",
-    "time-zone",
+    "web-search",
     "gmdss",
     "braille",
     "sign-language",
@@ -225,6 +236,7 @@ DEMO_PROMPTS: Tuple[str, ...] = (
 
 #: Hero suggestions that show off the search.
 SUGGESTIONS: Tuple[str, ...] = (
+    "web search",
     "braille",
     "time zone",
     "mortgage",

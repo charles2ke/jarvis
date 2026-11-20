@@ -67,3 +67,25 @@ jobs:
           name: site
           path: _site/
           include-hidden-files: true
+
+  live-web-search:
+    name: Live web search (Wikipedia)
+    runs-on: ubuntu-latest
+    # The public web is outside this repository's control, so a failure here
+    # is reported but does not fail the workflow.
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Run the live web search test
+        run: python -m unittest -v tests.test_websearch.LiveWebSearchTests
+        env:
+          PYTHONPATH: src
+          JARVIS_LIVE_WEB_TESTS: "1"
+      - name: Ask Jarvis something it can only answer from the web
+        run: python -m jarvis --no-memory "who invented the telephone?"
+        env:
+          PYTHONPATH: src

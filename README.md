@@ -10,8 +10,13 @@ Skills that reach the network or call out to an external tool (speech, CUA,
 opening phone and email links)
 take as long as that service or subprocess does.
 
-- **Offline by default** — every skill works without a network connection,
-  except the two that say otherwise (`add-knowledge-website` and `answer`).
+- **Offline first** — every skill works without a network connection, except
+  the ones that say otherwise (`web-search`, `add-knowledge-website` and
+  `answer`).
+- **Looks up what it does not know** — a factual question that no skill can
+  answer is searched on the web (Wikipedia by default) and summarised with
+  numbered sources; `--web-search off` keeps Jarvis fully offline
+  ([Searching the web](#searching-the-web)).
 - **No runtime dependencies** — the standard library only, on Python 3.10+.
 - **Private** — memory is a JSON file you own, and you can turn it off entirely.
 - **Extensible** — a skill is a regular expression plus a handler
@@ -30,6 +35,7 @@ take as long as that service or subprocess does.
 - [Solving science problems](#solving-science-problems)
 - [Economics and financial advice](#economics-and-financial-advice)
 - [Knowledge sources](#knowledge-sources)
+- [Searching the web](#searching-the-web)
 - [Text to speech](#text-to-speech)
 - [Natural language to text](#natural-language-to-text)
 - [Sign language](#sign-language)
@@ -92,6 +98,8 @@ Useful flags:
 - `--no-memory` — keep everything in RAM for the session.
 - `--speak` — also read every reply aloud (see [Text to speech](#text-to-speech)).
 - `--list-skills` — print every skill with an example and exit.
+- `--web-search auto|manual|off` — when to search the web (default `auto`, or
+  `JARVIS_WEB_SEARCH`); see [Searching the web](#searching-the-web).
 - `--version` — print the version and exit.
 
 ### Memory and privacy
@@ -106,9 +114,13 @@ by `psychiatrist` is never persisted. Memory is written to a temporary file and
 then swapped into place, so an interrupted save never leaves a half-written
 `memory.json` behind.
 
-Only two skills use the network: `add-knowledge-website`, when it fetches a page
-you asked for, and `answer`, when you send a question to a cloud session.
-Everything else is answered from data shipped with the package.
+The network is used only to search the web for a factual question no skill can
+answer, or when you ask it to ([Searching the web](#searching-the-web)); by
+`add-knowledge-website`, when it fetches a page you asked for; and by `answer`,
+when you send a question to a cloud session. Everything else is answered from
+data shipped with the package. The results of the last web search are kept in
+RAM for the session only; the pages, and the answer with the question it
+answered, are written to memory only when you say `learn that`.
 
 ## Built-in skills
 
@@ -189,6 +201,18 @@ matched in is defined in `src/jarvis/skills.py`.
 | economics-topics | `economics topics` |
 | financial-advisor | `financial advice on investing` |
 
+### Web research
+
+| Skill | Example |
+| --- | --- |
+| web-search | `search the web for the tallest building in Africa` |
+| web-more | `tell me more` |
+| web-sources | `sources` |
+| learn-answer | `learn that` |
+
+Questions that no skill matches, such as `who invented the telephone?`, are
+searched automatically too; see [Searching the web](#searching-the-web).
+
 ### Accessibility
 
 | Skill | Example |
@@ -261,6 +285,12 @@ the wellbeing skills, so `not great, I want to die` still reaches
 `crisis-support`, and `world-clock` and `date-calculator` come before `time` and
 `date`, so `what time is it in Tokyo?` gets the world clock while
 `what time is it?` still reads your own clock.
+
+The web research skills come straight after `answer`, ahead of the notes and
+encyclopedia skills, so `remember that answer` saves the last web answer while
+`remember that the bins go out on Monday` is still a note. A message that no
+skill matches is offered to the web search last of all, and only when it reads
+like a factual question.
 
 ## Time, dates and world clocks
 
@@ -502,7 +532,104 @@ sources, and the reply quotes the matching passage and says where it came from
 web pages have their markup, scripts and styles stripped first — and anything
 that is not a text file, is empty or cannot be reached is reported rather than
 guessed at. Adding the same location twice replaces the earlier copy, and only
-fetching a website reaches the network.
+fetching a website reaches the network. `clear my knowledge sources` also
+forgets the web answers saved with `learn that`.
+
+## Searching the web
+
+When you ask a factual question that none of the skills can answer, Jarvis
+looks it up online and replies with a short summary and numbered sources. The
+reply has this shape (the sentences and pages depend on what the search
+returns):
+
+```text
+you> who invented the telephone?
+(searching Wikipedia for 'invented the telephone'...)
+jarvis> I searched Wikipedia for 'invented the telephone'. Here is a summary:
+<two or three sentences quoted from the pages> [1] <another sentence> [2]
+
+Sources:
+[1] <page title> - https://en.wikipedia.org/wiki/...
+[2] <page title> - https://en.wikipedia.org/wiki/...
+
+(Automatic summary: check the sources. Say 'tell me more', 'sources' or 'learn that'.)
+```
+
+You can also search on purpose, and follow up on what was found:
+
+```bash
+jarvis "search the web for the tallest building in Africa"
+jarvis "google the speed of sound"
+jarvis "look up the Voyager probes online"
+```
+
+- `tell me more` continues the summary with the next most relevant sentences.
+- `sources` or `where did you find that?` lists every page the search returned.
+- `look it up` searches the web for your previous question.
+- `learn that` saves the answer, with the question it answered, and keeps the
+  pages as knowledge sources ([Knowledge sources](#knowledge-sources)). Asking
+  again with the same keywords and question word (`who invented the
+  telephone`) gets the saved answer offline, even after a restart or with web
+  search off; other questions are answered from the pages when they cover
+  them. `clear my knowledge sources` forgets both.
+
+### When Jarvis goes online
+
+`--web-search` (or the `JARVIS_WEB_SEARCH` environment variable) decides:
+
+| Mode | What happens |
+| --- | --- |
+| `auto` (the CLI default) | Factual questions that no skill answers are searched automatically, as are encyclopedia questions with no built-in entry. |
+| `manual` | Jarvis searches only when you ask (`search the web for ...`, `look it up`); otherwise it says it does not know and how to look it up. |
+| `off` | Jarvis never searches the web. |
+
+Used as a library, `Assistant()` defaults to `manual`; pass
+`Assistant(web_search="auto")` to behave like the CLI.
+
+Only messages that read like a factual question are searched automatically.
+Personal messages are never sent unless you ask: anything that mentions *me*,
+*my*, *we* or *you*, or *I* (other than in a how-to question such as
+`how do I tie a tie?`, or in a name such as *Elizabeth I*, *World War I* or
+*Stage I* when no first-person wording follows: `Under this Act I pay...` is
+personal). This is a word-level check, not understanding, so use `manual` or
+`off` if a message must never be sent by mistake. Questions about suicide,
+self-harm or lethal doses are never searched or offered for search, even after
+`look it up` or `tell me more`; Jarvis shows the crisis help lines instead.
+This errs on the side of caution, so `what is a lethal dose of caffeine?` gets
+the help lines too. The reply starts with the words that were sent
+(`I searched Wikipedia for '...'`), and a progress note is printed on stderr
+while the search runs, so piped output stays clean.
+
+### Search providers
+
+| Provider | Setup |
+| --- | --- |
+| Wikipedia (default) | None. `JARVIS_WIKIPEDIA_LANG` picks the language edition (default `en`). |
+| Brave Search | Set `JARVIS_BRAVE_API_KEY` to a [Brave Search API](https://brave.com/search/api/) key. |
+| SearXNG | Set `JARVIS_SEARXNG_URL` to your instance, with `json` listed under `search.formats` in its `settings.yml`. |
+
+`JARVIS_SEARCH_PROVIDER` (`wikipedia`, `brave` or `searxng`) picks one
+explicitly; otherwise Brave is used when its key is set, then SearXNG when its
+URL is set, then Wikipedia. With Brave and SearXNG, Jarvis also reads the top
+three result pages so it can quote them. It skips any page on your own machine
+or private network, checking both the addresses a name resolves to and, unless
+you use a proxy, the address it actually connects to. When a page cannot be
+read, Jarvis falls back to the search snippet.
+
+### Limitations
+
+- Summaries are *extractive*: Jarvis quotes the sentences that mention most of
+  your question's keywords. It does not reason over them or write new text, so
+  it can quote something related that does not quite answer the question.
+  Check the sources.
+- Wikipedia is an encyclopedia, not a live feed. Questions about news, weather,
+  prices or scores get a note suggesting Brave Search or SearXNG instead.
+- The search request gives up after 10 seconds without data. Result pages give
+  up after 8 seconds without data, and Jarvis stops waiting for them 15 seconds
+  after the search returns, using their search snippets instead. Press Ctrl-C
+  to cancel a slow search in a session.
+- Web search widens what Jarvis can answer, but Jarvis is still a rule-based
+  assistant, not artificial general intelligence.
 
 ## Text to speech
 
@@ -730,11 +857,11 @@ src/jarvis/
   skills.py       every built-in skill and the registry that routes to them
   memory.py       JSON backed memory, or RAM only when no path is given
   nl.py           natural language normalisation and number words
-  <topic>.py      the offline data and logic behind a family of skills
+  <topic>.py      the data and logic behind a family of skills
                   (atlas, bible, braille, calculator, clock, cloud, cua,
                   dates, emergency, encyclopedia, finance, knowledge, maritime,
                   percentages, poetry, science, signlanguage, sketch, speech,
-                  traffic, units)
+                  traffic, units, websearch)
 tests/            one unittest module per topic
 ```
 
@@ -770,6 +897,13 @@ install first:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests
+```
+
+The suite never goes online. To also check web search against the real
+Wikipedia, opt in to the live test:
+
+```bash
+JARVIS_LIVE_WEB_TESTS=1 PYTHONPATH=src python -m unittest tests.test_websearch
 ```
 
 `pytest` works too, since `pyproject.toml` already points it at `tests/` and

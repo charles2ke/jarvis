@@ -5,9 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable, List, Optional
 
+from jarvis import websearch
 from jarvis.memory import Memory
 from jarvis.nl import normalize
-from jarvis.skills import SkillContext, SkillRegistry, build_default_registry
+from jarvis.skills import (
+    SkillContext,
+    SkillRegistry,
+    answer_unknown,
+    build_default_registry,
+)
 
 FALLBACK_RESPONSE = (
     "I am not sure how to help with that yet. Ask me for 'help' to see my skills."
@@ -15,7 +21,13 @@ FALLBACK_RESPONSE = (
 
 
 class Assistant:
-    """Routes user requests to the first skill that understands them."""
+    """Routes user requests to the first skill that understands them.
+
+    ``web_search`` says when the web may be searched: ``"auto"`` also looks up
+    factual questions that no skill answers, ``"manual"`` (the default) only
+    when asked, and ``"off"`` never. ``notify`` receives progress notes, such
+    as "(searching Wikipedia...)", while a slow skill works.
+    """
 
     def __init__(
         self,
@@ -23,13 +35,24 @@ class Assistant:
         memory: Optional[Memory] = None,
         now: Callable[[], datetime] = datetime.now,
         name: str = "Jarvis",
+        web_search: str = "manual",
+        notify: Optional[Callable[[str], None]] = None,
     ) -> None:
+        if web_search not in websearch.MODES:
+            raise ValueError(
+                f"web_search must be one of {', '.join(websearch.MODES)}, not {web_search!r}."
+            )
         self.name = name
         self.memory = memory if memory is not None else Memory()
         self.registry = registry if registry is not None else build_default_registry()
         self.history: List[tuple[str, str]] = []
         self._context = SkillContext(
-            memory=self.memory, registry=self.registry, now=now, history=self.history
+            memory=self.memory,
+            registry=self.registry,
+            now=now,
+            history=self.history,
+            web_search=web_search,
+            notify=notify,
         )
 
     def greet(self) -> str:
@@ -49,7 +72,7 @@ class Assistant:
             return "I am listening."
         resolved = self._resolve(text)
         if resolved is None:
-            reply = FALLBACK_RESPONSE
+            reply = answer_unknown(text, self._context) or FALLBACK_RESPONSE
         else:
             skill, match = resolved
             reply = skill.handler(match, self._context)
