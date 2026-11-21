@@ -656,8 +656,16 @@ def _previous_topic(context: SkillContext) -> Optional[str]:
 
     for message, _ in reversed(context.history[-3:]):
         resolved = context.registry.resolve(message)
+        normalized = normalize(message)
+        normalized_resolved = (
+            context.registry.resolve(normalized) if normalized != message else None
+        )
         # Signal messages are private: never send their number or text to a search.
-        if resolved is not None and resolved[0].name in _WEB_SKILLS | {"signal-message"}:
+        if any(
+            candidate is not None
+            and candidate[0].name in _WEB_SKILLS | {"signal-message"}
+            for candidate in (resolved, normalized_resolved)
+        ):
             continue
         if websearch.content_words(message):
             return message

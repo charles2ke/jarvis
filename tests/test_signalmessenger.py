@@ -203,6 +203,7 @@ class SignalSkillTests(unittest.TestCase):
         assistant = Assistant(memory=Memory(None), web_search="manual")
         assistant.respond("who invented the telephone")
         assistant.respond("signal +15551234567: meet me at the clinic")
+        assistant.respond("signal +one billion: meet me at the clinic")
         with mock.patch("jarvis.skills._web_answer", return_value=("(searched)", True)) as web:
             assistant.respond("look it up")
         self.assertEqual(web.call_args.args[1], "who invented the telephone")
