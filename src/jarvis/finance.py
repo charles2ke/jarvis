@@ -743,10 +743,16 @@ def _solve_us_tax(match: re.Match[str]) -> str:
     )
 
 
+US_TAX_PATTERN = (
+    r"\bus\s+(?:federal\s+)?tax\b[^?!]*?"
+    r"(?:\bon\s+[$£€]?\s*|[$£€]\s*)"
+    r"(?P<income>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)"
+)
+
+
 _SOLVERS: Tuple[Tuple[str, Callable[[re.Match[str]], str]], ...] = (
     (
-        r"\bus\s+(?:federal\s+)?tax\b"
-        r".{0,20}?\b[$£€]?\s*(?P<income>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)",
+        US_TAX_PATTERN,
         _solve_us_tax,
     ),
     (

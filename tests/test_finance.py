@@ -32,6 +32,18 @@ class FinanceGlossaryTests(unittest.TestCase):
 
 
 class MoneyMathTests(unittest.TestCase):
+    def test_us_tax_requires_an_income_cue(self):
+        answer = finance.solve_money(
+            "US tax in 2024 on $100,000 married with 2 children aged 20"
+        )
+        self.assertIn("at $100,000.00", answer)
+        for question in ("US tax in 2024", "US federal tax rates for 2024"):
+            with self.subTest(question=question):
+                self.assertIsNone(finance.solve_money(question))
+        for question in ("US tax on 100000", "US tax in 2024 for $100,000"):
+            with self.subTest(question=question):
+                self.assertIn("at $100,000.00", finance.solve_money(question))
+
     def test_us_tax_uses_all_2024_brackets(self):
         for filing, income, expected in (
             ("single", "250,000", "$53,014.50"),
@@ -163,6 +175,14 @@ class FinanceSkillRoutingTests(unittest.TestCase):
 
     def respond(self, text):
         return self.assistant.respond(text)
+
+    def test_us_tax_routing_requires_an_income_cue(self):
+        for question in ("US tax in 2024", "US federal tax rates for 2024"):
+            with self.subTest(question=question):
+                resolved = self.assistant._resolve(question)
+                self.assertTrue(resolved is None or resolved[0].name != "money-math")
+        answer = self.respond("US tax in 2024 on $100,000 married with 2 children aged 20")
+        self.assertIn("at $100,000.00", answer)
 
     def test_us_tax_requests_parseable_child_ages(self):
         answer = self.respond("US tax on $100,000 married with 2 children aged twenty")
