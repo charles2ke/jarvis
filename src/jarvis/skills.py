@@ -3161,6 +3161,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 description="Store a note for later.",
                 patterns=[
                     _VERBATIM_POLITE
+                    + r"(?!(?:remember\s+my\s+name\s+is\b|write\s+(?:a\s+)?note\s+(?:in|into|to)\s+braille\b))"
                     + r"(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
                     r"|jot\s+down)(?:\s+(?:that|to)\b)?[:,]?\s+(?P<note>.+)$"
                 ],

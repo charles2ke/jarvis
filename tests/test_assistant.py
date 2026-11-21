@@ -111,6 +111,19 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.assistant.respond("what is my name?"), "You are Charles.")
         self.assertIn("Charles", self.assistant.respond("hello"))
 
+    def test_remember_my_name_is_not_saved_as_a_note(self):
+        self.assistant.respond("remember my name is Ada")
+        self.assertEqual(self.assistant.memory.get("user_name"), "Ada")
+        self.assertFalse(self.assistant.memory.get("notes"))
+        self.assertEqual(self.assistant.respond("what is my name?"), "You are Ada.")
+
+    def test_write_note_in_braille_is_converted(self):
+        self.assertEqual(
+            self.assistant.respond("write note in braille"),
+            "In braille that is: ⠝⠕⠞⠑",
+        )
+        self.assertFalse(self.assistant.memory.get("notes"))
+
 
     def test_psychiatrist_reflects_feeling(self):
         reply = self.assistant.respond("I feel anxious about work")
