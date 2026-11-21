@@ -40,6 +40,18 @@ class AssistantTests(unittest.TestCase):
     def test_financial_note_content_is_saved_verbatim(self):
         examples = (
             ("add a note: paper buy 10 AAPL", "paper buy 10 AAPL"),
+            (
+                "add a note:invest 10000 at 6% for 20 years",
+                "invest 10000 at 6% for 20 years",
+            ),
+            (
+                "add a note,invest 10000 at 6% for 20 years",
+                "invest 10000 at 6% for 20 years",
+            ),
+            (
+                "please add a note:invest ten times two\nthen save at 6% for 20 years",
+                "invest ten times two\nthen save at 6% for 20 years",
+            ),
             ("please add a note: paper buy ten AAPL", "paper buy ten AAPL"),
             ("remember invest 10000 at 6% for 20 years", "invest 10000 at 6% for 20 years"),
             (
