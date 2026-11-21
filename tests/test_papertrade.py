@@ -215,6 +215,25 @@ class PaperOrderTests(FakeMarketTestCase):
         self.assertNotIn("order", [action for action, _ in self.calls])
         self.assertIsNone(self.memory.get(KEY))
 
+    def test_modal_order_questions_do_not_place_orders(self):
+        saved = {"cash": 800, "positions": {"ACME": {"quantity": 10, "averagePrice": 20}}}
+        self.memory.set(KEY, saved)
+        for text in ("Can I paper buy 10 ACME?", "Could we paper sell 2 ACME?"):
+            with self.subTest(text=text):
+                reply = self.lines(text)
+                self.assertIn("To place that paper order, say:", reply[0])
+        self.assertEqual(self.memory.get(KEY), saved)
+        self.assertEqual([action for action, _ in self.calls], ["market"])
+
+    def test_polite_can_you_order_still_executes(self):
+        self.answers["order"] = _filled(
+            {"cash": 960, "positions": {"ACME": {"quantity": 2, "averagePrice": 20}}},
+            _summary(960, _holding(ACME, 2, 20, 40, 0)),
+            2,
+        )
+        self.lines("Can you paper buy 2 ACME?")
+        self.assertEqual(self.calls[-1], _order("ACME", "buy", 2))
+
     def test_a_huge_number_of_shares_does_not_break_anything(self):
         self.assertEqual(self.lines("paper buy " + "9" * 400 + " ACME")[0],
                          "How many shares of ACME? For example: paper buy 10 ACME.")
@@ -255,8 +274,14 @@ class PortfolioTests(FakeMarketTestCase):
         self.assertEqual(self.memory.get(KEY), fresh)
 
     def test_reset_questions_and_mixed_requests_change_nothing(self):
+        saved = {"cash": 800, "positions": {"ACME": {"quantity": 10, "averagePrice": 20}}}
+        self.memory.set(KEY, saved)
         cases = (
             ("how do I reset my paper portfolio?",
+             "To start again with $1,000.00 of paper cash and no positions, say: reset my paper portfolio"),
+            ("Can I reset my paper portfolio?",
+             "To start again with $1,000.00 of paper cash and no positions, say: reset my paper portfolio"),
+            ("Would we reset our paper portfolio?",
              "To start again with $1,000.00 of paper cash and no positions, say: reset my paper portfolio"),
             ("reset my paper portfolio and buy 2 ACME",
              'One thing at a time: say "reset my paper portfolio" to start again with $1,000.00, '
@@ -266,6 +291,7 @@ class PortfolioTests(FakeMarketTestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.lines(text), [line, *ENDING])
         self.assertEqual([action for action, _ in self.calls], ["market"])
+        self.assertEqual(self.memory.get(KEY), saved)
 
 
 class QuoteTests(FakeMarketTestCase):

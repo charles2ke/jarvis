@@ -628,7 +628,11 @@ _RESET = re.compile(
     re.IGNORECASE,
 )
 _NEGATED = re.compile(r"\b(?:don['\u2019]?t|do\s+not|never|not)\s+(?:\w+\s+){0,2}$", re.I)
-_QUESTION = re.compile(r"^(?:how|what|why|when|which|does|is|are|should)\b", re.IGNORECASE)
+_QUESTION = re.compile(
+    r"^(?:how|what|why|when|which|does|is|are|should)\b"
+    r"|^(?:can|could|would|should|will|shall|may|might|must)\s+(?:i|we)\b",
+    re.IGNORECASE,
+)
 _IDENTIFIER = re.compile(
     r"\b(?P<kind>isin|cusip|sedol)(?:\s+(?:code|number))?\s*(?:[:#=]\s*|\bis\s+)?"
     r"(?P<code>(?=[A-Za-z0-9-]*\d)[A-Za-z0-9][A-Za-z0-9-]{4,})\b",
