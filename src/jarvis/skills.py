@@ -2966,17 +2966,6 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
             ),
             Skill(
-                name="add-note",
-                description="Store a note for later.",
-                patterns=[
-                    _VERBATIM_POLITE
-                    + r"(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
-                    r"|jot\s+down)(?:\s+(?:that|to)\b)?[:,]?\s+(?P<note>.+)$"
-                ],
-                handler=_add_note,
-                examples=["remember buy milk"],
-            ),
-            Skill(
                 name="emergency-share",
                 description=(
                     "Send a country's emergency numbers to someone by email or "
@@ -3166,6 +3155,17 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_learn_answer,
                 examples=["learn that"],
+            ),
+            Skill(
+                name="add-note",
+                description="Store a note for later.",
+                patterns=[
+                    _VERBATIM_POLITE
+                    + r"(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
+                    r"|jot\s+down)(?:\s+(?:that|to)\b)?[:,]?\s+(?P<note>.+)$"
+                ],
+                handler=_add_note,
+                examples=["remember buy milk"],
             ),
             Skill(
                 name="cua-actions",

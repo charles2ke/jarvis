@@ -54,6 +54,9 @@ class AssistantTests(unittest.TestCase):
                 self.assertEqual(assistant.memory.get("notes"), [note])
                 self.assertIn(note, assistant.respond("list my notes"))
 
+    def test_remember_answer_remains_a_web_command(self):
+        self.assertEqual(self.assistant._resolve("remember that answer")[0].name, "learn-answer")
+
     def test_delete_single_note(self):
         self.assistant.respond("remember buy milk")
         self.assistant.respond("remember call mum")
