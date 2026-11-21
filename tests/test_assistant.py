@@ -37,6 +37,23 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("cleared", self.assistant.respond("clear my notes"))
         self.assertIn("no notes", self.assistant.respond("show notes"))
 
+    def test_financial_note_content_is_saved_verbatim(self):
+        examples = (
+            ("add a note: paper buy 10 AAPL", "paper buy 10 AAPL"),
+            ("please add a note: paper buy ten AAPL", "paper buy ten AAPL"),
+            ("remember invest 10000 at 6% for 20 years", "invest 10000 at 6% for 20 years"),
+            (
+                "Hey Jarvis, could you please add a note: invest ten at 6% for 20 years",
+                "invest ten at 6% for 20 years",
+            ),
+        )
+        for command, note in examples:
+            with self.subTest(command=command):
+                assistant = make_assistant()
+                self.assertEqual(assistant.respond(command), "Noted. You now have 1 note(s).")
+                self.assertEqual(assistant.memory.get("notes"), [note])
+                self.assertIn(note, assistant.respond("list my notes"))
+
     def test_delete_single_note(self):
         self.assistant.respond("remember buy milk")
         self.assistant.respond("remember call mum")
