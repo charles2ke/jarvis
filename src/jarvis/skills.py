@@ -2147,26 +2147,26 @@ def _about_jarvis(match: Match[str], context: SkillContext) -> str:
     groups = match.groupdict()
     count = len(context.registry)
     how = (
-        f"I match what you type against {count} skills written in plain Python and "
-        "answer with the first one that fits"
+        f"I match what you type against {count} skills and answer with the first "
+        "one that fits"
     )
     if groups.get("version"):
         return f"I am Jarvis version {__version__}, with {count} skills."
     if groups.get("nature"):
+        skills = (
+            "'answer', 'add-knowledge-website', 'weather', 'hazard-alerts' and "
+            "'space-weather' skills"
+        )
+        signal = "and 'signal-message' once you enable sending"
         online = {
             "auto": (
                 "I go online to search the web for factual questions my skills "
-                "cannot answer, and for the 'web-search', 'answer' and "
-                "'add-knowledge-website' skills."
+                f"cannot answer, and for the 'web-search', {skills}, {signal}."
             ),
             "manual": (
-                "I go online only when you ask, through the 'web-search', 'answer' "
-                "and 'add-knowledge-website' skills."
+                f"I go online only when you ask, through the 'web-search', {skills}, {signal}."
             ),
-            "off": (
-                "Web search is turned off, so only the 'answer' and "
-                "'add-knowledge-website' skills go online."
-            ),
+            "off": f"Web search is turned off, so only the {skills} go online, {signal}.",
         }[_web_mode(context)]
         return (
             f"I am a computer program, not a person. {how}, using built-in rules "
@@ -2176,7 +2176,8 @@ def _about_jarvis(match: Match[str], context: SkillContext) -> str:
         return (
             "I am a small, dependency-free Python project. Every answer comes from "
             "a skill defined in jarvis/skills.py, so you can read exactly how I "
-            "work. Say 'help' to see my skills."
+            "work; a few skills run the author's other projects, checked out in "
+            "projects/, with Node.js. Say 'help' to see my skills."
         )
     return (
         f"I am Jarvis, a personal assistant that runs in your terminal. {how}. "

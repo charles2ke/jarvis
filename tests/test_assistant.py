@@ -436,6 +436,16 @@ class EverydaySkillTests(unittest.TestCase):
         self.assertIn(f"{len(self.assistant.registry)} skills", self.assistant.respond("who are you?"))
         self.assertEqual(self.assistant.respond("good night"), "Good night. Sleep well.")
 
+    def test_about_jarvis_names_every_skill_that_goes_online(self):
+        online = ("answer", "add-knowledge-website", "weather", "hazard-alerts", "space-weather")
+        for mode in ("auto", "manual", "off"):
+            reply = Assistant(memory=Memory(None), web_search=mode).respond("are you an AI?")
+            with self.subTest(mode=mode):
+                for name in online:
+                    self.assertIn(f"'{name}'", reply)
+                self.assertIn("'signal-message' once you enable sending", reply)
+                self.assertEqual("'web-search'" in reply, mode != "off")
+
     def test_small_talk_does_not_shadow_support_skills(self):
         self.assertEqual(self.skill_for("not great, i want to die"), "crisis-support")
         self.assertEqual(self.skill_for("i am not ok"), "emotional-support")

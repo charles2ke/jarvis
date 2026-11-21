@@ -4,7 +4,7 @@ Personal AI Companion — a small, dependency-free assistant you can run from yo
 terminal.
 
 Jarvis matches what you type against a registry of skills and answers with the
-first one that fits. Everything is plain Python, so most offline requests are
+first one that fits. Jarvis itself is plain Python, so most offline requests are
 answered in milliseconds and you can read exactly how the answer was produced.
 Skills that reach the network or call out to an external tool (speech, CUA,
 Signal messages, opening phone and email links, and the connected projects,
