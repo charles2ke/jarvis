@@ -32,6 +32,17 @@ class FinanceGlossaryTests(unittest.TestCase):
 
 
 class MoneyMathTests(unittest.TestCase):
+    def test_us_tax_uses_all_2024_brackets(self):
+        for filing, income, expected in (
+            ("single", "250,000", "$53,014.50"),
+            ("married", "250,000", "$39,077"),
+            ("single", "1,000,000", "$322,785.75"),
+            ("married", "1,000,000", "$285,321.50"),
+        ):
+            with self.subTest(filing=filing, income=income):
+                answer = finance.solve_money(f"US tax on ${income} {filing}")
+                self.assertIn(f"is {expected}", answer)
+
     def test_us_tax_excludes_explicitly_older_children(self):
         answer = finance.solve_money(
             "US tax on $100,000 married with 2 20-year-old children"

@@ -713,9 +713,17 @@ def _solve_us_tax(match: re.Match[str]) -> str:
     standard_deduction = 29200 if married else 14600
     taxable = max(0.0, income - standard_deduction)
     brackets = (
-        ((23200, 0.10), (94300, 0.12), (float("inf"), 0.22))
+        (
+            (23200, 0.10), (94300, 0.12), (201050, 0.22),
+            (383900, 0.24), (487450, 0.32), (731200, 0.35),
+            (float("inf"), 0.37),
+        )
         if married
-        else ((11600, 0.10), (47150, 0.12), (float("inf"), 0.22))
+        else (
+            (11600, 0.10), (47150, 0.12), (100525, 0.22),
+            (191950, 0.24), (243725, 0.32), (609350, 0.35),
+            (float("inf"), 0.37),
+        )
     )
     tax = 0.0
     lower = 0.0
