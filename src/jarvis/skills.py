@@ -2916,7 +2916,7 @@ def _space_weather(match: Match[str], context: SkillContext) -> str:
 
 # Accepts every prefix nl.normalize strips, so the raw text always matches and
 # the message is sent verbatim instead of with number or operator words rewritten.
-_SIGNAL_POLITE = (
+_VERBATIM_POLITE = (
     r"^\s*(?:(?:(?:hey|ok|okay)\s+)?jarvis[,:]?\s+|(?:please|kindly)[,:]?\s+"
     r"|(?:could|can|would|will)\s+you\s+(?:please\s+)?)*"
 )
@@ -3240,35 +3240,35 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "(opt-in; shows the message until enabled)."
                 ),
                 patterns=[
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"(?:send|write)\s+(?:an?\s+)?(?:signal\s+" + _SIGNAL_NOUN + r"|"
                     + _SIGNAL_NOUN + r"\s+" + _SIGNAL_VIA + r")\s+to\s+" + _SIGNAL_TO
                     + _SIGNAL_TAIL,
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"(?:message|msg|text|dm|tell|ping|send\s+(?:an?\s+)?" + _SIGNAL_NOUN
                     + r"\s+to)\s+" + _SIGNAL_NOT_A_QUESTION + _SIGNAL_TO + r"\s+" + _SIGNAL_VIA
                     + _SIGNAL_TAIL,
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"signal\s+(?:" + _SIGNAL_NOUN + r"\s+)?(?:to\s+)?" + _SIGNAL_ADDRESS
                     + _SIGNAL_TAIL,
                     # A number or username without a colon before the message.
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"signal\s+(?P<recipient>(?:" + _SIGNAL_DIGITS
                     + r"|(?:u:|@)[a-z_])(?s:.*))$",
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"(?:send|write)\s+(?!an?\s)" + _SIGNAL_TO + r"\s+(?:an?\s+)?signal\s+"
                     + _SIGNAL_NOUN + _SIGNAL_TAIL,
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"(?:(?:send|save|write|make|add)\s+)?(?:an?\s+|my\s+)?"
                     r"(?P<recipient>note[\s-]+to[\s-]+(?:self|myself))\s+" + _SIGNAL_VIA
                     + _SIGNAL_TAIL,
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"send\s+[\"\u201c\u201d'\u2018\u2019](?P<message_already_unquoted>)"
                     + r"(?P<message>(?s:.+?))"
                     r"[\"\u201c\u201d'\u2018\u2019]\s+to\s+" + _SIGNAL_TO + r"\s+"
                     + _SIGNAL_VIA + r"(?:[,\s]+please)?\s*[.!?]*\s*$",
                     # No recipient yet: ask who the message is for.
-                    _SIGNAL_POLITE
+                    _VERBATIM_POLITE
                     + r"(?:send|write)\s+(?:an?\s+)?(?:signal\s+" + _SIGNAL_NOUN + r"|"
                     + _SIGNAL_NOUN + r"\s+" + _SIGNAL_VIA + r")" + _SIGNAL_TAIL,
                 ],
@@ -3469,6 +3469,18 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_learn_answer,
                 examples=["learn that"],
+            ),
+            Skill(
+                name="add-note",
+                description="Store a note for later.",
+                patterns=[
+                    _VERBATIM_POLITE
+                    + r"(?!(?:remember\s+my\s+name\s+is\b|write\s+(?:a\s+)?note\s+(?:in|into|to)\s+braille\b))"
+                    + r"(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
+                    r"|jot\s+down)(?:\s+(?:that|to)\b)?(?:[:,]\s*|\s+)(?P<note>(?s:.+))$"
+                ],
+                handler=_add_note,
+                examples=["remember buy milk"],
             ),
             Skill(
                 name="cua-actions",
@@ -4464,16 +4476,6 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_edit_note,
                 examples=["change note 2 to call dad"],
-            ),
-            Skill(
-                name="add-note",
-                description="Store a note for later.",
-                patterns=[
-                    r"^\s*(?:remember|note(?:\s+to\s+self)?|(?:take|make|add|write)\s+(?:a\s+)?note"
-                    r"|jot\s+down)(?:\s+(?:that|to)\b)?[:,]?\s+(?P<note>.+)$"
-                ],
-                handler=_add_note,
-                examples=["remember buy milk"],
             ),
             Skill(
                 name="search-notes",

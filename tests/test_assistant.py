@@ -41,6 +41,38 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("cleared", self.assistant.respond("clear my notes"))
         self.assertIn("no notes", self.assistant.respond("show notes"))
 
+    def test_financial_note_content_is_saved_verbatim(self):
+        examples = (
+            ("add a note: paper buy 10 AAPL", "paper buy 10 AAPL"),
+            (
+                "add a note:invest 10000 at 6% for 20 years",
+                "invest 10000 at 6% for 20 years",
+            ),
+            (
+                "add a note,invest 10000 at 6% for 20 years",
+                "invest 10000 at 6% for 20 years",
+            ),
+            (
+                "please add a note:invest ten times two\nthen save at 6% for 20 years",
+                "invest ten times two\nthen save at 6% for 20 years",
+            ),
+            ("please add a note: paper buy ten AAPL", "paper buy ten AAPL"),
+            ("remember invest 10000 at 6% for 20 years", "invest 10000 at 6% for 20 years"),
+            (
+                "Hey Jarvis, could you please add a note: invest ten at 6% for 20 years",
+                "invest ten at 6% for 20 years",
+            ),
+        )
+        for command, note in examples:
+            with self.subTest(command=command):
+                assistant = make_assistant()
+                self.assertEqual(assistant.respond(command), "Noted. You now have 1 note(s).")
+                self.assertEqual(assistant.memory.get("notes"), [note])
+                self.assertIn(note, assistant.respond("list my notes"))
+
+    def test_remember_answer_remains_a_web_command(self):
+        self.assertEqual(self.assistant._resolve("remember that answer")[0].name, "learn-answer")
+
     def test_delete_single_note(self):
         self.assistant.respond("remember buy milk")
         self.assistant.respond("remember call mum")
@@ -94,6 +126,19 @@ class AssistantTests(unittest.TestCase):
         self.assistant.respond("my name is Charles")
         self.assertEqual(self.assistant.respond("what is my name?"), "You are Charles.")
         self.assertIn("Charles", self.assistant.respond("hello"))
+
+    def test_remember_my_name_is_not_saved_as_a_note(self):
+        self.assistant.respond("remember my name is Ada")
+        self.assertEqual(self.assistant.memory.get("user_name"), "Ada")
+        self.assertFalse(self.assistant.memory.get("notes"))
+        self.assertEqual(self.assistant.respond("what is my name?"), "You are Ada.")
+
+    def test_write_note_in_braille_is_converted(self):
+        self.assertEqual(
+            self.assistant.respond("write note in braille"),
+            "In braille that is: ⠝⠕⠞⠑",
+        )
+        self.assertFalse(self.assistant.memory.get("notes"))
 
 
     def test_psychiatrist_reflects_feeling(self):
