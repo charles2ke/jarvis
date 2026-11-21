@@ -486,6 +486,15 @@ class EverydaySkillTests(unittest.TestCase):
         )
         self.assertIn("None of your 2 notes", self.assistant.respond("search my notes for bread"))
 
+    def test_polite_note_edit_uses_normalized_command(self):
+        self.assistant.respond("remember call mum")
+        self.assistant.respond("remember buy milk")
+
+        self.assertEqual(
+            self.assistant.respond("could you change note 2 to chemo at nine?"),
+            "Updated note 2 from 'buy milk' to 'chemo at 9?'.",
+        )
+
 
 class ConnectedProjectTests(unittest.TestCase):
     """Skills that use charles2ke's other repositories, checked out under projects/."""
