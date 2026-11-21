@@ -821,9 +821,10 @@ read, and says that Jarvis is not an official warning system — follow your
 local authorities.
 
 These skills go online only when you ask, in `auto` or `manual` mode. With
-`--web-search off` they say that web access is off rather than going online,
-and, like a web search, they are never sent for a message about suicide or
-self-harm.
+`--web-search off` they say that web access is off rather than going online.
+Like a web search, they are not sent for a message that Jarvis recognises as
+being about suicide or self-harm, such as a plan to jump from a bridge; it
+shows the crisis help lines instead.
 
 ## Text to speech
 

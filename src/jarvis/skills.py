@@ -604,6 +604,33 @@ _SELF_HARM = re.compile(
     re.IGNORECASE,
 )
 
+# A first-person plan to jump, or throw yourself, from a height or in front of
+# traffic: "the bridge I want to jump off". It needs a height or vehicle, so
+# "I'll jump off this call" or "I'm going to jump from Python to Rust" is not one.
+_JUMP_PLAN = re.compile(
+    r"\b(?:i\s*'ll|i\s+(?:will|shall)"
+    r"|i(?:\s*'m|m|\s+am)?\s+(?:really\s+|just\s+)?(?:want(?:ed)?\s+to|wanna|going\s+to|gonna"
+    r"|plan(?:ning)?\s+to|about\s+to|ready\s+to)"
+    r"|should\s+i|thinking\s+(?:about|of))"
+    r"\s+(?:jump(?:ing)?|throw(?:ing)?\s+myself)"
+    r"(?:\s+(?:off|from|out(?:\s+of)?|in\s+front\s+of|under)\b|\s*(?:[,.;!?]|$))",
+    re.IGNORECASE,
+)
+_ARTICLES = r"(?:(?:a|an|the|some|oncoming|moving|speeding)\s+)*"
+_JUMP_PLACE = re.compile(
+    r"\b(?:bridges?|cliffs?|roofs?|rooftops?|buildings?|balcon(?:y|ies)|ledges?|towers?|windows?"
+    r"|overpass(?:es)?|skyscrapers?|car\s+parks?|parking\s+(?:garages?|structures?|decks?))\b"
+    rf"|\bin\s+front\s+of\s+{_ARTICLES}"
+    r"(?:trains?|bus(?:es)?|cars?|trucks?|lorr(?:y|ies)|trams?|subway|tube|traffic|vehicles?)\b"
+    # Not "under the bus", which is usually the idiom.
+    rf"|\bunder\s+{_ARTICLES}(?:trains?|cars?|trucks?|lorr(?:y|ies)|trams?|subway|tube)\b",
+    re.IGNORECASE,
+)
+
+
+def _plans_to_jump(text: str) -> bool:
+    return bool(_JUMP_PLAN.search(text) and _JUMP_PLACE.search(text))
+
 
 def _web_mode(context: SkillContext) -> str:
     return context.web_search if context.web_search in websearch.MODES else "manual"
@@ -619,7 +646,11 @@ def _never_search(context: SkillContext, *texts: str) -> bool:
     crisis = next((skill for skill in context.registry if skill.name == "crisis-support"), None)
     for text in texts:
         for candidate in {text or "", normalize(text or "")}:
-            if _SELF_HARM.search(candidate) or (crisis is not None and crisis.match(candidate)):
+            if (
+                _SELF_HARM.search(candidate)
+                or _plans_to_jump(candidate)
+                or (crisis is not None and crisis.match(candidate))
+            ):
                 return True
     return False
 
