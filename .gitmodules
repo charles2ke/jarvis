@@ -1,0 +1,18 @@
+[submodule "projects/tax-break"]
+	path = projects/tax-break
+	url = https://github.com/charles2ke/tax-break.git
+[submodule "projects/Portfolio-Watcher"]
+	path = projects/Portfolio-Watcher
+	url = https://github.com/charles2ke/Portfolio-Watcher.git
+[submodule "projects/OpenTrading"]
+	path = projects/OpenTrading
+	url = https://github.com/charles2ke/OpenTrading.git
+[submodule "projects/beat-it"]
+	path = projects/beat-it
+	url = https://github.com/charles2ke/beat-it.git
+[submodule "projects/5-Mins"]
+	path = projects/5-Mins
+	url = https://github.com/charles2ke/5-Mins.git
+[submodule "projects/workout"]
+	path = projects/workout
+	url = https://github.com/charles2ke/workout.git

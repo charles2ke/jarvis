@@ -51,6 +51,16 @@ class BuiltSiteTests(unittest.TestCase):
         self.assertEqual(len(listed), len(set(listed)), "a skill is listed in two categories")
         self.assertEqual(set(listed), {skill.name for skill in self.skills})
 
+    def test_every_category_has_its_colours(self):
+        css = (self.out / "assets" / "style.css").read_text(encoding="utf-8")
+        for key, _, _, _ in build_site.CATEGORIES:
+            with self.subTest(category=key):
+                rule = rf'\[data-category="{key}"\] \{{ --cat: var\(--c-{key}\); --cat-ink: var\(--i-{key}\); \}}'
+                self.assertIsNotNone(re.search(rule, css), f"style.css has no [data-category={key!r}] rule")
+                self.assertEqual(css.count(f"--c-{key}:"), 1)
+                # The dark theme, the chosen light theme and the system light theme.
+                self.assertEqual(css.count(f"--i-{key}:"), 3)
+
     def test_every_skill_has_a_linkable_card(self):
         self.assertEqual(self.index.count('<article class="card"'), len(self.skills))
         for skill in self.skills:
