@@ -535,6 +535,15 @@ class AssistantWebTests(CleanEnvTestCase):
             self.assertIn("Tell me what you would like to know more about", assistant.respond("tell me more"))
         self.assertIn("did not come from the web", assistant.respond("sources"))
 
+    def test_auto_mode_tell_me_more_does_not_search_a_signal_command(self):
+        assistant = self.assistant(mode="auto")
+        search = fake_search()
+        with mock.patch("jarvis.websearch.search", search):
+            assistant.respond("signal +15551234567: who won the game?")
+            reply = assistant.respond("tell me more")
+        self.assertEqual(search.calls, [])
+        self.assertIn("Tell me what you would like to know more about", reply)
+
     def test_manual_mode_suggests_looking_it_up(self):
         search = fake_search()
         assistant = self.assistant(mode="manual")
