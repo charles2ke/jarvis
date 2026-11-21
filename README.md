@@ -7,12 +7,12 @@ Jarvis matches what you type against a registry of skills and answers with the
 first one that fits. Everything is plain Python, so most offline requests are
 answered in milliseconds and you can read exactly how the answer was produced.
 Skills that reach the network or call out to an external tool (speech, CUA,
-opening phone and email links)
+Signal messages, opening phone and email links)
 take as long as that service or subprocess does.
 
 - **Offline first** — every skill works without a network connection, except
-  the ones that say otherwise (`web-search`, `add-knowledge-website` and
-  `answer`).
+  the ones that say otherwise (`web-search`, `add-knowledge-website`, `answer`
+  and, once you enable sending, `signal-message`).
 - **Looks up what it does not know** — a factual question that no skill can
   answer is searched on the web (Wikipedia by default) and summarised with
   numbered sources; `--web-search off` keeps Jarvis fully offline
@@ -46,6 +46,7 @@ take as long as that service or subprocess does.
 - [Reading and writing braille](#reading-and-writing-braille)
 - [Answering any query with a cloud session](#answering-any-query-with-a-cloud-session)
 - [Computer use (CUA)](#computer-use-cua)
+- [Signal messages](#signal-messages)
 - [Project layout](#project-layout)
 - [Adding a skill](#adding-a-skill)
 - [Development](#development)
@@ -116,8 +117,10 @@ then swapped into place, so an interrupted save never leaves a half-written
 
 The network is used only to search the web for a factual question no skill can
 answer, or when you ask it to ([Searching the web](#searching-the-web)); by
-`add-knowledge-website`, when it fetches a page you asked for; and by `answer`,
-when you send a question to a cloud session. Everything else is answered from
+`add-knowledge-website`, when it fetches a page you asked for; by `answer`,
+when you send a question to a cloud session; and by `signal-message`, once you
+enable sending, when signal-cli delivers your message through Signal's servers.
+Everything else is answered from
 data shipped with the package. The results of the last web search are kept in
 RAM for the session only; the pages, and the answer with the question it
 answered, are written to memory only when you say `learn that`.
@@ -253,6 +256,7 @@ searched automatically too; see [Searching the web](#searching-the-web).
 | world-clock | `what time is it in Tokyo?` |
 | answer | `answer how does the skill registry work?` |
 | computer-use | `use the computer to open Safari then click on Sign in` |
+| signal-message | `signal +15551234567: running late, see you at 7` |
 | emergency-numbers | `what are the emergency numbers in Japan?` |
 | emergency-call | `call the police in Kenya` |
 | emergency-text | `text the police in France: there is a break-in` |
@@ -285,6 +289,12 @@ the wellbeing skills, so `not great, I want to die` still reaches
 `crisis-support`, and `world-clock` and `date-calculator` come before `time` and
 `date`, so `what time is it in Tokyo?` gets the world clock while
 `what time is it?` still reads your own clock.
+
+`signal-message` comes straight after `crisis-support`, ahead of the emergency
+skills, so the text of a Signal message is never mistaken for another command,
+while a message that mentions self-harm still gets the crisis help lines
+instead of being sent, and a Signal message for the police is handed to
+`emergency-text`.
 
 The web research skills come straight after `answer`, ahead of the notes and
 encyclopedia skills, so `remember that answer` saves the last web answer while
@@ -565,7 +575,8 @@ jarvis "look up the Voyager probes online"
 
 - `tell me more` continues the summary with the next most relevant sentences.
 - `sources` or `where did you find that?` lists every page the search returned.
-- `look it up` searches the web for your previous question.
+- `look it up` searches the web for your previous question. It skips Signal
+  messages, so their numbers and text are never searched.
 - `learn that` saves the answer, with the question it answered, and keeps the
   pages as knowledge sources ([Knowledge sources](#knowledge-sources)). Asking
   again with the same keywords and question word (`who invented the
@@ -848,6 +859,90 @@ The planner understands `open`, `click`, `double_click`, `right_click`,
 with how much of the instruction it did understand, rather than guessed at.
 The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
+## Signal messages
+
+`signal-message` sends a Signal message to a phone number or username, or a
+note to your own Note to Self. Signal has no official interface for programs,
+so Jarvis drives [signal-cli](https://github.com/AsamK/signal-cli), the
+unofficial command line client for Signal:
+
+```bash
+jarvis "signal +15551234567: running late, see you at 7"
+jarvis "send a signal message to u:alice.42 saying the train is delayed"
+jarvis "message +254 712 345 678 on signal that I'm on my way"
+jarvis "send 'happy birthday!' to +15551234567 on signal"
+jarvis "note to self on signal: buy milk"
+```
+
+Write phone numbers with `+` and the country code, usernames as `u:alice.42`
+or `@alice.42`, and `me` or `note to self` for your Note to Self. Jarvis keeps
+no contact list, so it cannot look up names such as `mom`, and it does not send
+to groups. Put a colon, `saying`, `that` or quotes between the recipient and
+the message: everything after it is sent exactly as you typed it, across
+several lines if you like. A colon directly followed by a digit, as in `10:30`,
+never ends the recipient, so when the message starts with a number put a space
+after the colon: `signal +15551234567: 10:30 works`. A message that mentions
+self-harm reaches `crisis-support` instead of being sent. Signal cannot reach
+emergency services, so a message for the police, an ambulance or the fire
+brigade gets the emergency text that `emergency-text` prepares instead
+(`text the police in France on signal: there is a break-in` works like
+`text the police in France: there is a break-in`).
+
+Sending reaches other people, so it is opt-in: until you set
+`JARVIS_SIGNAL_ENABLED`, Jarvis only shows the message it would send.
+
+### Setting up signal-cli
+
+1. Install a [recent release](https://github.com/AsamK/signal-cli/releases/latest)
+   of signal-cli. The standard build needs Java 25 or newer; the
+   `Linux-native` build needs no Java. Keep it up to date: Signal changes its
+   servers, and releases older than three months may stop working.
+2. Link it to your Signal account as a new device: run
+   `signal-cli link -n Jarvis`, then in Signal on your phone open
+   Settings > Linked devices and scan the QR code it prints. If no QR code
+   appears, turn the `sgnl://linkdevice?...` link it prints into one with a
+   tool such as `qrencode`. You can instead register a separate number with
+   `signal-cli -a +NUMBER register` and `verify` (see the signal-cli README).
+3. Check that it works:
+   `signal-cli -a +YOUR_NUMBER send --note-to-self -m "hello"`.
+4. Let Jarvis send: `export JARVIS_SIGNAL_ENABLED=1`.
+
+Jarvis reads its settings from the environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `JARVIS_SIGNAL_ENABLED` | `1` (or `true`/`yes`) lets Jarvis send. Without it, Jarvis only shows the message. |
+| `JARVIS_SIGNAL_ACCOUNT` | The Signal number you send from, with its country code (or the ACI of an account without a number), passed to signal-cli as `-a`. Needed when signal-cli has more than one account. |
+| `JARVIS_SIGNAL_COMMAND` | The command that starts signal-cli (default `signal-cli`), for example `/opt/signal-cli/bin/signal-cli`, or `docker exec -i <container> signal-cli` for a container (`-i` passes the message through). |
+| `JARVIS_SIGNAL_URL` | Send through a running signal-cli daemon instead, for example `http://localhost:8080`. |
+
+By default Jarvis runs
+`signal-cli [-a ACCOUNT] -o json send --message-from-stdin RECIPIENT` once per
+message and writes the message to its standard input, so the text never
+appears in the process list. To avoid starting signal-cli for every message,
+keep its daemon running and point Jarvis at it:
+
+```bash
+signal-cli -a +YOUR_NUMBER daemon --http localhost:8080
+export JARVIS_SIGNAL_URL=http://localhost:8080
+```
+
+Jarvis then posts a JSON-RPC `send` request to `/api/v1/rpc`, connecting
+directly rather than through an HTTP proxy. The daemon has no password:
+anything that can reach its port can send messages as you, so keep it on
+`localhost`.
+
+"Sent" means Signal's servers accepted the message, not that it was delivered
+or read. If signal-cli or the daemon does not answer within 60 seconds, Jarvis
+says it does not know whether the message went out rather than sending it
+again. Jarvis does not read incoming messages, but the Signal protocol expects
+them to be received regularly, so run `signal-cli -a +YOUR_NUMBER receive` now
+and then or keep the daemon running. signal-cli decodes standard input with
+your system's character set, so if accented letters or emoji arrive garbled,
+run it under a UTF-8 locale (for example `LANG=C.UTF-8`) or use the daemon.
+The helpers live in `jarvis.signalmessenger` (`parse_recipient`,
+`build_command`, `build_rpc_request`, `send`).
+
 ## Project layout
 
 ```
@@ -860,8 +955,8 @@ src/jarvis/
   <topic>.py      the data and logic behind a family of skills
                   (atlas, bible, braille, calculator, clock, cloud, cua,
                   dates, emergency, encyclopedia, finance, knowledge, maritime,
-                  percentages, poetry, science, signlanguage, sketch, speech,
-                  traffic, units, websearch)
+                  percentages, poetry, science, signalmessenger, signlanguage,
+                  sketch, speech, traffic, units, websearch)
 tests/            one unittest module per topic
 ```
 

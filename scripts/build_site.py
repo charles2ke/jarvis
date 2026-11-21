@@ -187,7 +187,7 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
         "everyday",
         "Everyday",
-        "Time, dates, world clocks, emergency numbers, cloud answers and computer use.",
+        "Time, dates, world clocks, emergency numbers, Signal messages, cloud answers and computer use.",
         (
             "time",
             "date",
@@ -196,6 +196,7 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
             "answer",
             "computer-use",
             "cua-actions",
+            "signal-message",
             "emergency-numbers",
             "emergency-call",
             "emergency-text",

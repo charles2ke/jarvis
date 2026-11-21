@@ -70,6 +70,7 @@ class Assistant:
         text = (message or "").strip()
         if not text:
             return "I am listening."
+        self._context.text = text
         resolved = self._resolve(text)
         if resolved is None:
             reply = answer_unknown(text, self._context) or FALLBACK_RESPONSE

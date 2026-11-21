@@ -18,6 +18,7 @@ from jarvis import (
     finance,
     knowledge,
     percentages,
+    signalmessenger,
     signlanguage,
     sketch,
     traffic,
@@ -83,6 +84,8 @@ class SkillContext:
     web_search: str = "manual"
     #: Shows a progress note, such as "searching...", while a skill works.
     notify: Optional[Callable[[str], None]] = None
+    #: The current message as typed, before ``nl.normalize`` rewrote it.
+    text: str = ""
 
 
 SkillHandler = Callable[[Match[str], SkillContext], str]
@@ -653,7 +656,16 @@ def _previous_topic(context: SkillContext) -> Optional[str]:
 
     for message, _ in reversed(context.history[-3:]):
         resolved = context.registry.resolve(message)
-        if resolved is not None and resolved[0].name in _WEB_SKILLS:
+        normalized = normalize(message)
+        normalized_resolved = (
+            context.registry.resolve(normalized) if normalized != message else None
+        )
+        # Signal messages are private: never send their number or text to a search.
+        if any(
+            candidate is not None
+            and candidate[0].name in _WEB_SKILLS | {"signal-message"}
+            for candidate in (resolved, normalized_resolved)
+        ):
             continue
         if websearch.content_words(message):
             return message
@@ -782,7 +794,7 @@ def _web_more(match: Match[str], context: SkillContext) -> str:
         return "\n".join(
             [websearch.cite(sentences), "", "Sources:", *websearch.source_lines(results.documents, sources)]
         )
-    previous = context.history[-1][0] if context.history else ""
+    previous = _previous_topic(context) or ""
     if previous and _never_search(context, previous):
         return CRISIS_RESPONSE
     if previous and websearch.is_lookup(previous):
@@ -2676,6 +2688,108 @@ def _emergency_share(
     return f"I prepared {what} with the emergency numbers for {entry.country}. {handed_off}"
 
 
+# Accepts every prefix nl.normalize strips, so the raw text always matches and
+# the message is sent verbatim instead of with number or operator words rewritten.
+_SIGNAL_POLITE = (
+    r"^\s*(?:(?:(?:hey|ok|okay)\s+)?jarvis[,:]?\s+|(?:please|kindly)[,:]?\s+"
+    r"|(?:could|can|would|will)\s+you\s+(?:please\s+)?)*"
+)
+_SIGNAL_VIA = (
+    r"(?:on|via|over|through|using|with)\s+(?:the\s+)?signal(?:\s+(?:app|messenger))?"
+)
+_SIGNAL_NOUN = r"(?:message|msg|text|note|dm)"
+# A colon followed by a digit, as in "10:30", never starts the message: the hour
+# would be read as the end of the phone number. Without a message, a trailing
+# "please" and punctuation are allowed; with one, they belong to the message.
+_SIGNAL_TAIL = (
+    r"(?:(?:(?:[,\s]+please)?\s*:(?!\d)\s*|\s+(?:saying(?:\s+that)?|that\s+says|that)(?:\s*:\s*|\s+)"
+    r"|\s+(?=[\"\u201c\u201d]))(?P<message>(?s:.+?))|(?:[,\s]+please)?\s*[.!?]*)\s*$"
+)
+_SIGNAL_TO = (
+    r"(?P<recipient>(?!(?:the\s+)?emergency\s+(?:phone\s+|contact\s+)?(?:numbers?|contacts?)\b)"
+    r"(?:u:)?(?:[^:]|:(?=\d))+?)"
+)
+# "tell me how to block someone on signal" is a question, not a message to me.
+_SIGNAL_NOT_A_QUESTION = rf"(?!(?:me|us)\s+(?=\S)(?!{_SIGNAL_VIA}))"
+_SIGNAL_DIGITS = r"(?:\+|plus\s*)?\(?\d[\d\s().\-\u2010-\u2015\u2212]*\d"
+_SIGNAL_ADDRESS = (
+    rf"(?P<recipient>{_SIGNAL_DIGITS}|(?:u:|@|username\s+)[a-z_][a-z0-9_]*\.\d+"
+    r"|me|myself|self|(?:my\s+)?note[\s-]+to[\s-]+(?:self|myself))"
+)
+_SIGNAL_LEAD = re.compile(rf"(?:{_SIGNAL_DIGITS}|(?:u:|@)[^\s:]+)", re.IGNORECASE)
+
+
+def _signal_message(
+    match: Match[str],
+    context: SkillContext,
+    *,
+    environ: Optional[dict] = None,
+    runner: Optional[Callable[..., object]] = None,
+    opener: Optional[Callable[..., object]] = None,
+) -> str:
+    groups = match.groupdict()
+    who = (groups.get("recipient") or "").strip()
+    who = re.sub(r"[,\s]+please$", "", who, flags=re.IGNORECASE)
+    raw_message = groups.get("message") or ""
+    message = (
+        raw_message
+        if groups.get("message_already_unquoted") is not None
+        else signalmessenger.clean_message(raw_message)
+    )
+    try:
+        recipient = signalmessenger.parse_recipient(who)
+    except signalmessenger.EmergencyServiceError as exc:
+        return _signal_emergency_text(who, message, context) or str(exc)
+    except signalmessenger.SignalError as exc:
+        lead = None if message else _SIGNAL_LEAD.match(who)
+        if lead is None or not re.search(r"\w", who[lead.end():]):
+            return str(exc)
+        try:
+            signalmessenger.parse_recipient(lead.group(0))
+        except signalmessenger.SignalError as lead_exc:
+            return str(lead_exc)
+        return (
+            "I could not tell where the recipient ends and the message starts. Put a "
+            "colon and a space after the recipient, such as "
+            "'signal +254712345678: on my way'."
+        )
+    if not message:
+        return (
+            f"What should the Signal message to {recipient.describe()} say? "
+            f"Say 'signal {recipient.address()}: your message'."
+        )
+    typed = context.text if context is not None else ""
+    if typed and match.string != typed:
+        # Only nl.normalize's rewrite matched, and it changes words such as "one".
+        return (
+            "I could not tell exactly what the message says, so I have not sent it. "
+            "Say 'signal +254712345678: your message'."
+        )
+    try:
+        return signalmessenger.send(
+            recipient, message, environ=environ, runner=runner, opener=opener
+        )
+    except signalmessenger.SignalError as exc:
+        return f"I could not send the Signal message: {exc}"
+
+
+def _signal_emergency_text(
+    who: str, message: str, context: Optional[SkillContext]
+) -> Optional[str]:
+    """Prepare a text to the emergency service ``who`` names, as emergency-text would."""
+
+    if context is None:
+        return None
+    phrase = " ".join(f"text {who}".split())
+    if message:
+        phrase += ": " + " ".join(message.split())
+    resolved = context.registry.resolve(phrase)
+    if resolved is None or resolved[0].name != "emergency-text":
+        return None
+    skill, found = resolved
+    return "Signal cannot reach emergency services. " + skill.handler(found, context)
+
+
 _END = r"\s*[?!.]*\s*$"
 
 _NAME_WORD = r"[^\W\d_][\w.'-]*"
@@ -2804,6 +2918,52 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_crisis_support,
                 examples=["I have been thinking about hurting myself"],
+            ),
+            Skill(
+                name="signal-message",
+                description=(
+                    "Send a Signal message or a Note to Self through signal-cli "
+                    "(opt-in; shows the message until enabled)."
+                ),
+                patterns=[
+                    _SIGNAL_POLITE
+                    + r"(?:send|write)\s+(?:an?\s+)?(?:signal\s+" + _SIGNAL_NOUN + r"|"
+                    + _SIGNAL_NOUN + r"\s+" + _SIGNAL_VIA + r")\s+to\s+" + _SIGNAL_TO
+                    + _SIGNAL_TAIL,
+                    _SIGNAL_POLITE
+                    + r"(?:message|msg|text|dm|tell|ping|send\s+(?:an?\s+)?" + _SIGNAL_NOUN
+                    + r"\s+to)\s+" + _SIGNAL_NOT_A_QUESTION + _SIGNAL_TO + r"\s+" + _SIGNAL_VIA
+                    + _SIGNAL_TAIL,
+                    _SIGNAL_POLITE
+                    + r"signal\s+(?:" + _SIGNAL_NOUN + r"\s+)?(?:to\s+)?" + _SIGNAL_ADDRESS
+                    + _SIGNAL_TAIL,
+                    # A number or username without a colon before the message.
+                    _SIGNAL_POLITE
+                    + r"signal\s+(?P<recipient>(?:" + _SIGNAL_DIGITS
+                    + r"|(?:u:|@)[a-z_])(?s:.*))$",
+                    _SIGNAL_POLITE
+                    + r"(?:send|write)\s+(?!an?\s)" + _SIGNAL_TO + r"\s+(?:an?\s+)?signal\s+"
+                    + _SIGNAL_NOUN + _SIGNAL_TAIL,
+                    _SIGNAL_POLITE
+                    + r"(?:(?:send|save|write|make|add)\s+)?(?:an?\s+|my\s+)?"
+                    r"(?P<recipient>note[\s-]+to[\s-]+(?:self|myself))\s+" + _SIGNAL_VIA
+                    + _SIGNAL_TAIL,
+                    _SIGNAL_POLITE
+                    + r"send\s+[\"\u201c\u201d'\u2018\u2019](?P<message_already_unquoted>)"
+                    + r"(?P<message>(?s:.+?))"
+                    r"[\"\u201c\u201d'\u2018\u2019]\s+to\s+" + _SIGNAL_TO + r"\s+"
+                    + _SIGNAL_VIA + r"(?:[,\s]+please)?\s*[.!?]*\s*$",
+                    # No recipient yet: ask who the message is for.
+                    _SIGNAL_POLITE
+                    + r"(?:send|write)\s+(?:an?\s+)?(?:signal\s+" + _SIGNAL_NOUN + r"|"
+                    + _SIGNAL_NOUN + r"\s+" + _SIGNAL_VIA + r")" + _SIGNAL_TAIL,
+                ],
+                handler=_signal_message,
+                examples=[
+                    "signal +15551234567: running late, see you at 7",
+                    "send a signal message to u:alice.42 saying the train is delayed",
+                    "note to self on signal: buy milk",
+                ],
             ),
             Skill(
                 name="emergency-share",
