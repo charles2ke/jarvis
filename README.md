@@ -57,11 +57,16 @@ take as long as that service or subprocess does.
 ## Quick start
 
 ```bash
+git clone --recurse-submodules https://github.com/charles2ke/jarvis.git
+cd jarvis
 pip install -e .
 jarvis "calculate 21 * 2"
 ```
 
-Python 3.10+ is required. There are no runtime dependencies.
+Python 3.10+ is required, with no Python dependencies. The skills built on the
+author's [connected projects](#connected-projects) also need those projects'
+git submodules and, except for beat-it, Node.js 22.18 or newer; without them
+everything else works and those skills explain how to set them up.
 
 Interactive session:
 
@@ -550,8 +555,8 @@ want to kill myself` reaches `crisis-support`.
 
 ### Investment maths
 
-`investment-math` brings the research calculators of
-[Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) to numbers
+`investment-math` runs the research calculators of
+[Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) on numbers
 you type — it has no market data, so it never looks up a company:
 
 ```bash
@@ -565,39 +570,43 @@ jarvis "drip 10000 at 3% yield 5% dividend growth for 10 years"
 
 It covers discounted cash flow, CAPM, simple and exponential moving averages,
 RSI, MACD, Bollinger bands, Fibonacci retracements, volatility, value at risk,
-expected shortfall, maximum drawdown, the Sharpe ratio, return statistics and
-dividend reinvestment. Every reply lists its assumptions, such as
-Portfolio-Watcher's 4.2% risk-free rate, and says that model outputs do not
-predict returns. Questions without numbers (`what is dcf`) still reach
-`economics` or `encyclopedia`.
+expected shortfall, maximum drawdown, return statistics and dividend
+reinvestment. Every figure comes from Portfolio-Watcher's own code; Jarvis
+reads the numbers from your message and lists the assumptions behind the
+answer, including any rates or defaults that are Portfolio-Watcher's own, and
+says that model outputs do not predict returns. Questions without numbers
+(`what is dcf`) still reach `economics` or `encyclopedia`.
 
 ### Paper trading
 
 `paper-trading` is [OpenTrading](https://charles2ke.github.io/OpenTrading/)'s
-practice account: $100,000 of pretend cash and its six demo stocks (AAPL, MSFT,
-TSLA, 7203, SAP and HSBA) at fixed demo prices from OpenTrading's built-in
-snapshot, never live quotes.
+practice account, run by OpenTrading's own trading code: its pretend cash, its
+demo stocks and indices, and its built-in demo prices, never live quotes.
+OpenTrading checks and fills each order; Jarvis reads the order from your
+message and words the result.
 
 ```bash
 jarvis "paper buy 10 AAPL"
 jarvis "paper sell 5 shares of Apple"
 jarvis "show my paper portfolio"
 jarvis "paper quote TSLA"
-jarvis "look up ISIN US0378331005"
+jarvis "look up the ISIN of Apple"
+jarvis "demo stocks"
 jarvis "reset my paper portfolio"
 ```
 
-The portfolio is kept in memory under `paper_portfolio`, so it survives a
-restart unless you run with `--no-memory`. Jarvis has no brokerage connection:
-an order that does not say paper (`buy 10 shares of Apple`) is never carried
-out, and the reply shows the paper command to practise with instead.
+The portfolio is kept in memory under `paper_portfolio`, in OpenTrading's own
+format, so it survives a restart unless you run with `--no-memory`. Jarvis has
+no brokerage connection: an order that does not say paper
+(`buy 10 shares of Apple`) is never carried out, and the reply shows the paper
+command to practise with instead.
 
 ### Income tax estimates
 
-`tax-estimate` works out income tax and take-home pay on a salary with the
-tables of [tax-break](https://charles2ke.github.io/tax-break/), offline, for
-India, the UK (England, Wales and Northern Ireland), the US, Ireland, the
-Netherlands and Singapore:
+`tax-estimate` works out income tax and take-home pay on a salary with the tax
+engine of [tax-break](https://charles2ke.github.io/tax-break/) (see
+[Connected projects](#connected-projects)), for India, the UK (England, Wales
+and Northern Ireland), the US, Ireland, the Netherlands and Singapore:
 
 ```bash
 jarvis "income tax on 15 lakh in India"
@@ -615,24 +624,28 @@ words (`lakh`, `UK`, a US state, `Irish`, `Dutch`, `S$`) and asks when it
 cannot tell — `€60,000` could be Irish or Dutch. It also reads the period
 (`a month`), a bonus, the year, and each country's options: India's regimes,
 age band and deductions such as `80C 1.5 lakh`, a UK student loan plan, a US
-filing status, children and state (all 50 and DC), Ireland's filing status,
-the Dutch 30% ruling and Singapore's age band and CPF contributions. India
-gets both regimes side by side with the cheaper one named, or the regime you
-name with the other's total for comparison.
+filing status, children and state, Ireland's filing status, the Dutch 30%
+ruling and Singapore's age band and CPF contributions. India gets both regimes
+side by side with the cheaper one named, or the regime you name with the
+other's total for comparison.
 
-Every estimate shows the year and assumptions it used, a line-by-line
-breakdown and the effective and marginal rates, and says that it is for general
-education, not tax advice. The tables are tax-break's: FY 2021-22 to FY 2025-26
-for India, 2025/26 for the UK, 2025 for the US, Ireland and the Netherlands,
-and YA 2025 for Singapore. For a year outside them, Jarvis says which years
-tax-break has rather than guessing, and suggests asking without a year to use
-the latest. Messages that only mention tax
+Jarvis turns the message into tax-break's inputs and words its answer: every
+rate, threshold, allowance and year, and the list of US states, comes from
+tax-break, so updating the submodule updates the estimates. Each estimate shows
+the year or calculator and the assumptions it used, a line-by-line breakdown
+and the effective and marginal rates, and says that it is for general
+education, not tax advice. For an Indian financial year tax-break doesn't have,
+Jarvis lists the years it has rather than guessing; the other countries'
+calculators don't take a year, so Jarvis says so when you name one. Scotland
+sets its own income tax bands, which tax-break doesn't have, so a Scottish
+salary gets National Insurance only. Messages that only mention tax
 (`what is a tax bracket?`, `20% tax on 500`) go to the skills that handle them.
 
 ## Health and fitness
 
 `cancer-info` answers from [beat-it](https://charles2ke.github.io/beat-it/)'s
-reviewed information on 22 cancer types, offline:
+reviewed information on cancer types, offline, reading the project's data
+files directly (it needs no Node.js):
 
 ```bash
 jarvis "lung cancer symptoms"
@@ -643,17 +656,18 @@ jarvis "cancer topics"
 ```
 
 It covers each type's overview, symptoms, risk factors, screening, treatments,
-medicines and recent FDA approvals, beat-it's frequently asked questions and
-its worldwide figures. It is general information, never a diagnosis: questions
-about your own symptoms get a gentle reply that urges you to see a doctor, a
-message that you or someone close to you has cancer is acknowledged kindly
-first, and answers about a particular type say when beat-it last reviewed it.
-Messages that only mention the word — the star sign, the Tropic of Cancer, a
-poem or a note — go to the skills that handle them, and thoughts of ending your
-life still reach `crisis-support` first.
+medicines and FDA approvals as beat-it lists them, beat-it's frequently asked
+questions and its worldwide figures. It is general information, never a
+diagnosis: questions about your own symptoms get a gentle reply that urges you
+to see a doctor, a message that you or someone close to you has cancer is
+acknowledged kindly first, and answers about a particular type say when beat-it
+last reviewed it. Messages that only mention the word — the star sign, the
+Tropic of Cancer, a poem or a note — go to the skills that handle them, and
+thoughts of ending your life still reach `crisis-support` first.
 
-`workout-plan` shows the 7-Day Longevity & Strength Program from
-[workout](https://charles2ke.github.io/workout/), using your computer's date:
+`workout-plan` shows the weekly plan in
+[workout](https://charles2ke.github.io/workout/), read from the project each
+time and matched to your computer's date:
 
 ```bash
 jarvis "what's my workout today?"
@@ -663,9 +677,9 @@ jarvis "is today a rest day?"
 jarvis "weekly workout plan"
 ```
 
-Each day's session lists its exercises with sets, reps and rest, and ends with
-a short safety note. The Zone 2 heart-rate range comes from the plan's author
-and is not a target for everyone.
+Each day's session lists the plan's exercises as the project describes them
+and ends with a short safety note. A heart-rate target in the plan is pointed
+out as the author's own, not a target for everyone.
 
 ## Knowledge sources
 
@@ -791,8 +805,8 @@ read, Jarvis falls back to the search snippet.
 
 ## Weather and hazard alerts
 
-Three skills from [5-Mins](https://charles2ke.github.io/5-Mins/) read free
-public feeds that need no API key:
+Three skills run [5-Mins](https://charles2ke.github.io/5-Mins/)'s own code,
+which reads free public feeds that need no API key:
 
 ```bash
 jarvis "weather in Paris"
@@ -804,21 +818,23 @@ jarvis "hazards near Manila"
 jarvis "space weather"
 ```
 
-| Skill | Feeds |
+| Skill | What it shows |
 | --- | --- |
-| `weather` | Current conditions and today's range from the [Open-Meteo](https://open-meteo.com/) forecast. |
-| `hazard-alerts` | Alerts from the last seven days: the US National Weather Service (US places only), USGS earthquakes of magnitude 4.5 or more within 300 km, and GDACS disaster alerts and NASA EONET natural events within 1000 km. |
-| `space-weather` | The latest alerts, watches and warnings from the NOAA Space Weather Prediction Center. |
+| `weather` | The current conditions and today's range at a place. |
+| `hazard-alerts` | The recent alerts 5-Mins finds near a place, most severe first; worldwide alerts are only counted. |
+| `space-weather` | The worldwide alerts, such as space weather, that 5-Mins finds. |
 
-Places are found with the Open-Meteo geocoding API: name a city, add its
-region or country (`Paris, Texas`), or give coordinates (`48.85, 2.35`). Only
-the place name, never the rest of your message, is sent to the geocoder, and
-the feeds receive its coordinates. Jarvis does not know where you are, so
+5-Mins decides which feeds to ask, how far around a place to look and how far
+back; Jarvis finds the place in your question and words the answer. Name a
+city, add its region or country (`Paris, Texas`), or give coordinates
+(`48.85, 2.35`). Only the place name, never the rest of your message, is sent
+to the place lookup — a region or country is matched on your computer — and the
+feeds receive its coordinates. Jarvis does not know where you are, so
 `weather near me` asks you to name a place. Weather covers now and today only;
-Jarvis does not forecast later days. Each alert feed is asked on its own, so one
-failure never hides the others. Every reply lists its sources and when they were
-read, and says that Jarvis is not an official warning system — follow your
-local authorities.
+Jarvis does not forecast later days. A feed that fails is listed rather than
+hiding the others' alerts. Every reply lists the hosts it asked and when, and
+says that Jarvis is not an official warning system — follow your local
+authorities.
 
 These skills go online only when you ask, in `auto` or `manual` mode. With
 `--web-search off` they say that web access is off rather than going online.
@@ -1045,37 +1061,34 @@ The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
 ## Connected projects
 
-Six of the author's other projects are built into Jarvis. Each is a Python
-port of the project's logic or data, not a link to its running app, so Jarvis
-never needs those sites to be up. Answers credit the project they come from and
-link to it.
+Six of the author's other projects power Jarvis skills. Jarvis keeps no copy of
+them: each is a git submodule in `projects/`, pinned to a commit of its own
+repository, and the skills run that project's own code — or, for beat-it, read
+its data files — from there. Jarvis's modules only read your question and word
+the project's answer, and every reply credits the project and links to its app.
 
-| Project | Skills | Ported into | Commit | Licence |
-| --- | --- | --- | --- | --- |
-| [tax-break](https://charles2ke.github.io/tax-break/) | `tax-estimate` | `tax.py` — the tax engine's salary calculators | [`a3d630c`](https://github.com/charles2ke/tax-break/commit/a3d630c7eb45d188ffb28da7507df948ca8be59b) | AGPL-3.0 (its `package.json` says MIT) |
-| [Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) | `investment-math` | `investing.py` — the research calculators | [`4dddc15`](https://github.com/charles2ke/Portfolio-Watcher/commit/4dddc15734246445eedb7b040b0722bcbe49bc02) | MIT |
-| [OpenTrading](https://charles2ke.github.io/OpenTrading/) | `paper-trading` | `papertrade.py` — the paper account and demo stocks | [`a252eb4`](https://github.com/charles2ke/OpenTrading/commit/a252eb47adae72cab77b04368f682b74710e9968) | Apache-2.0 |
-| [beat-it](https://charles2ke.github.io/beat-it/) | `cancer-info`, `cancer-topics` | `cancer.py`, `cancer_data.py` — the reviewed cancer information | [`647f8d1`](https://github.com/charles2ke/beat-it/commit/647f8d15468105089d71a39de137408f427c5534) | AGPL-3.0-only |
-| [5-Mins](https://charles2ke.github.io/5-Mins/) | `weather`, `hazard-alerts`, `space-weather` | `alerts.py` — the weather and alert feed lookups | [`560f23e`](https://github.com/charles2ke/5-Mins/commit/560f23e4fada678e605517d100e5f0a968e490ae) | AGPL-3.0 |
-| [workout](https://charles2ke.github.io/workout/) | `workout-plan` | `workout.py` — the 7-day plan | [`0c0d425`](https://github.com/charles2ke/workout/commit/0c0d425759094649654a1cd483f6360bf8c15b71) | MIT |
+| Project | Skills | What Jarvis uses | Licence |
+| --- | --- | --- | --- |
+| [tax-break](https://github.com/charles2ke/tax-break) | `tax-estimate` | its tax engine, through `bridges/tax-break.mjs` | AGPL-3.0 (its `package.json` files say MIT) |
+| [Portfolio-Watcher](https://github.com/charles2ke/Portfolio-Watcher) | `investment-math` | its research calculators, through `bridges/portfolio-watcher.mjs` | MIT |
+| [OpenTrading](https://github.com/charles2ke/OpenTrading) | `paper-trading` | its trading core, through `bridges/opentrading.mjs` | Apache-2.0 |
+| [beat-it](https://github.com/charles2ke/beat-it) | `cancer-info`, `cancer-topics` | its data files, read directly | AGPL-3.0-only |
+| [5-Mins](https://github.com/charles2ke/5-Mins) | `weather`, `hazard-alerts`, `space-weather` | its weather and alert code, through `bridges/five-mins.mjs` | AGPL-3.0 |
+| [workout](https://github.com/charles2ke/workout) | `workout-plan` | the plan in its `workout.js`, through `bridges/workout.mjs` | MIT |
 
-Only the 5-Mins skills go online, straight to the public feeds and only as
-[Weather and hazard alerts](#weather-and-hazard-alerts) describes; the rest
-answer offline. The ported data is a snapshot from those commits and does not
-update itself: the tax tables are listed under
-[Income tax estimates](#income-tax-estimates), beat-it last reviewed its
-entries on 12 November 2026, and paper-trading prices are OpenTrading's
-built-in demo snapshot. To refresh beat-it's data, regenerate `cancer_data.py`
-from a beat-it checkout with `python3 scripts/import_beat_it.py
-/path/to/beat-it`; the other ports are updated by hand.
+To set them up, clone with `--recurse-submodules` (or run
+`git submodule update --init` in an existing clone) and install
+[Node.js](https://nodejs.org/) 22.18 or newer, which runs the projects'
+JavaScript and TypeScript as they are; beat-it needs no Node.js. Set
+`JARVIS_NODE` to use a particular `node`, and `JARVIS_PROJECTS_DIR` when the
+checkouts are somewhere other than `projects/` next to `src/` — for example
+after a non-editable `pip install`. When a project or Node.js is missing, the
+rest of Jarvis works as usual and that project's skills reply with these steps
+and a link to its app.
 
-Some parts were left out on purpose: tax-break's document parsers, filing
-exports and non-salary income; Portfolio-Watcher's market data; OpenTrading's
-live quotes and server; beat-it's daily news feed; and 5-Mins' features for
-alerting other people and its safety check-ins. Each module's docstring lists
-what it follows and how it differs, and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) keeps each project's licence
-notice.
+Answers follow whatever commit each submodule is pinned to. To move a project
+on, run `git submodule update --remote projects/<name>`, run the tests and
+commit the new pointer.
 
 ## Project layout
 
@@ -1092,11 +1105,11 @@ src/jarvis/
                   investing, knowledge, maritime, papertrade, percentages,
                   poetry, science, signlanguage, sketch, speech, tax, traffic,
                   units, websearch, workout)
-  cancer_data.py  beat-it's cancer information, generated by
-                  scripts/import_beat_it.py
+  projects.py     finds the connected projects and runs them with Node.js
+  bridges/        one small Node.js adapter per connected project
+projects/         the connected projects, as git submodules
 scripts/
   build_site.py   builds the GitHub Pages site from the skill registry
-  import_beat_it.py  regenerates cancer_data.py from a beat-it checkout
 tests/            one unittest module per topic
 ```
 
@@ -1134,8 +1147,11 @@ install first:
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-The suite never goes online. To also check web search against the real
-Wikipedia, opt in to the live test:
+The suite never goes online. The tests that run the connected projects skip
+when a project's submodule or Node.js is missing; set
+`JARVIS_REQUIRE_PROJECTS=1`, as CI does, to make that a failure instead.
+
+To also check web search against the real Wikipedia, opt in to the live test:
 
 ```bash
 JARVIS_LIVE_WEB_TESTS=1 PYTHONPATH=src python -m unittest tests.test_websearch
@@ -1147,6 +1163,6 @@ module, and any new routing order should be covered there as well.
 
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](LICENSE). Files ported from the author's
-other projects keep those projects' notices and terms in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+AGPL-3.0-or-later. See [LICENSE](LICENSE). The connected projects in
+`projects/` are separate repositories under their own licences (see
+[Connected projects](#connected-projects)).

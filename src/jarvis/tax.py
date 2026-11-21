@@ -1,36 +1,24 @@
-"""Salary income-tax estimates ported from charles2ke's tax-break engine.
+"""Estimate income tax on a salary with the user's tax-break project.
 
-tax-break is charles2ke's zero-dependency TypeScript tax engine (repository
-https://github.com/charles2ke/tax-break, live app
-https://charles2ke.github.io/tax-break/). This module is a stdlib-only port
-of its salary paths at commit a3d630c7eb45d188ffb28da7507df948ca8be59b:
-
-- India, FY 2021-22 to FY 2025-26, old and new regimes:
-  packages/tax-engine/src/calculators/slabTax.ts, rebate.ts, surcharge.ts,
-  deductions.ts, houseProperty.ts, regime.ts and compare.ts, with the tables
-  in packages/tax-engine/src/config/fy2021-22.ts to fy2025-26.ts.
-- United Kingdom 2025/26, United States 2025 (federal tax, FICA and the 50
-  states plus DC), Ireland 2025, the Netherlands 2025 and Singapore YA 2025:
-  calculators/uk.ts, us.ts, usState.ts, ireland.ts, netherlands.ts,
-  singapore.ts and international.ts.
-
-The formulas, thresholds, caps and order of operations are the engine's, and
-JavaScript's ``Math.round`` is reproduced exactly, so the figures match
-tax-break to the cent. Only employment income is covered: tax-break's
-document parsers, ITR JSON export and form recommender, HRA, rental income,
-capital gains, advance tax and investment income are not ported.
-
-Licence: the tax-break repository ships the AGPL-3.0 licence text, while its
-package.json files (the tax engine's included) declare MIT without naming a
-copyright holder. Jarvis follows the LICENSE file; see THIRD_PARTY_NOTICES.md.
+tax-break (https://charles2ke.github.io/tax-break/, source at
+https://github.com/charles2ke/tax-break) is the user's own tax calculator,
+built around a TypeScript tax engine. Jarvis keeps no copy of its rules: every
+figure in a reply comes from that engine in the ``projects/tax-break``
+submodule, run with Node.js by ``bridges/tax-break.mjs``. The Indian financial
+years and US states the engine offers, and the web app's one-line description
+of each country's calculator, come from the project too and are read once per
+session.
 
 :func:`estimate` reads a free-text request such as "income tax on 15 lakh in
-India" and answers in plain text. The calculators (:func:`india_tax`,
-:func:`uk_tax`, :func:`us_tax`, :func:`ireland_tax`, :func:`netherlands_tax`
-and :func:`singapore_tax`) are pure functions returning frozen dataclasses.
-The tables are the latest that tax-break encodes, not necessarily the
-current tax year, and every reply names the year it used. Nothing here is
-tax advice.
+India" or "UK take-home on £3,000 a month" itself — salary, period, country,
+year, regime, deductions, filing status and so on — then asks the engine about
+that salary and about 1,000 more, for the marginal rate, in one Node.js run.
+It returns ``None`` when the text isn't a salary tax question, so the caller
+can try something else; that check needs neither the project nor Node.js, and
+nor does :func:`usage`. Nothing here is tax advice.
+
+When the project or Node.js is missing, :func:`estimate` raises
+:class:`jarvis.projects.ProjectUnavailable` with setup steps.
 """
 
 from __future__ import annotations
@@ -39,12 +27,14 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from jarvis import projects
 
 PROJECT = "tax-break"
-SITE_URL = "https://charles2ke.github.io/tax-break/"
-REPO_URL = "https://github.com/charles2ke/tax-break"
-SOURCE_COMMIT = "a3d630c7eb45d188ffb28da7507df948ca8be59b"
+SITE_URL = projects.PROJECTS[PROJECT].site
+REPO_URL = projects.PROJECTS[PROJECT].repo
 CREDIT = f"From {PROJECT}: {SITE_URL}"
 DISCLAIMER = (
     "This is an estimate for general education, not tax advice — check with "
@@ -53,1010 +43,92 @@ DISCLAIMER = (
 
 
 # --------------------------------------------------------------------------
-# Shared arithmetic
+# The project
 # --------------------------------------------------------------------------
 
-def _js_round(value: float) -> float:
-    """Round like JavaScript's ``Math.round``: halves go up, towards +infinity."""
-
-    whole = math.floor(value)
-    return float(whole + 1) if value - whole >= 0.5 else float(whole)
-
-
-def _round2(value: float) -> float:
-    """Round to cents exactly as tax-break's ``round2`` helper does."""
-
-    return _js_round(value * 100) / 100
-
-
 @dataclass(frozen=True)
-class Bracket:
-    """One tax band: ``rate`` applies to income from ``lower`` up to ``upper``."""
-
-    lower: float
-    upper: Optional[float]
-    rate: float
-
-
-def _bands(*points: Tuple[float, float]) -> Tuple[Bracket, ...]:
-    """Build contiguous brackets from ``(start, rate)`` pairs; the last is open."""
-
-    brackets = []
-    for index, (lower, rate) in enumerate(points):
-        upper = float(points[index + 1][0]) if index + 1 < len(points) else None
-        brackets.append(Bracket(float(lower), upper, float(rate)))
-    return tuple(brackets)
-
-
-def slab_tax(income: float, slabs: Sequence[Bracket]) -> float:
-    """Return progressive tax on ``income`` (tax-break's ``calculateSlabTax``)."""
-
-    income = max(0.0, income)
-    tax = 0.0
-    for bracket in slabs:
-        if income <= bracket.lower:
-            break
-        upper = income if bracket.upper is None else min(income, bracket.upper)
-        tax += max(0.0, upper - bracket.lower) * bracket.rate
-    return tax
-
-
-# --------------------------------------------------------------------------
-# India: config/fy2021-22.ts to fy2025-26.ts and the India calculators
-# --------------------------------------------------------------------------
-
-INDIA_AGE_BANDS: Tuple[str, ...] = ("below60", "60to80", "above80")
-INDIA_REGIMES: Tuple[str, ...] = ("new", "old")
-
-SECTION_80C_CAP = 150000.0
-SECTION_80CCD1B_CAP = 50000.0
-SECTION_80D_CAP = 25000.0
-SECTION_80D_SENIOR_CAP = 50000.0
-HOME_LOAN_INTEREST_CAP = 200000.0
-HOUSE_PROPERTY_LOSS_CAP = 200000.0
-
-
-@dataclass(frozen=True)
-class IndiaRegimeRules:
-    """Slabs by age band, standard deduction, 87A rebate and surcharge tiers."""
-
-    below60: Tuple[Bracket, ...]
-    senior: Tuple[Bracket, ...]
-    super_senior: Tuple[Bracket, ...]
-    standard_deduction: float
-    rebate_limit: float
-    rebate_max: float
-    rebate_marginal_relief: bool
-    surcharge_tiers: Tuple[Tuple[float, float], ...]
-    cess_rate: float = 0.04
-
-    def slabs(self, age_band: str = "below60") -> Tuple[Bracket, ...]:
-        """Return the slabs for ``below60``, ``60to80`` or ``above80``."""
-
-        if age_band == "below60":
-            return self.below60
-        if age_band == "60to80":
-            return self.senior
-        if age_band == "above80":
-            return self.super_senior
-        raise ValueError(f"Unknown age band {age_band!r}; use one of {INDIA_AGE_BANDS}.")
-
-
-@dataclass(frozen=True)
-class IndiaYear:
-    """One financial year's rules for the old and new regimes."""
-
-    key: str
-    label: str
-    old: IndiaRegimeRules
-    new: IndiaRegimeRules
-
-    def rules(self, regime: str) -> IndiaRegimeRules:
-        if regime == "old":
-            return self.old
-        if regime == "new":
-            return self.new
-        raise ValueError(f"Unknown regime {regime!r}; use 'old' or 'new'.")
-
-
-_SURCHARGE_TO_37 = ((5000000.0, 0.1), (10000000.0, 0.15), (20000000.0, 0.25), (50000000.0, 0.37))
-_SURCHARGE_TO_25 = ((5000000.0, 0.1), (10000000.0, 0.15), (20000000.0, 0.25))
-
-_OLD_REGIME = IndiaRegimeRules(
-    below60=_bands((0, 0), (250000, 0.05), (500000, 0.2), (1000000, 0.3)),
-    senior=_bands((0, 0), (300000, 0.05), (500000, 0.2), (1000000, 0.3)),
-    super_senior=_bands((0, 0), (500000, 0.2), (1000000, 0.3)),
-    standard_deduction=50000.0,
-    rebate_limit=500000.0,
-    rebate_max=12500.0,
-    rebate_marginal_relief=False,
-    surcharge_tiers=_SURCHARGE_TO_37,
-)
-
-
-def _new_regime(
-    slabs: Tuple[Bracket, ...],
-    standard_deduction: float,
-    rebate_limit: float,
-    rebate_max: float,
-    marginal_relief: bool,
-    surcharge_tiers: Tuple[Tuple[float, float], ...],
-) -> IndiaRegimeRules:
-    return IndiaRegimeRules(
-        slabs, slabs, slabs, standard_deduction, rebate_limit, rebate_max,
-        marginal_relief, surcharge_tiers,
-    )
-
-
-_NEW_SLABS_2020 = _bands(
-    (0, 0), (250000, 0.05), (500000, 0.1), (750000, 0.15), (1000000, 0.2),
-    (1250000, 0.25), (1500000, 0.3),
-)
-_NEW_SLABS_2023 = _bands(
-    (0, 0), (300000, 0.05), (600000, 0.1), (900000, 0.15), (1200000, 0.2), (1500000, 0.3),
-)
-_NEW_SLABS_2025 = _bands(
-    (0, 0), (400000, 0.05), (800000, 0.1), (1200000, 0.15), (1600000, 0.2),
-    (2000000, 0.25), (2400000, 0.3),
-)
-
-INDIA_YEARS: Dict[str, IndiaYear] = {
-    "FY2021-22": IndiaYear(
-        "FY2021-22", "FY 2021-22 (AY 2022-23)", _OLD_REGIME,
-        _new_regime(_NEW_SLABS_2020, 0.0, 500000.0, 12500.0, False, _SURCHARGE_TO_37),
-    ),
-    "FY2022-23": IndiaYear(
-        "FY2022-23", "FY 2022-23 (AY 2023-24)", _OLD_REGIME,
-        _new_regime(_NEW_SLABS_2020, 0.0, 500000.0, 12500.0, False, _SURCHARGE_TO_37),
-    ),
-    "FY2023-24": IndiaYear(
-        "FY2023-24", "FY 2023-24 (AY 2024-25)", _OLD_REGIME,
-        _new_regime(_NEW_SLABS_2023, 50000.0, 700000.0, 25000.0, True, _SURCHARGE_TO_25),
-    ),
-    "FY2024-25": IndiaYear(
-        "FY2024-25", "FY 2024-25 (AY 2025-26)", _OLD_REGIME,
-        _new_regime(_NEW_SLABS_2023, 75000.0, 700000.0, 25000.0, True, _SURCHARGE_TO_25),
-    ),
-    "FY2025-26": IndiaYear(
-        "FY2025-26", "FY 2025-26 (AY 2026-27)", _OLD_REGIME,
-        _new_regime(_NEW_SLABS_2025, 75000.0, 1200000.0, 60000.0, True, _SURCHARGE_TO_25),
-    ),
-}
-LATEST_INDIA_FY = "FY2025-26"
-
-
-@dataclass(frozen=True)
-class IndiaDeductions:
-    """Old-regime claims as stated; tax-break's caps are applied in :func:`india_tax`.
-
-    ``math.inf`` means "the maximum allowed".
-    """
-
-    section_80c: float = 0.0
-    section_80d_self: float = 0.0
-    section_80d_parents: float = 0.0
-    parents_senior: bool = False
-    section_80ccd1b: float = 0.0
-    section_80e: float = 0.0
-    section_80g: float = 0.0
-    home_loan_interest: float = 0.0
-
-    def claimed(self) -> bool:
-        """Return True if any deduction amount is positive."""
-
-        return any(
-            amount > 0
-            for amount in (
-                self.section_80c, self.section_80d_self, self.section_80d_parents,
-                self.section_80ccd1b, self.section_80e, self.section_80g,
-                self.home_loan_interest,
-            )
-        )
-
-
-@dataclass(frozen=True)
-class Surcharge:
-    """Surcharge after marginal relief, the relief given and the tier's rate."""
-
-    amount: float
-    marginal_relief: float
-    rate: float
-
-
-@dataclass(frozen=True)
-class IndiaTax:
-    """One regime's computation for a resident individual with salary income."""
-
-    fy: str
-    label: str
-    regime: str
-    age_band: str
-    salary: float
-    house_property: float
-    gross_total_income: float
-    standard_deduction: float
-    section_80c: float
-    section_80d: float
-    section_80ccd1b: float
-    section_80e: float
-    section_80g: float
-    total_deductions: float
-    taxable_income: float
-    tax_before_rebate: float
-    rebate: float
-    tax_after_rebate: float
-    surcharge: float
-    surcharge_rate: float
-    marginal_relief: float
-    cess: float
-    unrounded_total: float
-    total: float
-    effective_rate: float
-
-
-@dataclass(frozen=True)
-class IndiaComparison:
-    """Both regimes side by side, as tax-break's ``compareRegimes`` reports them."""
-
-    old: IndiaTax
-    new: IndiaTax
-    recommended: str
-    savings: float
-
-
-def india_year(fy: str = LATEST_INDIA_FY) -> IndiaYear:
-    """Return the rules for ``fy`` ("FY2025-26", "FY 2025-26" or "2025-26")."""
-
-    key = re.sub(r"\s+", "", str(fy)).upper()
-    if not key.startswith("FY"):
-        key = "FY" + key
-    if key not in INDIA_YEARS:
-        supported = ", ".join(INDIA_YEARS)
-        raise ValueError(f"tax-break has no India table for {fy!r}; use one of {supported}.")
-    return INDIA_YEARS[key]
-
-
-def india_age_band(age: Optional[int]) -> str:
-    """Map an age to tax-break's band: below 60, 60 to 79, or 80 and over."""
-
-    if age is None or age < 60:
-        return "below60"
-    return "60to80" if age < 80 else "above80"
-
-
-def rebate_87a(taxable_income: float, tax_before_rebate: float, rules: IndiaRegimeRules) -> float:
-    """Rebate u/s 87A, with marginal relief where the regime allows it."""
-
-    if taxable_income <= rules.rebate_limit:
-        return min(tax_before_rebate, rules.rebate_max)
-    if not rules.rebate_marginal_relief:
-        return 0.0
-    return max(0.0, tax_before_rebate - (taxable_income - rules.rebate_limit))
-
-
-def india_surcharge(
-    taxable_income: float,
-    tax_before_surcharge: float,
-    tiers: Sequence[Tuple[float, float]],
-    slabs: Sequence[Bracket],
-) -> Surcharge:
-    """Surcharge with marginal relief (tax-break's ``calculateSurcharge``)."""
-
-    ordered = sorted(tiers)
-    index = -1
-    for position, (threshold, _rate) in enumerate(ordered):
-        if taxable_income > threshold:
-            index = position
-    if index == -1:
-        return Surcharge(0.0, 0.0, 0.0)
-    threshold, rate = ordered[index]
-    previous_rate = ordered[index - 1][1] if index > 0 else 0.0
-    raw = tax_before_surcharge * rate
-    max_allowed = slab_tax(threshold, slabs) * (1 + previous_rate) + (taxable_income - threshold)
-    if tax_before_surcharge + raw > max_allowed:
-        adjusted = max(0.0, max_allowed - tax_before_surcharge)
-        return Surcharge(adjusted, raw - adjusted, rate)
-    return Surcharge(raw, 0.0, rate)
-
-
-def india_tax(
-    salary: float,
-    *,
-    fy: str = LATEST_INDIA_FY,
-    regime: str = "new",
-    age_band: str = "below60",
-    deductions: Optional[IndiaDeductions] = None,
-) -> IndiaTax:
-    """Tax on a resident individual's salary for one regime (``calculateTaxForRegime``).
-
-    Old-regime deductions are capped as tax-break caps them; the new regime
-    allows only the standard deduction. Home-loan interest is the
-    self-occupied 24(b) deduction, set off against salary in the old regime.
-    """
-
-    year = india_year(fy)
-    rules = year.rules(regime)
-    slabs = rules.slabs(age_band)
-    claims = deductions or IndiaDeductions()
-    pay = max(0.0, float(salary))
-
-    house_property = 0.0
-    if regime == "old" and claims.home_loan_interest > 0:
-        interest = min(max(0.0, claims.home_loan_interest), HOME_LOAN_INTEREST_CAP)
-        house_property = max(-interest, -HOUSE_PROPERTY_LOSS_CAP)
-    gross_total = pay + house_property
-    standard = min(rules.standard_deduction, pay)
-
-    c80 = d80 = ccd = e80 = g80 = 0.0
-    if regime == "new":
-        total_deductions = standard
-    else:
-        c80 = min(max(0.0, claims.section_80c), SECTION_80C_CAP)
-        self_cap = SECTION_80D_SENIOR_CAP if age_band != "below60" else SECTION_80D_CAP
-        parents_cap = SECTION_80D_SENIOR_CAP if claims.parents_senior else SECTION_80D_CAP
-        d80 = min(max(0.0, claims.section_80d_self), self_cap) + min(
-            max(0.0, claims.section_80d_parents), parents_cap
-        )
-        ccd = min(max(0.0, claims.section_80ccd1b), SECTION_80CCD1B_CAP)
-        e80 = max(0.0, claims.section_80e)
-        g80 = max(0.0, claims.section_80g)
-        total_deductions = c80 + d80 + ccd + 0.0 + e80 + g80 + standard
-
-    taxable = max(0.0, gross_total - total_deductions)
-    before = slab_tax(taxable, slabs)
-    rebate = rebate_87a(taxable, before, rules)
-    after = max(0.0, before - rebate)
-    surcharge = india_surcharge(taxable, after, rules.surcharge_tiers, slabs)
-    with_surcharge = after + surcharge.amount
-    cess = with_surcharge * rules.cess_rate
-    unrounded = with_surcharge + cess
-    total = _js_round(unrounded)
-    effective = total / gross_total * 100 if gross_total > 0 else 0.0
-    return IndiaTax(
-        fy=year.key, label=year.label, regime=regime, age_band=age_band, salary=pay,
-        house_property=house_property, gross_total_income=gross_total,
-        standard_deduction=standard, section_80c=c80, section_80d=d80,
-        section_80ccd1b=ccd, section_80e=e80, section_80g=g80,
-        total_deductions=total_deductions, taxable_income=taxable,
-        tax_before_rebate=before, rebate=rebate, tax_after_rebate=after,
-        surcharge=surcharge.amount, surcharge_rate=surcharge.rate,
-        marginal_relief=surcharge.marginal_relief, cess=cess,
-        unrounded_total=unrounded, total=total, effective_rate=effective,
-    )
-
-
-def india_compare(
-    salary: float,
-    *,
-    fy: str = LATEST_INDIA_FY,
-    age_band: str = "below60",
-    deductions: Optional[IndiaDeductions] = None,
-) -> IndiaComparison:
-    """Compute both regimes; the new regime wins ties, as in ``compareRegimes``."""
-
-    old = india_tax(salary, fy=fy, regime="old", age_band=age_band, deductions=deductions)
-    new = india_tax(salary, fy=fy, regime="new", age_band=age_band, deductions=deductions)
-    recommended = "new" if new.total <= old.total else "old"
-    return IndiaComparison(old, new, recommended, abs(old.total - new.total))
-
-
-# --------------------------------------------------------------------------
-# United Kingdom 2025/26: calculators/uk.ts
-# --------------------------------------------------------------------------
-
-UK_TAX_YEAR = "2025/26"
-UK_PERSONAL_ALLOWANCE = 12570.0
-UK_TAPER_THRESHOLD = 100000.0
-UK_BASIC_RATE_LIMIT = 37700.0
-UK_HIGHER_RATE_LIMIT = 125140.0
-UK_NI_PRIMARY_THRESHOLD = 12570.0
-UK_NI_UPPER_EARNINGS_LIMIT = 50270.0
-
-UK_STUDENT_LOAN_PLANS: Dict[str, Tuple[float, float]] = {
-    "plan1": (26065.0, 0.09),
-    "plan2": (28470.0, 0.09),
-    "plan4": (32745.0, 0.09),
-    "plan5": (25000.0, 0.09),
-    "postgraduate": (21000.0, 0.06),
-}
-
-
-@dataclass(frozen=True)
-class UkTax:
-    """Income tax, employee Class 1 NI and student loan on UK employment income."""
-
-    gross_income: float
-    adjusted_net_income: float
-    personal_allowance: float
-    taxable_income: float
-    basic_rate_income: float
-    higher_rate_income: float
-    additional_rate_income: float
-    income_tax: float
-    national_insurance: float
-    student_loan_plan: Optional[str]
-    student_loan: float
-    total: float
-    take_home: float
-    effective_rate: float
-
-
-def uk_personal_allowance(adjusted_net_income: float) -> float:
-    """£12,570, reduced by £1 for every £2 of income over £100,000."""
-
-    if adjusted_net_income <= UK_TAPER_THRESHOLD:
-        return UK_PERSONAL_ALLOWANCE
-    return max(0.0, UK_PERSONAL_ALLOWANCE - (adjusted_net_income - UK_TAPER_THRESHOLD) / 2)
-
-
-def uk_national_insurance(earnings: float) -> float:
-    """Employee Class 1 NI: 8% from £12,570 to £50,270 and 2% above."""
-
-    earnings = max(0.0, earnings)
-    main_band = max(0.0, min(earnings, UK_NI_UPPER_EARNINGS_LIMIT) - UK_NI_PRIMARY_THRESHOLD)
-    upper_band = max(0.0, earnings - UK_NI_UPPER_EARNINGS_LIMIT)
-    return _round2(main_band * 0.08 + upper_band * 0.02)
-
-
-def uk_student_loan(income: float, plan: Optional[str]) -> float:
-    """Annual repayment, to the nearest pound, for a plan in :data:`UK_STUDENT_LOAN_PLANS`."""
-
-    if plan is None or plan == "none":
-        return 0.0
-    if plan not in UK_STUDENT_LOAN_PLANS:
-        raise ValueError(f"Unknown student loan plan {plan!r}.")
-    threshold, rate = UK_STUDENT_LOAN_PLANS[plan]
-    return _js_round(max(0.0, income - threshold) * rate)
-
-
-def uk_tax(salary: float, *, student_loan_plan: Optional[str] = None) -> UkTax:
-    """England, Wales and Northern Ireland tax on salary (``calculateUkTax``)."""
-
-    plan = None if student_loan_plan in (None, "none") else student_loan_plan
-    if plan is not None and plan not in UK_STUDENT_LOAN_PLANS:
-        raise ValueError(f"Unknown student loan plan {plan!r}.")
-    pay = max(0.0, float(salary))
-    gross = _round2(pay)
-    non_savings = _round2(pay)
-    adjusted = _round2(max(0.0, gross))
-    allowance = _round2(uk_personal_allowance(adjusted))
-    taxable = _round2(non_savings - min(allowance, non_savings))
-    basic = max(0.0, min(taxable, UK_BASIC_RATE_LIMIT))
-    higher = max(0.0, min(taxable, UK_HIGHER_RATE_LIMIT) - UK_BASIC_RATE_LIMIT)
-    additional = max(0.0, taxable - UK_HIGHER_RATE_LIMIT)
-    income_tax = _round2(_round2(basic * 0.2 + higher * 0.4 + additional * 0.45))
-    national_insurance = uk_national_insurance(pay)
-    student_loan = uk_student_loan(pay, plan)
-    total = _round2(income_tax + national_insurance + student_loan)
-    return UkTax(
-        gross_income=gross, adjusted_net_income=adjusted, personal_allowance=allowance,
-        taxable_income=_round2(taxable), basic_rate_income=basic,
-        higher_rate_income=higher, additional_rate_income=additional,
-        income_tax=income_tax, national_insurance=national_insurance,
-        student_loan_plan=plan, student_loan=student_loan, total=total,
-        take_home=_round2(gross - total),
-        effective_rate=total / gross * 100 if gross > 0 else 0.0,
-    )
-
-
-# --------------------------------------------------------------------------
-# United States 2025: calculators/us.ts and usState.ts
-# --------------------------------------------------------------------------
-
-US_TAX_YEAR = "2025"
-US_FILING_STATUSES: Dict[str, str] = {
-    "single": "single",
-    "married_joint": "married filing jointly",
-    "married_separate": "married filing separately",
-    "head_of_household": "head of household",
-}
-US_STANDARD_DEDUCTION: Dict[str, float] = {
-    "single": 15750.0,
-    "married_joint": 31500.0,
-    "married_separate": 15750.0,
-    "head_of_household": 23625.0,
-}
-_US_FEDERAL_BRACKETS: Dict[str, Tuple[Bracket, ...]] = {
-    "single": _bands(
-        (0, 0.1), (11925, 0.12), (48475, 0.22), (103350, 0.24), (197300, 0.32),
-        (250525, 0.35), (626350, 0.37),
-    ),
-    "married_joint": _bands(
-        (0, 0.1), (23850, 0.12), (96950, 0.22), (206700, 0.24), (394600, 0.32),
-        (501050, 0.35), (751600, 0.37),
-    ),
-    "married_separate": _bands(
-        (0, 0.1), (11925, 0.12), (48475, 0.22), (103350, 0.24), (197300, 0.32),
-        (250525, 0.35), (375800, 0.37),
-    ),
-    "head_of_household": _bands(
-        (0, 0.1), (17000, 0.12), (64850, 0.22), (103350, 0.24), (197300, 0.32),
-        (250500, 0.35), (626350, 0.37),
-    ),
-}
-_US_CTC_PHASE_OUT: Dict[str, float] = {
-    "single": 200000.0,
-    "married_joint": 400000.0,
-    "married_separate": 200000.0,
-    "head_of_household": 200000.0,
-}
-_US_ADDITIONAL_MEDICARE_THRESHOLD: Dict[str, float] = {
-    "single": 200000.0,
-    "married_joint": 250000.0,
-    "married_separate": 125000.0,
-    "head_of_household": 200000.0,
-}
-US_CHILD_TAX_CREDIT = 2200.0
-US_SOCIAL_SECURITY_WAGE_BASE = 176100.0
-
-
-@dataclass(frozen=True)
-class UsStateRules:
-    """A state's single-filer deduction, exemption and brackets (empty: no wage tax)."""
-
-    code: str
-    name: str
-    standard_deduction: float
-    personal_exemption: float
-    brackets: Tuple[Bracket, ...]
-
-
-@dataclass(frozen=True)
-class UsStateTax:
-    code: str
-    name: str
-    deduction: float
-    taxable_income: float
-    tax: float
-
-
-@dataclass(frozen=True)
-class UsTax:
-    """Federal income tax, FICA and optional state tax on wages."""
-
-    filing_status: str
-    gross_income: float
-    adjusted_gross_income: float
-    standard_deduction: float
-    taxable_income: float
-    federal_income_tax: float
-    children: int
-    child_tax_credit: float
-    fica: float
-    additional_medicare: float
-    state: Optional[UsStateTax]
-    total: float
-    take_home: float
-    effective_rate: float
-
-
-def _state(code: str, name: str, deduction: float = 0, exemption: float = 0,
-           *points: Tuple[float, float]) -> UsStateRules:
-    return UsStateRules(code, name, float(deduction), float(exemption), _bands(*points) if points else ())
-
-
-US_STATES: Dict[str, UsStateRules] = {
-    rules.code: rules
-    for rules in (
-        _state("AL", "Alabama", 2500, 1500, (0, 0.02), (500, 0.04), (3000, 0.05)),
-        _state("AK", "Alaska"),
-        _state("AZ", "Arizona", 15750, 0, (0, 0.025)),
-        _state("AR", "Arkansas", 2410, 0, (0, 0), (5500, 0.02), (10900, 0.03), (15600, 0.034),
-               (25700, 0.039)),
-        _state("CA", "California", 5706, 0, (0, 0.01), (10756, 0.02), (25499, 0.04),
-               (40245, 0.06), (55866, 0.08), (70606, 0.093), (360659, 0.103), (432787, 0.113),
-               (721314, 0.123), (1000000, 0.133)),
-        _state("CO", "Colorado", 15750, 0, (0, 0.044)),
-        _state("CT", "Connecticut", 0, 15000, (0, 0.03), (10000, 0.05), (50000, 0.055),
-               (100000, 0.06), (200000, 0.065), (250000, 0.069), (500000, 0.0699)),
-        _state("DE", "Delaware", 3250, 110, (0, 0), (2000, 0.022), (5000, 0.039),
-               (10000, 0.048), (20000, 0.052), (25000, 0.0555), (60000, 0.066)),
-        _state("DC", "District of Columbia", 5650, 0, (0, 0.04), (10000, 0.06), (40000, 0.065),
-               (60000, 0.085), (250000, 0.0925), (500000, 0.0975), (1000000, 0.1075)),
-        _state("FL", "Florida"),
-        _state("GA", "Georgia", 5400, 0, (0, 0.0519)),
-        _state("HI", "Hawaii", 2200, 1144, (0, 0.014), (9600, 0.032), (14400, 0.055),
-               (19200, 0.064), (24000, 0.068), (36000, 0.072), (48000, 0.076), (125000, 0.079),
-               (175000, 0.0825), (225000, 0.09), (275000, 0.1), (325000, 0.11)),
-        _state("ID", "Idaho", 15750, 0, (0, 0.058)),
-        _state("IL", "Illinois", 0, 2765, (0, 0.0495)),
-        _state("IN", "Indiana", 0, 1000, (0, 0.0305)),
-        _state("IA", "Iowa", 15750, 0, (0, 0.038)),
-        _state("KS", "Kansas", 3500, 2225, (0, 0.052), (23000, 0.0558)),
-        _state("KY", "Kentucky", 2980, 0, (0, 0.04)),
-        _state("LA", "Louisiana", 4500, 1000, (0, 0.03)),
-        _state("ME", "Maine", 15000, 5150, (0, 0.058), (26799, 0.0675), (63449, 0.0715)),
-        _state("MD", "Maryland", 2500, 3200, (0, 0.02), (1000, 0.03), (2000, 0.04),
-               (3000, 0.0475), (100000, 0.05), (125000, 0.0525), (150000, 0.055),
-               (250000, 0.0575)),
-        _state("MA", "Massachusetts", 0, 4400, (0, 0.05), (1083150, 0.09)),
-        _state("MI", "Michigan", 0, 5400, (0, 0.0425)),
-        _state("MN", "Minnesota", 14950, 0, (0, 0.0535), (32570, 0.068), (106990, 0.0785),
-               (198630, 0.0985)),
-        _state("MS", "Mississippi", 2300, 6000, (0, 0), (10000, 0.044)),
-        _state("MO", "Missouri", 15750, 0, (0, 0), (1121, 0.015), (2242, 0.02), (3363, 0.025),
-               (4484, 0.03), (5605, 0.035), (6726, 0.04), (7847, 0.045), (8968, 0.048)),
-        _state("MT", "Montana", 15750, 0, (0, 0.047), (20500, 0.059)),
-        _state("NE", "Nebraska", 8600, 0, (0, 0.0246), (4030, 0.0351), (24120, 0.0501),
-               (38870, 0.052)),
-        _state("NV", "Nevada"),
-        _state("NH", "New Hampshire"),
-        _state("NJ", "New Jersey", 0, 1000, (0, 0.014), (20000, 0.0175), (35000, 0.035),
-               (40000, 0.05525), (75000, 0.0637), (500000, 0.0897), (1000000, 0.1075)),
-        _state("NM", "New Mexico", 15750, 0, (0, 0.015), (5500, 0.032), (16500, 0.043),
-               (33500, 0.047), (66500, 0.049), (210000, 0.059)),
-        _state("NY", "New York", 8000, 0, (0, 0.04), (8500, 0.045), (11700, 0.0525),
-               (13900, 0.055), (80650, 0.06), (215400, 0.0685), (1077550, 0.0965),
-               (5000000, 0.103), (25000000, 0.109)),
-        _state("NC", "North Carolina", 7500, 0, (0, 0.0475)),
-        _state("ND", "North Dakota", 15750, 0, (0, 0), (48475, 0.0195), (244825, 0.025)),
-        _state("OH", "Ohio", 0, 2650, (0, 0), (26050, 0.0275), (100000, 0.03125)),
-        _state("OK", "Oklahoma", 6350, 1000, (0, 0.0025), (999, 0.0075), (2499, 0.0175),
-               (3749, 0.0275), (4899, 0.0375), (7199, 0.0475)),
-        _state("OR", "Oregon", 2835, 0, (0, 0.0475), (4400, 0.0675), (11050, 0.0875),
-               (125000, 0.099)),
-        _state("PA", "Pennsylvania", 0, 0, (0, 0.0307)),
-        _state("RI", "Rhode Island", 10900, 5100, (0, 0.0375), (79900, 0.0475),
-               (181650, 0.0599)),
-        _state("SC", "South Carolina", 15750, 4770, (0, 0), (3460, 0.03), (17330, 0.06)),
-        _state("SD", "South Dakota"),
-        _state("TN", "Tennessee"),
-        _state("TX", "Texas"),
-        _state("UT", "Utah", 15750, 0, (0, 0.0465)),
-        _state("VT", "Vermont", 7650, 5300, (0, 0.0335), (47900, 0.066), (116000, 0.076),
-               (242000, 0.0875)),
-        _state("VA", "Virginia", 8500, 930, (0, 0.02), (3000, 0.03), (5000, 0.05),
-               (17000, 0.0575)),
-        _state("WA", "Washington"),
-        _state("WV", "West Virginia", 2000, 2000, (0, 0.0222), (10000, 0.0296),
-               (25000, 0.0333), (40000, 0.0444), (60000, 0.0482)),
-        _state("WI", "Wisconsin", 13930, 700, (0, 0.035), (14319, 0.044), (28639, 0.053),
-               (315309, 0.0765)),
-        _state("WY", "Wyoming"),
-    )
-}
-
-
-def _filing_status(filing_status: str) -> str:
-    if filing_status not in US_FILING_STATUSES:
-        raise ValueError(
-            f"Unknown filing status {filing_status!r}; use one of {tuple(US_FILING_STATUSES)}."
-        )
-    return filing_status
-
-
-def us_fica(wages: float) -> float:
-    """Employee Social Security (6.2% up to the wage base) plus Medicare (1.45%)."""
-
-    earnings = max(0.0, wages)
-    return _round2(min(earnings, US_SOCIAL_SECURITY_WAGE_BASE) * 0.062 + earnings * 0.0145)
-
-
-def us_child_tax_credit(children: int, agi: float, filing_status: str = "single") -> float:
-    """$2,200 per child under 17, less $50 per $1,000 (or part) of AGI over the threshold."""
-
-    base = max(0, children) * US_CHILD_TAX_CREDIT
-    if base <= 0:
-        return 0.0
-    excess = max(0.0, agi - _US_CTC_PHASE_OUT[_filing_status(filing_status)])
-    reduction = math.ceil(excess / 1000) * 50
-    return _round2(max(0.0, base - reduction))
-
-
-def us_state_tax(income: float, code: str) -> UsStateTax:
-    """2025 single-filer state income tax on ``income`` (``calculateUsStateTax``)."""
-
-    key = str(code).upper()
-    if key not in US_STATES:
-        raise ValueError(f"Unknown US state code {code!r}.")
-    rules = US_STATES[key]
-    income = max(0.0, income)
-    deduction = min(income, rules.standard_deduction + rules.personal_exemption)
-    taxable = income - deduction
-    tax = _js_round(slab_tax(taxable, rules.brackets) * 100) / 100
-    return UsStateTax(rules.code, rules.name, deduction, taxable, tax)
-
-
-def us_tax(
-    wages: float,
-    *,
-    filing_status: str = "single",
-    state: Optional[str] = None,
-    children: int = 0,
-) -> UsTax:
-    """Federal tax with the standard deduction, FICA and optional state tax (``calculateUsTax``)."""
-
-    status = _filing_status(filing_status)
-    pay = max(0.0, float(wages))
-    gross = _round2(_round2(pay) + 0.0)
-    agi = _round2(max(0.0, gross))
-    standard = US_STANDARD_DEDUCTION[status]
-    taxable = _round2(max(0.0, agi - standard))
-    federal = _round2(_round2(slab_tax(_round2(max(0.0, taxable)), _US_FEDERAL_BRACKETS[status])))
-    kids = max(0, int(children))
-    credits = _round2(min(federal, us_child_tax_credit(kids, agi, status)))
-    fica = us_fica(pay)
-    additional = _round2(max(0.0, pay - _US_ADDITIONAL_MEDICARE_THRESHOLD[status]) * 0.009)
-    state_tax = us_state_tax(gross, state) if state else None
-    total = _round2(
-        federal - credits + fica + additional + (state_tax.tax if state_tax else 0.0)
-    )
-    return UsTax(
-        filing_status=status, gross_income=gross, adjusted_gross_income=agi,
-        standard_deduction=standard, taxable_income=taxable, federal_income_tax=federal,
-        children=kids, child_tax_credit=credits, fica=fica, additional_medicare=additional,
-        state=state_tax, total=total, take_home=_round2(gross - total),
-        effective_rate=total / gross * 100 if gross > 0 else 0.0,
-    )
-
-
-# --------------------------------------------------------------------------
-# Ireland 2025: calculators/ireland.ts
-# --------------------------------------------------------------------------
-
-IRELAND_TAX_YEAR = "2025"
-IRELAND_FILING_STATUSES: Dict[str, str] = {
-    "single": "single",
-    "single_parent": "single parent",
-    "married_one_income": "married or in a civil partnership, one income",
-    "married_two_incomes": "married or in a civil partnership, two incomes",
-}
-_IRELAND_CUT_OFF: Dict[str, float] = {
-    "single": 44000.0,
-    "single_parent": 48000.0,
-    "married_one_income": 53000.0,
-    "married_two_incomes": 53000.0,
-}
-_IRELAND_PERSONAL_CREDIT: Dict[str, float] = {
-    "single": 2000.0,
-    "single_parent": 3900.0,
-    "married_one_income": 4000.0,
-    "married_two_incomes": 4000.0,
-}
-IRELAND_EMPLOYEE_CREDIT = 2000.0
-_IRELAND_CUT_OFF_INCREASE_CAP = 35000.0
-_IRELAND_USC_BANDS = _bands((0, 0.005), (12012, 0.02), (27382, 0.03), (70044, 0.08))
-IRELAND_USC_EXEMPTION = 13000.0
-IRELAND_PRSI_RATE = 0.041
-IRELAND_PRSI_EXEMPTION = 352.0 * 52
-
-
-@dataclass(frozen=True)
-class IrelandTax:
-    """PAYE income tax, credits, USC and Class A PRSI."""
-
-    filing_status: str
-    gross_income: float
-    taxable_income: float
-    standard_rate_cut_off: float
-    income_tax: float
-    personal_credit: float
-    employee_credit: float
-    tax_credits: float
-    usc: float
-    prsi: float
-    total: float
-    take_home: float
-    effective_rate: float
-
-
-def _ireland_status(filing_status: str) -> str:
-    if filing_status not in IRELAND_FILING_STATUSES:
-        raise ValueError(
-            f"Unknown filing status {filing_status!r}; use one of {tuple(IRELAND_FILING_STATUSES)}."
-        )
-    return filing_status
-
-
-def ireland_standard_rate_cut_off(filing_status: str = "single", spouse_income: float = 0.0) -> float:
-    """Income taxed at 20%; a second earner adds up to €35,000."""
-
-    status = _ireland_status(filing_status)
-    base = _IRELAND_CUT_OFF[status]
-    if status != "married_two_incomes":
-        return base
-    return base + min(max(0.0, spouse_income), _IRELAND_CUT_OFF_INCREASE_CAP)
-
-
-def ireland_usc(gross_income: float) -> float:
-    """Universal Social Charge; nothing is due on €13,000 or less."""
-
-    if gross_income <= IRELAND_USC_EXEMPTION:
-        return 0.0
-    return _round2(slab_tax(gross_income, _IRELAND_USC_BANDS))
-
-
-def ireland_prsi(gross_income: float) -> float:
-    """Class A employee PRSI at 4.1% on all income once over €352 a week."""
-
-    if gross_income <= IRELAND_PRSI_EXEMPTION:
-        return 0.0
-    return _round2(gross_income * IRELAND_PRSI_RATE)
-
-
-def ireland_tax(
-    salary: float, *, filing_status: str = "single", spouse_income: float = 0.0
-) -> IrelandTax:
-    """Tax on a PAYE employee's salary (``calculateIrelandTax``)."""
-
-    status = _ireland_status(filing_status)
-    spouse = max(0.0, spouse_income)
-    pay = max(0.0, float(salary))
-    taxable = _round2(max(0.0, pay))
-    cut_off = ireland_standard_rate_cut_off(status, spouse)
-    income_tax = _round2(slab_tax(taxable, _bands((0, 0.2), (cut_off, 0.4))))
-    employee_credit = (IRELAND_EMPLOYEE_CREDIT if pay > 0 else 0.0) + (
-        IRELAND_EMPLOYEE_CREDIT if status == "married_two_incomes" and spouse > 0 else 0.0
-    )
-    personal_credit = _IRELAND_PERSONAL_CREDIT[status]
-    credits = _round2(min(income_tax, personal_credit + employee_credit))
-    usc = ireland_usc(pay)
-    prsi = ireland_prsi(pay)
-    total = _round2(income_tax - credits + usc + prsi)
-    return IrelandTax(
-        filing_status=status, gross_income=pay, taxable_income=taxable,
-        standard_rate_cut_off=cut_off, income_tax=income_tax,
-        personal_credit=personal_credit, employee_credit=employee_credit,
-        tax_credits=credits, usc=usc, prsi=prsi, total=total,
-        take_home=_round2(pay - total),
-        effective_rate=total / pay * 100 if pay > 0 else 0.0,
-    )
-
-
-# --------------------------------------------------------------------------
-# Netherlands 2025: calculators/netherlands.ts
-# --------------------------------------------------------------------------
-
-NETHERLANDS_TAX_YEAR = "2025"
-_DUTCH_BOX1_BRACKETS = _bands((0, 0.3582), (38441, 0.3748), (76817, 0.495))
-_DUTCH_RULING_CAP = 246000.0
-
-
-@dataclass(frozen=True)
-class NetherlandsTax:
-    """Box 1 tax on salary less the general and labour tax credits."""
-
-    gross_income: float
-    thirty_percent_ruling: bool
-    ruling_exemption: float
-    taxable_employment_income: float
-    box1_income: float
-    box1_tax: float
-    general_tax_credit: float
-    labour_tax_credit: float
-    tax_credits: float
-    total: float
-    take_home: float
-    effective_rate: float
-
-
-def dutch_general_tax_credit(income: float) -> float:
-    """Algemene heffingskorting: €3,068, phased out between €28,406 and €76,817."""
-
-    if income <= 28406:
-        return 3068.0
-    if income >= 76817:
-        return 0.0
-    return max(0.0, 3068 - 0.06337 * (income - 28406))
-
-
-def dutch_labour_tax_credit(income: float) -> float:
-    """Arbeidskorting: builds up to €5,599, then phases out to nil at €129,078."""
-
-    if income <= 12169:
-        return 0.08053 * income
-    if income <= 26288:
-        return 980 + 0.3003 * (income - 12169)
-    if income <= 43071:
-        return 5220 + 0.02258 * (income - 26288)
-    if income >= 129078:
-        return 0.0
-    return max(0.0, 5599 - 0.0651 * (income - 43071))
-
-
-def dutch_thirty_percent_exemption(employment_income: float) -> float:
-    """Tax-free part under the 30% ruling: 30% of salary up to €246,000."""
-
-    return 0.3 * min(employment_income, _DUTCH_RULING_CAP)
-
-
-def netherlands_tax(salary: float, *, thirty_percent_ruling: bool = False) -> NetherlandsTax:
-    """Box 1 tax on salary for someone below AOW age (``calculateNetherlandsTax``)."""
-
-    pay = max(0.0, float(salary))
-    exemption = _round2(dutch_thirty_percent_exemption(pay)) if thirty_percent_ruling else 0.0
-    taxable_employment = _round2(pay - exemption)
-    box1_income = _round2(max(0.0, _round2(taxable_employment)))
-    box1_tax = _round2(_round2(slab_tax(box1_income, _DUTCH_BOX1_BRACKETS)))
-    general = _round2(dutch_general_tax_credit(box1_income))
-    labour = _round2(dutch_labour_tax_credit(taxable_employment))
-    credits = _round2(min(box1_tax, general + labour))
-    total = _round2(box1_tax - credits)
-    gross = _round2(pay)
-    return NetherlandsTax(
-        gross_income=gross, thirty_percent_ruling=bool(thirty_percent_ruling),
-        ruling_exemption=exemption, taxable_employment_income=taxable_employment,
-        box1_income=box1_income, box1_tax=box1_tax, general_tax_credit=general,
-        labour_tax_credit=labour, tax_credits=credits, total=total,
-        take_home=_round2(gross - total),
-        effective_rate=total / gross * 100 if gross > 0 else 0.0,
-    )
-
-
-# --------------------------------------------------------------------------
-# Singapore YA 2025: calculators/singapore.ts
-# --------------------------------------------------------------------------
-
-SINGAPORE_YEAR_OF_ASSESSMENT = "2025"
-SINGAPORE_AGE_BANDS: Tuple[str, ...] = ("below55", "55to59", "60plus")
-_SINGAPORE_SLABS = _bands(
-    (0, 0), (20000, 0.02), (30000, 0.035), (40000, 0.07), (80000, 0.115), (120000, 0.15),
-    (160000, 0.18), (200000, 0.19), (240000, 0.195), (280000, 0.2), (320000, 0.22),
-    (500000, 0.23), (1000000, 0.24),
-)
-_SINGAPORE_EARNED_INCOME_RELIEF: Dict[str, float] = {
-    "below55": 1000.0,
-    "55to59": 6000.0,
-    "60plus": 8000.0,
-}
-SINGAPORE_RELIEF_CAP = 80000.0
-
-
-@dataclass(frozen=True)
-class SingaporeTax:
-    """Resident tax on employment income after earned income and CPF relief."""
-
-    age_band: str
-    gross_income: float
-    earned_income_relief: float
-    cpf_relief: float
-    total_reliefs: float
-    chargeable_income: float
-    income_tax: float
-    rebate: float
-    total: float
-    after_tax: float
-    effective_rate: float
-
-
-def singapore_age_band(age: Optional[int]) -> str:
-    """Map an age to the earned-income-relief band."""
-
-    if age is None or age < 55:
-        return "below55"
-    return "55to59" if age < 60 else "60plus"
-
-
-def singapore_earned_income_relief(earned_income: float, age_band: str = "below55") -> float:
-    """S$1,000, S$6,000 or S$8,000 by age, never more than the income itself."""
-
-    if age_band not in _SINGAPORE_EARNED_INCOME_RELIEF:
-        raise ValueError(f"Unknown age band {age_band!r}; use one of {SINGAPORE_AGE_BANDS}.")
-    return min(max(0.0, earned_income), _SINGAPORE_EARNED_INCOME_RELIEF[age_band])
-
-
-def singapore_tax(
-    salary: float, *, age_band: str = "below55", cpf_contributions: float = 0.0
-) -> SingaporeTax:
-    """YA 2025 resident tax on salary (``calculateSingaporeTax``)."""
-
-    employment = _round2(max(0.0, float(salary)))
-    gross = _round2(employment)
-    assessable = _round2(max(0.0, gross))
-    earned_relief = singapore_earned_income_relief(employment, age_band)
-    cpf_relief = _round2(max(0.0, cpf_contributions))
-    reliefs = min(_round2(earned_relief + cpf_relief), SINGAPORE_RELIEF_CAP)
-    chargeable = _round2(max(0.0, assessable - reliefs))
-    income_tax = _round2(slab_tax(chargeable, _SINGAPORE_SLABS))
-    rebate = _round2(min(income_tax * 0.6, 200))
-    total = _round2(income_tax - rebate)
-    return SingaporeTax(
-        age_band=age_band, gross_income=gross, earned_income_relief=earned_relief,
-        cpf_relief=cpf_relief, total_reliefs=reliefs, chargeable_income=chargeable,
-        income_tax=income_tax, rebate=rebate, total=total,
-        after_tax=_round2(gross - total),
-        effective_rate=total / gross * 100 if gross > 0 else 0.0,
-    )
+class _Meta:
+    """What the engine offers: Indian years, US states and calculator descriptions."""
+
+    years: Tuple[Tuple[str, str], ...]  # (key, label)
+    states: Tuple[Tuple[str, str], ...]  # (two-letter code, name)
+    taglines: Tuple[Tuple[str, str], ...]  # (country key, description)
+
+    @property
+    def latest_year(self) -> str:
+        return max(key for key, _label in self.years)
+
+    def year_label(self, key: str) -> str:
+        return dict(self.years)[key]
+
+    def state_name(self, code: str) -> str:
+        return dict(self.states)[code]
+
+    def tagline(self, country: str) -> str:
+        return dict(self.taglines).get(country, "")
+
+
+_YEAR_KEY = re.compile(r"FY\d{4}-\d{2}")
+_STATE_CODE = re.compile(r"[A-Z]{2}")
+
+
+def _entries(data: Any, key: str, fields: Tuple[str, str]) -> Tuple[Tuple[str, str], ...]:
+    items = data.get(key) if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        raise projects.ProjectError(f"tax-break listed no {key}")
+    rows = []
+    for item in items:
+        first, second = (item.get(name) if isinstance(item, dict) else None for name in fields)
+        if not all(isinstance(value, str) and value.strip() for value in (first, second)):
+            raise projects.ProjectError(f"tax-break's {key} have no usable {' or '.join(fields)}")
+        rows.append((first.strip(), second.strip()))
+    return tuple(rows)
+
+
+@lru_cache(maxsize=1)
+def _meta() -> _Meta:
+    """Read the years, states and calculator descriptions from tax-break (once per process)."""
+
+    data = projects.call(PROJECT, "meta")
+    years = _entries(data, "years", ("key", "label"))
+    if not all(_YEAR_KEY.fullmatch(key) for key, _label in years):
+        raise projects.ProjectError("tax-break's Indian years aren't keyed the way Jarvis expects")
+    states = _entries(data, "states", ("code", "name"))
+    if not all(_STATE_CODE.fullmatch(code) for code, _name in states):
+        raise projects.ProjectError("tax-break's US states don't all have two-letter codes")
+    # The descriptions are only shown, so a missing one just isn't.
+    countries = data.get("countries")
+    taglines = []
+    for item in countries if isinstance(countries, list) else ():
+        if isinstance(item, dict):
+            value, tagline = item.get("value"), item.get("tagline")
+            if isinstance(value, str) and isinstance(tagline, str) and tagline.strip():
+                taglines.append((value, " ".join(tagline.split())))
+    return _Meta(years, states, tuple(taglines))
+
+
+def _number(data: Any, *path: str) -> float:
+    """The finite number at ``path`` in an engine result."""
+
+    value = data
+    for key in path:
+        value = value.get(key) if isinstance(value, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise projects.ProjectError(f"tax-break's result has no usable {'.'.join(path)}")
+    return float(value)
+
+
+def _calculate(action: str, inputs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Run one of the adapter's calculations on each input, in one Node.js run."""
+
+    results = projects.call(PROJECT, action, {"inputs": list(inputs)})
+    if not (
+        isinstance(results, list)
+        and len(results) == len(inputs)
+        and all(isinstance(result, dict) for result in results)
+    ):
+        raise projects.ProjectError(f"tax-break's {action} results don't match the request")
+    return results
 
 
 # --------------------------------------------------------------------------
@@ -1066,13 +138,8 @@ def singapore_tax(
 _SYMBOLS: Dict[str, str] = {
     "india": "₹", "uk": "£", "us": "$", "ireland": "€", "netherlands": "€", "singapore": "S$",
 }
-_LATEST = "the latest in tax-break's tables"
-_MARGINAL_STEP = 1000.0
-_MARGINAL_REASONS: Dict[str, str] = {
-    "india": "as the 87A rebate or surcharge marginal relief tapers off",
-    "uk": "as the personal allowance is withdrawn",
-    "ireland": "as PRSI or USC starts to apply",
-}
+# The marginal rate is the extra tax on this much more salary.
+_STEP = 1000.0
 _INDIA_AGE_TEXT: Dict[str, str] = {
     "below60": "below 60", "60to80": "aged 60 to 79", "above80": "aged 80 or over",
 }
@@ -1083,23 +150,35 @@ _UK_PLAN_NAMES: Dict[str, str] = {
     "plan1": "Plan 1", "plan2": "Plan 2", "plan4": "Plan 4", "plan5": "Plan 5",
     "postgraduate": "Postgraduate Loan",
 }
-_TABLES_HELD: Dict[str, Tuple[str, str]] = {
-    "india": ("India tables for FY 2021-22 to FY 2025-26", "FY 2025-26"),
-    "uk": ("a UK table for 2025/26 only", "2025/26"),
-    "us": ("US tables for 2025 only", "2025"),
-    "ireland": ("an Irish table for 2025 only", "2025"),
-    "netherlands": ("a Dutch table for 2025 only", "2025"),
-    "singapore": ("a Singapore table for YA 2025 only", "YA 2025"),
+_US_STATUS_TEXT: Dict[str, str] = {
+    "single": "single filer", "marriedJoint": "married filing jointly",
+    "marriedSeparate": "married filing separately", "headOfHousehold": "head of household",
 }
-_FY2024_25_NOTE = (
-    "tax-break's FY 2024-25 new-regime slabs are the earlier 3/6/9/12/15 lakh ones; the July "
-    "2024 Budget changed them to 3/7/10/12/15 lakh, so the new-regime figure may be up to "
-    "₹10,000 too high before cess and surcharge."
+_IRELAND_STATUS_TEXT: Dict[str, str] = {
+    "single": "single PAYE employee",
+    "singleParent": "single parent, PAYE employee",
+    "marriedOneIncome": "married or civil partners with one income, PAYE employee",
+}
+# (name in replies, Jarvis's claim keys, the engine's deduction)
+_INDIA_DEDUCTIONS: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
+    ("80C", ("section_80c",), "section80C"),
+    ("80D", ("section_80d_self", "section_80d_parents"), "section80D"),
+    ("NPS 80CCD(1B)", ("section_80ccd1b",), "section80CCD1B"),
+    ("80E", ("section_80e",), "section80E"),
+    ("80G", ("section_80g",), "section80G"),
 )
-_PRSI_NOTE = (
-    "tax-break charges PRSI at 4.1% for all of 2025, but the rate was scheduled to rise to "
-    "4.2% from 1 October 2025, so the PRSI figure may be slightly low."
-)
+
+
+def _india_age(age: Optional[int]) -> str:
+    if age is None or age < 60:
+        return "below60"
+    return "60to80" if age < 80 else "above80"
+
+
+def _singapore_age(age: Optional[int]) -> str:
+    if age is None or age < 55:
+        return "below55"
+    return "55to59" if age < 60 else "60plus"
 
 
 def _group_indian(digits: str) -> str:
@@ -1118,7 +197,8 @@ def _group_indian(digits: str) -> str:
 def _money(value: float, symbol: str, *, whole: bool = False) -> str:
     """Format money with ``symbol`` and separators (lakh/crore for ₹); cents only if any."""
 
-    cents = int(_js_round(abs(value))) * 100 if whole else int(_js_round(abs(value) * 100))
+    size = abs(value)
+    cents = math.floor(size + 0.5) * 100 if whole else math.floor(size * 100 + 0.5)
     units, fraction = divmod(cents, 100)
     digits = _group_indian(str(units)) if symbol == "₹" else f"{units:,}"
     text = symbol + digits + (f".{fraction:02d}" if fraction else "")
@@ -1131,49 +211,6 @@ def _pct(value: float) -> str:
     if abs(value) < 0.05:
         return "0%"
     return f"{value:.1f}".rstrip("0").rstrip(".") + "%"
-
-
-def _rate_text(rate: float) -> str:
-    """A tax rate such as 0.3582 written as "35.82%"."""
-
-    return f"{rate * 100:.4f}".rstrip("0").rstrip(".") + "%"
-
-
-def _band_split(income: float, brackets: Sequence[Bracket]) -> List[Tuple[float, float]]:
-    """Return ``(rate, amount)`` for each band that ``income`` reaches."""
-
-    parts = []
-    for bracket in brackets:
-        if income <= bracket.lower:
-            break
-        upper = income if bracket.upper is None else min(income, bracket.upper)
-        parts.append((bracket.rate, upper - bracket.lower))
-    return parts
-
-
-def _band_text(parts: Sequence[Tuple[float, float]], symbol: str) -> str:
-    return ", ".join(
-        f"{_rate_text(rate)} on {_money(amount, symbol)}" for rate, amount in parts if amount > 0
-    )
-
-
-def _marginal(total_at: Callable[[float], float], income: float) -> float:
-    """Extra tax on the next 1,000 of salary, as a percentage of that 1,000."""
-
-    return (total_at(income + _MARGINAL_STEP) - total_at(income)) / _MARGINAL_STEP * 100
-
-
-def _rates_line(country: str, effective: float, marginal: float) -> str:
-    step = _money(_MARGINAL_STEP, _SYMBOLS[country])
-    line = f"- Rates: {_pct(effective)} effective, {_pct(marginal)} marginal on the next {step}"
-    if marginal >= 60:
-        reason = _MARGINAL_REASONS.get(country, "as a credit phases out or a threshold is crossed")
-        line += f" ({reason})"
-    return line
-
-
-def _year_line(heading: str, label: str, defaulted: bool) -> str:
-    return f"{heading}: {label}" + (f", {_LATEST}." if defaulted else ".")
 
 
 def _assumptions(parts: Sequence[str]) -> str:
@@ -1201,6 +238,20 @@ def _per_year_line(label: str, amount: float, req: "_Request", symbol: str, suff
     return f"- {label}: {_money(amount, symbol)} a year, {per}{suffix}"
 
 
+def _rates_line(symbol: str, income: float, total: float, next_total: float) -> str:
+    """Tax as a share of the income, and the share of the next _STEP that goes in tax."""
+
+    effective = total / income * 100 if income > 0 else 0.0
+    marginal = (next_total - total) / _STEP * 100
+    line = (
+        f"- Rates: {_pct(effective)} effective, {_pct(marginal)} marginal on the next "
+        f"{_money(_STEP, symbol)}"
+    )
+    if marginal >= 60:
+        line += " (a threshold is crossed here, or an allowance, credit or relief tapers off)"
+    return line
+
+
 def _finish(lines: Sequence[str], notes: Sequence[str] = (), *, disclaimer: bool = True) -> str:
     out = list(lines)
     if notes:
@@ -1220,130 +271,220 @@ def _claim_suffix(claimed: float, allowed: float, symbol: str) -> str:
     return ""
 
 
-def _india_claims(req: "_Request") -> IndiaDeductions:
-    stated = req.deductions
-    return IndiaDeductions(
-        section_80c=stated.get("section_80c", 0.0),
-        section_80d_self=stated.get("section_80d_self", 0.0),
-        section_80d_parents=stated.get("section_80d_parents", 0.0),
-        parents_senior=req.parents_senior,
-        section_80ccd1b=stated.get("section_80ccd1b", 0.0),
-        section_80e=stated.get("section_80e", 0.0),
-        section_80g=stated.get("section_80g", 0.0),
-        home_loan_interest=stated.get("home_loan_interest", 0.0),
+def _age_note(calculator: str, example: str) -> str:
+    return (
+        f"tax-break's {calculator} calculator doesn't take an age, so age-based rules such as "
+        f"{example} aren't applied."
     )
 
 
-def _india_block(result: IndiaTax, claims: IndiaDeductions, req: "_Request") -> List[str]:
+def _calculator_line(meta: _Meta, country: str) -> List[str]:
+    """The web app's own description of the calculator used, which may name its year."""
+
+    tagline = meta.tagline(country)
+    return [f'Calculator: tax-break for {_COUNTRY_NAMES[country]} — "{tagline}"'] if tagline else []
+
+
+def _totals(
+    lines: List[str], req: "_Request", symbol: str, result: Dict[str, Any], next_total: float,
+    label: str = "Take-home", suffix: str = "",
+) -> float:
+    """Add the total, take-home and rates lines for an international estimate."""
+
+    total = _number(result, "totalTaxLiability")
+    lines.append(f"- Total: {_money(total, symbol)}")
+    lines.append(_per_year_line(label, _number(result, result["country"], "netIncome"), req, symbol, suffix))
+    lines.append(_rates_line(symbol, req.income, total, next_total))
+    return total
+
+
+def _fy(key: str) -> str:
+    """A year key such as "FY2024-25" written as "FY 2024-25"."""
+
+    return "FY " + key[2:]
+
+
+def _year_decline(meta: _Meta, asked: str) -> str:
+    keys = sorted(key for key, _label in meta.years)
+    held = _fy(keys[0]) + (f" to {_fy(keys[-1])}" if len(keys) > 1 else " only")
+    return _finish(
+        [
+            f"tax-break has Indian tables for {held}, not {asked}, so I can't estimate that year.",
+            f"Ask without a year to use {meta.year_label(meta.latest_year)}, the latest it has.",
+        ],
+        disclaimer=False,
+    )
+
+
+# India: the engine compares both regimes for the salary and for _STEP more.
+
+def _india_input(req: "_Request", fy: str, age: str, salary: float) -> Dict[str, Any]:
+    def claim(*keys: str) -> Any:
+        value = sum(req.deductions.get(key, 0.0) for key in keys)
+        return "max" if math.isinf(value) else value
+
+    data: Dict[str, Any] = {
+        "assessmentYear": fy,
+        "ageCategory": age,
+        "salary": {
+            "basic": salary, "hraReceived": 0, "rentPaid": 0, "cityType": "metro", "lta": 0,
+            "specialAllowance": 0, "otherTaxableAllowances": req.bonus,
+        },
+    }
+    if any(value > 0 for key, value in req.deductions.items() if key != "home_loan_interest"):
+        data["deductions"] = {
+            "section80C": claim("section_80c"),
+            "section80D": {
+                "selfAndFamilyPremium": claim("section_80d_self"),
+                "parentsPremium": claim("section_80d_parents"),
+                "selfSenior": age != "below60",
+                "parentsSenior": req.parents_senior,
+            },
+            "section80CCD1B": claim("section_80ccd1b"),
+            "section80E": claim("section_80e"),
+            "section80G": claim("section_80g"),
+        }
+    if req.deductions.get("home_loan_interest", 0.0) > 0:
+        data["houseProperty"] = {
+            "type": "self-occupied", "homeLoanInterest": claim("home_loan_interest"),
+        }
+    return data
+
+
+def _regimes(result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    regimes = {regime: result.get(regime) for regime in ("new", "old")}
+    if not all(isinstance(value, dict) for value in regimes.values()):
+        raise projects.ProjectError("tax-break's comparison is missing a regime")
+    return regimes  # type: ignore[return-value]
+
+
+def _deductions_unused(result: Dict[str, Any]) -> bool:
+    """True when a regime's figure used no deduction but the standard one."""
+
+    return (
+        _number(result, "totalDeductions")
+        <= _number(result, "deductionsBreakdown", "standardDeduction") + 0.005
+        and _number(result, "grossTotalIncome") >= _number(result, "taxableSalaryIncome") - 0.005
+    )
+
+
+def _india_block(result: Dict[str, Any], req: "_Request", next_total: float) -> List[str]:
     symbol = _SYMBOLS["india"]
     lines: List[str] = []
-    old = result.regime == "old"
-    if old and claims.home_loan_interest > 0:
-        allowed = -result.house_property
+    claimed = req.deductions
+    used = not _deductions_unused(result)
+    interest = claimed.get("home_loan_interest", 0.0)
+    set_off = _number(result, "taxableSalaryIncome") - _number(result, "grossTotalIncome")
+    if interest > 0 and set_off > 0:
         lines.append(
-            f"- Home-loan interest 24(b): {_money(allowed, symbol)} set off against salary"
-            + _claim_suffix(claims.home_loan_interest, allowed, symbol)
+            f"- Home-loan interest 24(b): {_money(set_off, symbol)} set off against salary"
+            + _claim_suffix(interest, set_off, symbol)
         )
-    rows = (
-        ("80C", claims.section_80c, result.section_80c),
-        ("80D", claims.section_80d_self + claims.section_80d_parents, result.section_80d),
-        ("NPS 80CCD(1B)", claims.section_80ccd1b, result.section_80ccd1b),
-        ("80E", claims.section_80e, result.section_80e),
-        ("80G", claims.section_80g, result.section_80g),
-    )
-    if old and any(claimed > 0 for _name, claimed, _allowed in rows):
-        parts = [f"standard {_money(result.standard_deduction, symbol)}"]
-        parts.extend(
-            f"{name} {_money(allowed, symbol)}" + _claim_suffix(claimed, allowed, symbol)
-            for name, claimed, allowed in rows
-            if claimed > 0
-        )
+    standard = _number(result, "deductionsBreakdown", "standardDeduction")
+    total_deductions = _number(result, "totalDeductions")
+    rows = [
+        (name, sum(claimed.get(key, 0.0) for key in keys), field_name)
+        for name, keys, field_name in _INDIA_DEDUCTIONS
+    ]
+    rows = [row for row in rows if row[1] > 0]
+    if used and rows:
+        parts = [f"standard {_money(standard, symbol)}"]
+        for name, amount, field_name in rows:
+            allowed = _number(result, "deductionsBreakdown", field_name)
+            parts.append(f"{name} {_money(allowed, symbol)}" + _claim_suffix(amount, allowed, symbol))
         lines.append("- Deductions: " + ", ".join(parts))
-        basis = f"after {_money(result.total_deductions, symbol)} of deductions"
-    elif result.standard_deduction > 0:
-        basis = f"after the {_money(result.standard_deduction, symbol)} standard deduction"
-    elif INDIA_YEARS[result.fy].rules(result.regime).standard_deduction == 0:
-        fy_name = INDIA_YEARS[result.fy].label.split(" (")[0]
-        basis = f"this regime had no standard deduction in {fy_name}"
+        basis = f"after {_money(total_deductions, symbol)} of deductions"
+    elif total_deductions > standard + 0.005:
+        basis = f"after {_money(total_deductions, symbol)} of deductions"
+    elif standard > 0:
+        basis = f"after the {_money(standard, symbol)} standard deduction"
     else:
-        basis = ""
-    lines.append(
-        f"- Taxable income: {_money(result.taxable_income, symbol)}" + (f" ({basis})" if basis else "")
-    )
-    lines.append(f"- Tax on slabs: {_money(result.tax_before_rebate, symbol)}")
-    if result.rebate > 0:
-        lines.append(f"- Less rebate u/s 87A: {_money(result.rebate, symbol)}")
-    if result.surcharge > 0 or result.marginal_relief > 0:
-        line = f"- Surcharge ({_rate_text(result.surcharge_rate)}): {_money(result.surcharge, symbol)}"
-        if result.marginal_relief > 0:
-            line += f" after {_money(result.marginal_relief, symbol)} marginal relief"
+        basis = "no standard deduction"
+    lines.append(f"- Taxable income: {_money(_number(result, 'taxableIncome'), symbol)} ({basis})")
+    lines.append(f"- Tax on slabs: {_money(_number(result, 'taxBeforeRebate'), symbol)}")
+    rebate = _number(result, "rebate")
+    if rebate > 0:
+        lines.append(f"- Less rebate u/s 87A: {_money(rebate, symbol)}")
+    surcharge, relief = _number(result, "surcharge"), _number(result, "marginalRelief")
+    if surcharge > 0 or relief > 0:
+        line = f"- Surcharge: {_money(surcharge, symbol)}"
+        if relief > 0:
+            line += f" after {_money(relief, symbol)} marginal relief"
         lines.append(line)
-    if result.cess > 0:
-        lines.append(f"- Health and education cess (4%): {_money(result.cess, symbol)}")
-    lines.append(f"- Total tax: {_money(result.total, symbol)}")
-    lines.append(_per_year_line("After income tax", result.salary - result.total, req, symbol))
-    effective = result.total / result.salary * 100 if result.salary > 0 else 0.0
-    marginal = _marginal(
-        lambda pay: india_tax(
-            pay, fy=result.fy, regime=result.regime, age_band=result.age_band, deductions=claims
-        ).unrounded_total,
-        result.salary,
-    )
-    lines.append(_rates_line("india", effective, marginal))
+    cess = _number(result, "cess")
+    if cess > 0:
+        lines.append(f"- Health and education cess: {_money(cess, symbol)}")
+    total = _number(result, "totalTaxLiability")
+    lines.append(f"- Total tax: {_money(total, symbol)}")
+    lines.append(_per_year_line("After income tax", req.income - total, req, symbol))
+    lines.append(_rates_line(symbol, req.income, total, next_total))
     return lines
 
 
-def _india_reply(req: "_Request", fy: str, defaulted: bool, notes: List[str]) -> str:
+def _india_reply(req: "_Request", meta: _Meta, fy: str, defaulted: bool, notes: List[str]) -> str:
     symbol = _SYMBOLS["india"]
-    year = INDIA_YEARS[fy]
-    age_band = india_age_band(req.age)
-    claims = _india_claims(req)
-    comparison = india_compare(req.income, fy=fy, age_band=age_band, deductions=claims)
+    age = _india_age(req.age)
+    now, more = _calculate(
+        "india",
+        [_india_input(req, fy, age, req.salary), _india_input(req, fy, age, req.salary + _STEP)],
+    )
+    regimes, next_regimes = _regimes(now), _regimes(more)
     shown = ("new", "old") if req.regime is None else (req.regime,)
-    assumptions = [f"resident individual {_INDIA_AGE_TEXT[age_band]}", "salary income only"]
-    if not claims.claimed():
+    claimed = any(value > 0 for value in req.deductions.values())
+    assumptions = [f"resident individual {_INDIA_AGE_TEXT[age]}", "salary income only"]
+    if not claimed:
         assumptions.append("no deductions beyond the standard deduction")
     lines = [
         f"Indian income tax on {_income_phrase(req, symbol)}",
-        _year_line("Financial year", year.label, defaulted),
+        f"Financial year: {meta.year_label(fy)}"
+        + (", the latest in tax-break's tables." if defaulted else "."),
         _assumptions(assumptions),
     ]
     for regime in shown:
         lines.append(f"{regime.capitalize()} regime:")
-        lines.extend(_india_block(comparison.new if regime == "new" else comparison.old, claims, req))
+        lines.extend(
+            _india_block(regimes[regime], req, _number(next_regimes[regime], "totalTaxLiability"))
+        )
+    totals = {regime: _number(result, "totalTaxLiability") for regime, result in regimes.items()}
     if req.regime is None:
-        if comparison.old.total == comparison.new.total:
+        recommended = now.get("recommendedRegime")
+        if recommended not in totals:
+            raise projects.ProjectError("tax-break's comparison names no regime")
+        if totals["old"] == totals["new"]:
             lines.append("Both regimes come to the same tax.")
         else:
             lines.append(
-                f"The {comparison.recommended} regime is lower by "
-                f"{_money(comparison.savings, symbol)} a year."
+                f"The {recommended} regime is lower by {_money(_number(now, 'savings'), symbol)} a year."
             )
     else:
-        other = comparison.old if req.regime == "new" else comparison.new
-        lines.append(f"For comparison, the {other.regime} regime comes to {_money(other.total, symbol)}.")
+        other = "old" if req.regime == "new" else "new"
+        lines.append(f"For comparison, the {other} regime comes to {_money(totals[other], symbol)}.")
 
     extra = list(notes)
-    if fy == "FY2024-25" and "new" in shown:
-        extra.append(_FY2024_25_NOTE)
-    if claims.claimed() and shown == ("new",):
+    if claimed and shown == ("new",) and _deductions_unused(regimes["new"]):
         extra.append(
-            "The deductions you gave only lower the old-regime figure; the new regime allows "
-            "just the standard deduction."
+            "The new-regime figure uses none of the deductions you gave; the old-regime "
+            "comparison includes them."
         )
-    if not claims.claimed() and "old" in shown:
+    if not claimed and "old" in shown:
         extra.append(
             "Old-regime deductions such as 80C, 80D, NPS 80CCD(1B) and home-loan interest 24(b) "
-            'would lower the old figure; add them, e.g. "80C 1.5 lakh".'
+            'would lower the old figure; add them, e.g. "80C 1 lakh".'
         )
-    if age_band != "below60":
-        extra.append("Age only changes the old-regime slabs and the 80D limit for your own health cover.")
-    if claims.section_80g > 0:
+    donation = req.deductions.get("section_80g", 0.0)
+    if (
+        "old" in shown and 0 < donation < math.inf
+        and _number(regimes["old"], "deductionsBreakdown", "section80G") >= donation - 0.005
+    ):
         extra.append(
-            "tax-break deducts 80G donations in full; many donations qualify for only 50% or are capped."
+            "tax-break deducted the whole 80G donation; many donations qualify for only 50% or "
+            "are capped."
         )
     if _HRA.search(req.text):
-        extra.append("HRA exemption isn't modelled, so the old-regime figure may be too high if you claim it.")
+        extra.append(
+            "I didn't include an HRA exemption, so the old-regime figure may be too high if you "
+            "claim one."
+        )
     if _CTC.search(req.text):
         extra.append(
             "The CTC is treated as taxable salary; employer PF and other untaxed parts of a CTC "
@@ -1355,6 +496,32 @@ def _india_reply(req: "_Request", fy: str, defaulted: bool, notes: List[str]) ->
     return _finish(lines, extra)
 
 
+# The other countries: one engine estimate for the salary and one for _STEP more.
+
+def _international_input(req: "_Request", country: str, **options: Any) -> Dict[str, Any]:
+    data: Dict[str, Any] = {"country": country, "annualIncome": req.salary}
+    data.update((key, value) for key, value in options.items() if value is not None)
+    if req.bonus:
+        data["bonus"] = req.bonus
+    return data
+
+
+def _checked(result: Dict[str, Any], country: str) -> Dict[str, Any]:
+    if result.get("country") != country or not isinstance(result.get(country), dict):
+        raise projects.ProjectError(f"tax-break's estimate isn't for {_COUNTRY_NAMES[country]}")
+    return result
+
+
+def _international(req: "_Request", country: str, **options: Any) -> Tuple[Dict[str, Any], float]:
+    """The engine's estimate for the salary, and its total on _STEP more."""
+
+    data = _international_input(req, country, **options)
+    now, more = _calculate(
+        "international", [data, dict(data, annualIncome=req.salary + _STEP)]
+    )
+    return _checked(now, country), _number(_checked(more, country), "totalTaxLiability")
+
+
 def _uk_plan(text: str) -> Tuple[Optional[str], List[str]]:
     """Read a student loan plan from ``text``; returns the plan key and any notes."""
 
@@ -1362,9 +529,9 @@ def _uk_plan(text: str) -> Tuple[Optional[str], List[str]]:
     plans: List[str] = []
     for match in _UK_PLAN.finditer(text):
         number = _NUMBER_WORDS.get(match.group("plan").lower(), match.group("plan"))
-        plans.append({"1": "plan1", "2": "plan2", "3": "postgraduate", "4": "plan4", "5": "plan5"}[str(number)])
-        if str(number) == "3":
-            notes.append("Plan 3 is the Postgraduate Loan, repaid at 6% above £21,000.")
+        plans.append({"1": "plan1", "2": "plan2", "3": "postgraduate", "4": "plan4", "5": "plan5"}[number])
+        if number == "3":
+            notes.append("I took Plan 3 as the Postgraduate Loan.")
     if _UK_POSTGRAD.search(text):
         plans.append("postgraduate")
     unique = list(dict.fromkeys(plans))
@@ -1373,53 +540,34 @@ def _uk_plan(text: str) -> Tuple[Optional[str], List[str]]:
             notes.append('Say which student loan plan you have, e.g. "plan 2", to include repayments.')
         return None, notes
     if len(unique) > 1:
-        notes.append(f"tax-break works out one loan at a time, so I used {_UK_PLAN_NAMES[unique[0]]} only.")
-    if unique[0] == "plan5":
-        notes.append("Plan 5 repayments start from April 2026, so none may be due in 2025/26.")
+        notes.append(
+            f"I can give tax-break one student loan plan at a time, so I used "
+            f"{_UK_PLAN_NAMES[unique[0]]} only."
+        )
     return unique[0], notes
 
 
-def _uk_reply(req: "_Request", defaulted: bool, notes: List[str]) -> str:
+def _uk_reply(req: "_Request", meta: _Meta, notes: List[str]) -> str:
     symbol = _SYMBOLS["uk"]
     plan, plan_notes = _uk_plan(req.text)
-    result = uk_tax(req.income, student_loan_plan=plan)
+    result, next_total = _international(req, "uk", studentLoanPlan=plan)
     assumptions = ["England, Wales or Northern Ireland rates", "salary only"]
     if plan is None:
         assumptions.append("no student loan")
     assumptions.append("no pension contributions")
-    lines = [
-        f"UK tax on {_income_phrase(req, symbol)}",
-        _year_line("Tax year", f"{UK_TAX_YEAR} (6 April 2025 to 5 April 2026)", defaulted),
+    lines = [f"UK tax on {_income_phrase(req, symbol)}"]
+    lines += _calculator_line(meta, "uk")
+    lines += [
         _assumptions(assumptions),
+        f"- Personal allowance: {_money(_number(result, 'uk', 'personalAllowance'), symbol)}",
+        f"- Taxable income: {_money(_number(result, 'taxableIncome'), symbol)}",
+        f"- Income tax: {_money(_number(result, 'incomeTax'), symbol)}",
+        f"- National Insurance: {_money(_number(result, 'uk', 'nationalInsurance'), symbol)}",
     ]
-    allowance = f"- Personal allowance: {_money(result.personal_allowance, symbol)}"
-    if result.personal_allowance < UK_PERSONAL_ALLOWANCE:
-        allowance += (
-            f" ({_money(UK_PERSONAL_ALLOWANCE, symbol)} less £1 for every £2 over "
-            f"{_money(UK_TAPER_THRESHOLD, symbol)})"
-        )
-    lines.append(allowance)
-    lines.append(f"- Taxable income: {_money(result.taxable_income, symbol)}")
-    bands = _band_text(
-        ((0.2, result.basic_rate_income), (0.4, result.higher_rate_income),
-         (0.45, result.additional_rate_income)),
-        symbol,
-    )
-    lines.append(f"- Income tax: {_money(result.income_tax, symbol)}" + (f" ({bands})" if bands else ""))
-    lines.append(
-        f"- National Insurance: {_money(result.national_insurance, symbol)} "
-        "(8% from £12,570 to £50,270, 2% above)"
-    )
     if plan:
-        threshold, rate = UK_STUDENT_LOAN_PLANS[plan]
-        lines.append(
-            f"- Student loan ({_UK_PLAN_NAMES[plan]}): {_money(result.student_loan, symbol)} "
-            f"({_rate_text(rate)} above {_money(threshold, symbol)})"
-        )
-    lines.append(f"- Total: {_money(result.total, symbol)}")
-    lines.append(_per_year_line("Take-home", result.take_home, req, symbol))
-    marginal = _marginal(lambda pay: uk_tax(pay, student_loan_plan=plan).total, req.income)
-    lines.append(_rates_line("uk", result.effective_rate, marginal))
+        repayment = _number(result, "uk", "studentLoanRepayment")
+        lines.append(f"- Student loan ({_UK_PLAN_NAMES[plan]}): {_money(repayment, symbol)}")
+    _totals(lines, req, symbol, result, next_total)
 
     extra = list(notes) + plan_notes
     if _PENSION.search(req.text):
@@ -1427,277 +575,231 @@ def _uk_reply(req: "_Request", defaulted: bool, notes: List[str]) -> str:
             "Pension contributions aren't deducted; salary sacrifice or relief at source would "
             "lower the tax."
         )
-    if req.age is not None and req.age >= 66:
+    if req.age is not None:
+        extra.append(_age_note("UK", "employee National Insurance ending at State Pension age"))
+    if _KIDS.search(req.text):
         extra.append(
-            "Employee National Insurance stops at State Pension age (66), but this figure still "
-            "includes it."
+            "Child Benefit isn't included, nor the High Income Child Benefit Charge that takes "
+            "it back on higher incomes."
         )
-    if _KIDS.search(req.text) and req.income > 60000:
-        extra.append("The High Income Child Benefit Charge isn't included.")
     if _MARRIED.search(req.text):
-        extra.append("UK tax is per person; Marriage Allowance isn't included.")
-    return _finish(lines, extra)
-
-
-def _us_status(text: str) -> Tuple[str, List[str]]:
-    if _US_MFS.search(text):
-        return "married_separate", []
-    if _US_HOH.search(text):
-        return "head_of_household", []
-    if _US_MFJ.search(text):
-        return "married_joint", []
-    if _MARRIED.search(text) and not _SINGLE.search(text):
-        return "married_joint", ['I assumed married filing jointly; say "filing separately" if not.']
-    return "single", []
-
-
-def _us_reply(req: "_Request", state: Optional[str], defaulted: bool, notes: List[str]) -> str:
-    symbol = _SYMBOLS["us"]
-    status, status_notes = _us_status(req.text)
-    result = us_tax(req.income, filing_status=status, state=state, children=req.children)
-    where = f" in {US_STATES[state].name}" if state else ""
-    assumptions = [US_FILING_STATUSES[status], "standard deduction", "wages only"]
-    if not state:
-        assumptions.append("no state tax")
-    lines = [
-        f"US tax on {_income_phrase(req, symbol)}{where}",
-        _year_line("Tax year", US_TAX_YEAR, defaulted),
-        _assumptions(assumptions),
-        f"- Taxable income: {_money(result.taxable_income, symbol)} "
-        f"(after the {_money(result.standard_deduction, symbol)} standard deduction)",
-        f"- Federal income tax: {_money(result.federal_income_tax, symbol)}",
-    ]
-    if result.children:
-        kids = f"{result.children} {'child' if result.children == 1 else 'children'} under 17"
-        lines.append(
-            f"- Less child tax credit: {_money(result.child_tax_credit, symbol)} "
-            f"({kids}, {_money(US_CHILD_TAX_CREDIT, symbol)} each before limits)"
-        )
-    lines.append(
-        f"- FICA: {_money(result.fica, symbol)} (Social Security 6.2% up to "
-        f"{_money(US_SOCIAL_SECURITY_WAGE_BASE, symbol)}, Medicare 1.45%)"
-    )
-    if result.additional_medicare > 0:
-        threshold = _US_ADDITIONAL_MEDICARE_THRESHOLD[status]
-        lines.append(
-            f"- Additional Medicare: {_money(result.additional_medicare, symbol)} "
-            f"(0.9% above {_money(threshold, symbol)})"
-        )
-    if result.state is not None:
-        state_tax = result.state
-        if US_STATES[state_tax.code].brackets:
-            line = f"- {state_tax.name} income tax: {_money(state_tax.tax, symbol)}"
-            if state_tax.deduction > 0:
-                line += f" (after {_money(state_tax.deduction, symbol)} of state deductions)"
-            lines.append(line)
-        else:
-            lines.append(f"- {state_tax.name}: no state income tax on wages")
-    lines.append(f"- Total: {_money(result.total, symbol)}")
-    lines.append(_per_year_line("Take-home", result.take_home, req, symbol))
-    marginal = _marginal(
-        lambda pay: us_tax(pay, filing_status=status, state=state, children=req.children).total,
-        req.income,
-    )
-    lines.append(_rates_line("us", result.effective_rate, marginal))
-
-    extra = list(notes) + status_notes
-    if state is None:
-        extra.append('Add a state for state income tax, e.g. "in California".')
-    elif US_STATES[state].brackets:
-        if status != "single":
-            extra.append(
-                f"tax-break's state figures use single-filer rules, so a "
-                f"{US_FILING_STATUSES[status]} {US_STATES[state].name} return may differ."
-            )
-        extra.append("Local income taxes and state credits aren't included.")
-    if result.children:
-        extra.append("I assumed the children are under 17.")
-        if us_child_tax_credit(result.children, result.adjusted_gross_income, status) > result.child_tax_credit:
-            extra.append(
-                "The child tax credit is limited to the federal income tax here; any refundable "
-                "part isn't included."
-            )
-    elif _KIDS.search(req.text) and not req.children_stated:
-        extra.append("Say how many children under 17 you have to include the child tax credit.")
-    if req.age is not None and req.age >= 65:
-        extra.append("Extra deductions for people 65 and over aren't included.")
-    if _PENSION.search(req.text):
-        extra.append("401(k), IRA and other pre-tax contributions aren't deducted.")
-    return _finish(lines, extra)
-
-
-def _ireland_status_from_text(text: str) -> Tuple[str, List[str]]:
-    if _IE_SINGLE_PARENT.search(text):
-        return "single_parent", [
-            "The single person child carer credit (€1,900) and the €48,000 20% band are included."
-        ]
-    if _MARRIED.search(text):
-        return "married_one_income", [
-            "For a married couple or civil partners I assumed one income; a second income can "
-            "raise the 20% band by up to €35,000."
-        ]
-    return "single", []
-
-
-def _ireland_reply(req: "_Request", defaulted: bool, notes: List[str]) -> str:
-    symbol = _SYMBOLS["ireland"]
-    status, status_notes = _ireland_status_from_text(req.text)
-    result = ireland_tax(req.income, filing_status=status)
-    who = {
-        "single": "single PAYE employee",
-        "single_parent": "single parent, PAYE employee",
-        "married_one_income": "married or civil partners with one income, PAYE employee",
-    }[status]
-    lines = [
-        f"Irish tax on {_income_phrase(req, symbol)}",
-        _year_line("Tax year", IRELAND_TAX_YEAR, defaulted),
-        _assumptions([who, "salary only"]),
-    ]
-    bands = _band_text(
-        _band_split(result.taxable_income, _bands((0, 0.2), (result.standard_rate_cut_off, 0.4))),
-        symbol,
-    )
-    lines.append(f"- Income tax: {_money(result.income_tax, symbol)}" + (f" ({bands})" if bands else ""))
-    detail = (
-        f"personal {_money(result.personal_credit, symbol)}, "
-        f"employee {_money(result.employee_credit, symbol)}"
-    )
-    if result.tax_credits < result.personal_credit + result.employee_credit - 0.005:
-        detail += ", limited to the tax"
-    lines.append(f"- Less tax credits: {_money(result.tax_credits, symbol)} ({detail})")
-    lines.append(
-        f"- USC: {_money(result.usc, symbol)}" + (" (none on €13,000 or less)" if result.usc == 0 else "")
-    )
-    lines.append(
-        f"- PRSI (Class A, 4.1%): {_money(result.prsi, symbol)}"
-        + (" (none on €352 a week or less)" if result.prsi == 0 else "")
-    )
-    lines.append(f"- Total: {_money(result.total, symbol)}")
-    lines.append(_per_year_line("Take-home", result.take_home, req, symbol))
-    marginal = _marginal(lambda pay: ireland_tax(pay, filing_status=status).total, req.income)
-    lines.append(_rates_line("ireland", result.effective_rate, marginal))
-
-    extra = list(notes) + status_notes
-    if result.prsi > 0:
-        extra.append(_PRSI_NOTE)
-    if req.age is not None and req.age >= 65:
-        extra.append("Age credits and exemptions for people 65 and over aren't included.")
-    if _PENSION.search(req.text):
-        extra.append("Pension contributions aren't deducted.")
-    return _finish(lines, extra)
-
-
-def _netherlands_reply(req: "_Request", defaulted: bool, notes: List[str]) -> str:
-    symbol = _SYMBOLS["netherlands"]
-    result = netherlands_tax(req.income, thirty_percent_ruling=req.ruling)
-    lines = [
-        f"Dutch tax on {_income_phrase(req, symbol)}",
-        _year_line("Tax year", NETHERLANDS_TAX_YEAR, defaulted),
-        _assumptions([
-            "salary only", "below State Pension (AOW) age",
-            "30% ruling applied" if req.ruling else "no 30% ruling",
-        ]),
-    ]
-    if req.ruling:
-        lines.append(f"- 30% ruling: {_money(result.ruling_exemption, symbol)} tax-free")
-    lines.append(f"- Box 1 income: {_money(result.box1_income, symbol)}")
-    bands = _band_text(_band_split(result.box1_income, _DUTCH_BOX1_BRACKETS), symbol)
-    lines.append(
-        f"- Box 1 tax: {_money(result.box1_tax, symbol)}"
-        + (f" ({bands}; includes national insurance contributions)" if bands else "")
-    )
-    detail = (
-        f"general {_money(result.general_tax_credit, symbol)}, "
-        f"labour {_money(result.labour_tax_credit, symbol)}"
-    )
-    if result.tax_credits < result.general_tax_credit + result.labour_tax_credit - 0.005:
-        detail += ", limited to the tax"
-    lines.append(f"- Less tax credits: {_money(result.tax_credits, symbol)} ({detail})")
-    lines.append(f"- Total: {_money(result.total, symbol)}")
-    lines.append(_per_year_line("Take-home", result.take_home, req, symbol))
-    marginal = _marginal(
-        lambda pay: netherlands_tax(pay, thirty_percent_ruling=req.ruling).total, req.income
-    )
-    lines.append(_rates_line("netherlands", result.effective_rate, marginal))
-
-    extra = list(notes)
-    if req.ruling:
-        extra.append(
-            "The 30% ruling is modelled as 30% of salary tax-free, on salary up to €246,000; "
-            "its eligibility conditions aren't checked."
-        )
-    if _HOLIDAY.search(req.text):
-        extra.append("Holiday allowance (vakantiegeld) is taxable; include it in the salary if it's paid on top.")
-    if req.age is not None and req.age >= 67:
-        extra.append(
-            "From State Pension (AOW) age the first-bracket rate is lower; this uses the rates "
-            "for people below it."
-        )
-    if _PENSION.search(req.text):
-        extra.append("Pension contributions aren't deducted.")
-    if _MARRIED.search(req.text):
-        extra.append("Dutch tax is per person; sharing deductions with a tax partner isn't included.")
-    return _finish(lines, extra)
-
-
-def _singapore_reply(req: "_Request", defaulted: bool, notes: List[str]) -> str:
-    symbol = _SYMBOLS["singapore"]
-    band = singapore_age_band(req.age)
-    result = singapore_tax(req.income, age_band=band, cpf_contributions=req.cpf)
-    lines = [
-        f"Singapore income tax on {_income_phrase(req, symbol)}",
-        _year_line("Year of assessment", "YA 2025 (income earned in 2024)", defaulted),
-        _assumptions([
-            f"tax resident {_SINGAPORE_AGE_TEXT[band]}", "employment income only",
-            "earned income and CPF relief" if req.cpf else "earned income relief only",
-        ]),
-    ]
-    if result.total_reliefs >= SINGAPORE_RELIEF_CAP:
-        basis = f"after reliefs, capped at {_money(SINGAPORE_RELIEF_CAP, symbol)}"
-    elif req.cpf:
-        basis = f"after {_money(result.total_reliefs, symbol)} of earned income and CPF relief"
-    else:
-        basis = f"after {_money(result.earned_income_relief, symbol)} earned income relief"
-    lines.append(f"- Chargeable income: {_money(result.chargeable_income, symbol)} ({basis})")
-    lines.append(f"- Income tax: {_money(result.income_tax, symbol)}")
-    if result.rebate > 0:
-        lines.append(f"- Less YA 2025 rebate (60%, up to S$200): {_money(result.rebate, symbol)}")
-    lines.append(f"- Total: {_money(result.total, symbol)}")
-    lines.append(
-        _per_year_line("After income tax", result.after_tax, req, symbol, " (CPF contributions not deducted)")
-    )
-    marginal = _marginal(
-        lambda pay: singapore_tax(pay, age_band=band, cpf_contributions=req.cpf).total, req.income
-    )
-    lines.append(_rates_line("singapore", result.effective_rate, marginal))
-
-    extra = list(notes)
-    if not req.cpf:
-        extra.append('Employee CPF contributions also get relief; add them, e.g. "CPF of S$12,000".')
+        extra.append("UK income tax is per person; this is for one salary.")
     return _finish(lines, extra)
 
 
 def _scotland_reply(req: "_Request") -> str:
     symbol = _SYMBOLS["uk"]
-    ni = uk_national_insurance(req.income)
+    (result,) = _calculate("international", [_international_input(req, "uk")])
+    ni = _number(_checked(result, "uk"), "uk", "nationalInsurance")
     return _finish([
-        "Scottish income tax isn't in tax-break's tables (Scotland sets its own bands and "
-        "rates), so I can't estimate it.",
-        f"National Insurance is UK-wide: on {_income_phrase(req, symbol)} it comes to "
-        f"{_money(ni, symbol)} for {UK_TAX_YEAR} (8% from £12,570 to £50,270, 2% above).",
+        "Scotland sets its own income tax bands and rates, which tax-break doesn't have, so I "
+        "can't estimate Scottish income tax.",
+        f"National Insurance is UK-wide: on {_income_phrase(req, symbol)}, tax-break puts it at "
+        f"{_money(ni, symbol)}.",
         "Ask about England, Wales or Northern Ireland for a full UK estimate.",
     ])
 
 
-def _year_decline(country: str, asked: str) -> str:
-    held, latest = _TABLES_HELD[country]
-    return _finish(
-        [
-            f"tax-break has {held}, not {asked}, so I can't estimate that year.",
-            f"Ask without a year to use {latest}, the latest it has.",
-        ],
-        disclaimer=False,
+def _us_status(text: str) -> Tuple[str, List[str]]:
+    if _US_MFS.search(text):
+        return "marriedSeparate", []
+    if _US_HOH.search(text):
+        return "headOfHousehold", []
+    if _US_MFJ.search(text):
+        return "marriedJoint", []
+    if _MARRIED.search(text) and not _SINGLE.search(text):
+        return "marriedJoint", ['I assumed married filing jointly; say "filing separately" if not.']
+    return "single", []
+
+
+def _us_reply(req: "_Request", meta: _Meta, state: Optional[str], notes: List[str]) -> str:
+    symbol = _SYMBOLS["us"]
+    status, status_notes = _us_status(req.text)
+    data = _international_input(
+        req, "us", filingStatus=status, dependentsUnder17=req.children or None, state=state,
     )
+    inputs = [data, dict(data, annualIncome=req.salary + _STEP)]
+    # A single filer's state tax, to tell whether tax-break's state figure reflects the status.
+    if state and status != "single":
+        inputs.append(dict(data, filingStatus="single"))
+    results = [_checked(found, "us") for found in _calculate("international", inputs)]
+    result, next_total = results[0], _number(results[1], "totalTaxLiability")
+    assumptions = [_US_STATUS_TEXT[status], "standard deduction", "wages only"]
+    if not state:
+        assumptions.append("no state tax")
+    lines = [f"US tax on {_income_phrase(req, symbol)}" + (f" in {meta.state_name(state)}" if state else "")]
+    lines += _calculator_line(meta, "us")
+    lines += [
+        _assumptions(assumptions),
+        f"- Taxable income: {_money(_number(result, 'taxableIncome'), symbol)} "
+        f"(after the {_money(_number(result, 'standardDeduction'), symbol)} standard deduction)",
+        f"- Federal income tax: {_money(_number(result, 'incomeTax'), symbol)}",
+    ]
+    credits = _number(result, "taxCredits")
+    if req.children:
+        kids = f"{req.children} {'child' if req.children == 1 else 'children'} under 17"
+        lines.append(f"- Less child tax credit: {_money(credits, symbol)} ({kids})")
+    elif credits > 0:
+        lines.append(f"- Less tax credits: {_money(credits, symbol)}")
+    lines.append(f"- FICA: {_money(_number(result, 'us', 'ficaTax'), symbol)}")
+    medicare = _number(result, "us", "additionalMedicareTax")
+    if medicare > 0:
+        lines.append(f"- Additional Medicare tax: {_money(medicare, symbol)}")
+    if state:
+        state_tax = _number(result, "stateTax")
+        if state_tax > 0:
+            base = _money(_number(result, "stateTaxableIncome"), symbol)
+            lines.append(
+                f"- {meta.state_name(state)} income tax: {_money(state_tax, symbol)} "
+                f"(on {base} of state taxable income)"
+            )
+        else:
+            lines.append(f"- {meta.state_name(state)} income tax: none")
+    _totals(lines, req, symbol, result, next_total)
+
+    extra = list(notes) + status_notes
+    if state is None:
+        extra.append('Add a state for state income tax, e.g. "in California".')
+    elif len(results) > 2:
+        state_tax = _number(result, "stateTax")
+        if state_tax > 0 and abs(_number(results[2], "stateTax") - state_tax) < 0.005:
+            extra.append(
+                f"tax-break's {meta.state_name(state)} figure is the same as a single filer's, "
+                f"so a {_US_STATUS_TEXT[status]} return there may differ."
+            )
+    if req.children:
+        extra.append("I assumed the children are under 17.")
+        full = _number(result, "us", "childTaxCredit")
+        if credits <= 0 < full:
+            extra.append(
+                f"The child tax credit would be {_money(full, symbol)}, but there's no federal "
+                "income tax here for it to reduce; a refundable part, if any, isn't included."
+            )
+        elif credits < full - 0.005:
+            extra.append(
+                f"The child tax credit would be {_money(full, symbol)}, but only "
+                f"{_money(credits, symbol)} of it is set against the federal income tax here; a "
+                "refundable part, if any, isn't included."
+            )
+    elif _KIDS.search(req.text) and not req.children_stated:
+        extra.append("Say how many children under 17 you have to include the child tax credit.")
+    if req.age is not None:
+        extra.append(_age_note("US", "the larger standard deduction for older filers"))
+    if _PENSION.search(req.text):
+        extra.append("401(k), IRA and other pre-tax contributions aren't deducted.")
+    return _finish(lines, extra)
+
+
+def _ireland_status(text: str) -> str:
+    if _IE_SINGLE_PARENT.search(text):
+        return "singleParent"
+    return "marriedOneIncome" if _MARRIED.search(text) else "single"
+
+
+def _ireland_reply(req: "_Request", meta: _Meta, notes: List[str]) -> str:
+    symbol = _SYMBOLS["ireland"]
+    status = _ireland_status(req.text)
+    result, next_total = _international(req, "ireland", filingStatus=status)
+    cut_off = _money(_number(result, "ireland", "standardRateCutOff"), symbol)
+    lines = [f"Irish tax on {_income_phrase(req, symbol)}"]
+    lines += _calculator_line(meta, "ireland")
+    lines += [
+        _assumptions([_IRELAND_STATUS_TEXT[status], "salary only"]),
+        f"- Gross tax: {_money(_number(result, 'incomeTax'), symbol)} "
+        f"(standard rate cut-off point {cut_off})",
+        f"- Less tax credits: {_money(_number(result, 'taxCredits'), symbol)}",
+        f"- USC: {_money(_number(result, 'ireland', 'universalSocialCharge'), symbol)}",
+        f"- PRSI: {_money(_number(result, 'ireland', 'prsi'), symbol)}",
+    ]
+    _totals(lines, req, symbol, result, next_total)
+
+    extra = list(notes)
+    if status == "marriedOneIncome":
+        extra.append("For a married couple or civil partners I assumed one income.")
+    if req.age is not None:
+        extra.append(_age_note("Irish", "the age tax credit"))
+    if _PENSION.search(req.text):
+        extra.append("Pension contributions aren't deducted.")
+    return _finish(lines, extra)
+
+
+def _netherlands_reply(req: "_Request", meta: _Meta, notes: List[str]) -> str:
+    symbol = _SYMBOLS["netherlands"]
+    result, next_total = _international(
+        req, "netherlands", thirtyPercentRuling=True if req.ruling else None
+    )
+    lines = [f"Dutch tax on {_income_phrase(req, symbol)}"]
+    lines += _calculator_line(meta, "netherlands")
+    lines.append(_assumptions(["salary only", "30% ruling applied" if req.ruling else "no 30% ruling"]))
+    if req.ruling:
+        exempt = _number(result, "netherlands", "thirtyPercentExemption")
+        lines.append(f"- 30% ruling: {_money(exempt, symbol)} tax-free")
+    lines.append(f"- Box 1 income: {_money(_number(result, 'netherlands', 'box1Income'), symbol)}")
+    lines.append(f"- Box 1 tax: {_money(_number(result, 'netherlands', 'box1Tax'), symbol)}")
+    credits = _number(result, "taxCredits")
+    general = _number(result, "netherlands", "generalTaxCredit")
+    labour = _number(result, "netherlands", "labourTaxCredit")
+    detail = f"general {_money(general, symbol)}, labour {_money(labour, symbol)}"
+    if credits < general + labour - 0.005:
+        detail += ", limited to the tax"
+    lines.append(f"- Less tax credits: {_money(credits, symbol)} ({detail})")
+    _totals(lines, req, symbol, result, next_total)
+
+    extra = list(notes)
+    if req.ruling:
+        extra.append("I didn't check whether you meet the 30% ruling's conditions.")
+    if _HOLIDAY.search(req.text):
+        extra.append(
+            "Holiday allowance (vakantiegeld) is taxable; include it in the salary if it's paid "
+            "on top."
+        )
+    if req.age is not None:
+        extra.append(_age_note("Dutch", "the lower rates from State Pension (AOW) age"))
+    if _PENSION.search(req.text):
+        extra.append("Pension contributions aren't deducted.")
+    if _MARRIED.search(req.text):
+        extra.append("Dutch income tax is per person; this is for one salary.")
+    return _finish(lines, extra)
+
+
+def _singapore_reply(req: "_Request", meta: _Meta, notes: List[str]) -> str:
+    symbol = _SYMBOLS["singapore"]
+    band = _singapore_age(req.age)
+    result, next_total = _international(
+        req, "singapore", ageBand=band,
+        reliefs={"cpfContributions": req.cpf} if req.cpf else None,
+    )
+    lines = [f"Singapore income tax on {_income_phrase(req, symbol)}"]
+    lines += _calculator_line(meta, "singapore")
+    lines.append(_assumptions([
+        f"tax resident {_SINGAPORE_AGE_TEXT[band]}", "employment income only",
+        "earned income and CPF relief" if req.cpf else "earned income relief only",
+    ]))
+    allowed = _number(result, "singapore", "totalReliefsAllowed")
+    if _number(result, "singapore", "totalReliefsBeforeCap") > allowed + 0.005:
+        basis = f"after reliefs, capped at {_money(allowed, symbol)}"
+    elif req.cpf:
+        basis = f"after {_money(allowed, symbol)} of earned income and CPF relief"
+    else:
+        relief = _number(result, "singapore", "earnedIncomeRelief")
+        basis = f"after {_money(relief, symbol)} earned income relief"
+    chargeable = _number(result, "singapore", "chargeableIncome")
+    lines.append(f"- Chargeable income: {_money(chargeable, symbol)} ({basis})")
+    lines.append(f"- Income tax: {_money(_number(result, 'incomeTax'), symbol)}")
+    rebate = _number(result, "singapore", "taxRebate")
+    if rebate > 0:
+        lines.append(f"- Less tax rebate: {_money(rebate, symbol)}")
+    after_tax = req.income - _number(result, "totalTaxLiability")
+    untouched = abs(_number(result, "singapore", "netIncome") - after_tax) < 0.005
+    _totals(
+        lines, req, symbol, result, next_total, "After income tax",
+        " (CPF contributions not deducted)" if untouched else "",
+    )
+
+    extra = list(notes)
+    if not req.cpf:
+        extra.append('Employee CPF contributions also get relief; add them, e.g. "CPF of S$12,000".')
+    return _finish(lines, extra)
 
 
 # --------------------------------------------------------------------------
@@ -1994,7 +1096,7 @@ def _gate(low: str) -> Optional[str]:
     if _SELF_EMPLOYED.search(low):
         return _finish(
             [
-                "tax-break covers employment (salary) income only, so I can't estimate tax on "
+                "I can only estimate tax on a salary (employment income), so I can't do "
                 "self-employment, freelance or business income.",
                 f'For a salary, ask e.g. "{_EXAMPLES["uk"]}".',
             ],
@@ -2005,7 +1107,7 @@ def _gate(low: str) -> Optional[str]:
     if _REVERSE.search(low):
         return _finish(
             [
-                "tax-break works forward from a gross (before-tax) salary, so I can't start from a "
+                "I work forward from a gross (before-tax) salary, so I can't start from a "
                 "take-home figure.",
                 f'Give a gross salary instead, e.g. "{_EXAMPLES["uk"]}".',
             ],
@@ -2607,7 +1709,8 @@ def _promote(amounts: Sequence[_Amount]) -> Optional[_Amount]:
 
 
 # Places: each name maps to a country key, "us:XX" for a state, or "x:Name" for
-# somewhere tax-break doesn't cover.
+# somewhere tax-break doesn't cover. The US state names themselves come from
+# tax-break (see _place_table).
 _PLACE_KINDS: Dict[str, str] = {}
 
 
@@ -2640,8 +1743,6 @@ _register_places(
 _register_places("us", """
     usa, u.s., u.s, u.s.a., u.s.a, america, american, united states, united states of america
 """)
-for _state in US_STATES.values():
-    _register_places("us:" + _state.code, _state.name.lower())
 _register_places("us:DC", "washington dc, washington d.c., d.c., dc, district of columbia")
 for _code, _cities in (
     ("NY", "nyc, new york city, manhattan, brooklyn, bronx"),
@@ -2732,11 +1833,23 @@ for _name, _words in (
 ):
     _register_places("x:" + _name, _words)
 
-_PLACES = re.compile(
-    r"(?<![a-z])(?:"
-    + "|".join(re.escape(name) for name in sorted(_PLACE_KINDS, key=len, reverse=True))
-    + r")(?![a-z])"
-)
+
+@lru_cache(maxsize=4)
+def _place_table(
+    states: Tuple[Tuple[str, str], ...]
+) -> Tuple["re.Pattern[str]", Dict[str, str]]:
+    """The place-name pattern and kinds, with ``states`` (code, name) added."""
+
+    kinds = {" ".join(name.lower().split()): "us:" + code for code, name in states}
+    kinds.update(_PLACE_KINDS)
+    pattern = re.compile(
+        r"(?<![a-z])(?:"
+        + "|".join(re.escape(name) for name in sorted(kinds, key=len, reverse=True))
+        + r")(?![a-z])"
+    )
+    return pattern, kinds
+
+
 _US_LOWER = re.compile(
     r"(?<!\bgive\s)(?<!\btell\s)(?<!\bshow\s)(?<!\bhelp\s)(?<!\blet\s)(?<!\bto\s)(?<!\bwith\s)"
     r"\bus\s+(?:federal\s+|income\s+|state\s+)*"
@@ -2747,11 +1860,17 @@ _US_UPPER = re.compile(r"\bUS\b")
 _US_STATE_CODE = re.compile(r"\b(?i:in|from|state\s+of)\s+(?P<code>[A-Z]{2})\b")
 
 
-def _places(original: str) -> List[Tuple[int, str]]:
-    """Every place named in the question, as (position, kind), in order."""
+def _places(original: str, states: Sequence[Tuple[str, str]] = ()) -> List[Tuple[int, str]]:
+    """Every place named in the question, as (position, kind), in order.
 
+    ``states`` are tax-break's US states as (code, name); without them, states
+    are found only through the cities and abbreviations Jarvis knows.
+    """
+
+    pattern, kinds = _place_table(tuple(states))
+    codes = {code for code, _name in states}
     lowered = original.lower()
-    found = [(m.start(), _PLACE_KINDS[m.group()]) for m in _PLACES.finditer(lowered)]
+    found = [(m.start(), kinds[m.group()]) for m in pattern.finditer(lowered)]
     found += [(m.start(), "us") for m in _US_LOWER.finditer(lowered)]
     letters = [c for c in original if c.isalpha()]
     shouting = len(letters) >= 8 and sum(c.isupper() for c in letters) > 0.6 * len(letters)
@@ -2759,7 +1878,7 @@ def _places(original: str) -> List[Tuple[int, str]]:
         found += [(m.start(), "us") for m in _US_UPPER.finditer(original)]
         for m in _US_STATE_CODE.finditer(original):
             code = m.group("code")
-            if code in US_STATES and code != "LA":
+            if code in codes and code != "LA":
                 found.append((m.start("code"), "us:" + code))
     return sorted(found)
 
@@ -2875,12 +1994,13 @@ def _decide(
     unsupported = [kind[2:] for _, kind in places if kind.startswith("x:")]
     if unsupported:
         raise _ask([
-            f"tax-break covers {_COVERAGE}, so I can't estimate tax for {unsupported[0]}.",
+            f"With tax-break I cover {_COVERAGE}, so I can't estimate tax for {unsupported[0]}.",
         ])
     foreign = [a.currency[2:] for a in amounts if a.currency and a.currency.startswith("x:")]
     if foreign:
         raise _ask([
-            f"tax-break covers {_COVERAGE}, so I can't estimate tax on a salary in {foreign[0]}.",
+            f"With tax-break I cover {_COVERAGE}, so I can't estimate tax on a salary in "
+            f"{foreign[0]}.",
         ])
     if currency in _CURRENCY_COUNTRY:
         return _CURRENCY_COUNTRY[currency], []
@@ -2913,13 +2033,13 @@ def _decide(
         ])
     shown = _describe(salary)
     raise _ask([
-        f"Which country is the salary of {shown} for? tax-break covers {_COVERAGE}.",
+        f"Which country is the salary of {shown} for? With tax-break I cover {_COVERAGE}.",
         f'Ask e.g. "UK tax on {shown}" or "tax on {shown} in India".',
     ])
 
 
 def _check_currencies(country: str, amounts: Sequence[_Amount], notes: List[str]) -> None:
-    """Refuse amounts in another country's currency; tax-break doesn't convert."""
+    """Refuse amounts in another country's currency; I don't convert."""
 
     local = _LOCAL_CURRENCY[country]
     for amount in amounts:
@@ -2952,7 +2072,7 @@ def _salary_per_year(
         if hours is None:
             example = f"{_money(value, symbol)} an hour for 40 hours a week"
             raise _ask([
-                f"tax-break works from a yearly salary, so I need more than {shown}. Give the "
+                f"I work from a yearly salary, so I need more than {shown}. Give the "
                 f'hours you work a week, e.g. "{example}", or a yearly, monthly or weekly salary.',
             ])
         annual = value * hours * 52
@@ -2960,7 +2080,7 @@ def _salary_per_year(
         return annual, annual, "year"
     if period == "day":
         raise _ask([
-            "tax-break works from a yearly salary; give a yearly, monthly or weekly figure rather "
+            "I work from a yearly salary; give a yearly, monthly or weekly figure rather "
             f"than {shown}.",
         ])
     if period in ("fortnight", "semimonth"):
@@ -2985,75 +2105,63 @@ def _no_salary(amounts: Sequence[_Amount], country: Optional[str]) -> str:
     )
 
 
-def _year_choice(
-    country: str, kind: str, first: int, second: Optional[int]
-) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Read one year mention as (key, note, None), or (None, None, label) if it isn't held."""
+def _india_year(kind: str, first: int, second: Optional[int]) -> Tuple[str, Optional[str]]:
+    """Read one year mention as an Indian financial year key and a note on how it was read."""
 
-    span = f"{first}-{second % 100:02d}" if second is not None else None
-    if country == "india":
-        note = None
-        if second is not None:
-            start = first - 1 if kind in ("ay", "ya") else first
-            if second != first + 1:
-                return None, None, f"FY {span}"
-        elif kind == "fy":
-            start = first - 1
-            note = f"I took FY {first} as FY {start}-{first % 100:02d} (April {start} to March {first})."
-        elif kind in ("ay", "ya"):
-            start = first - 1
-            note = (
-                f"I took AY {first} as AY {first}-{(first + 1) % 100:02d}, for income in "
-                f"FY {start}-{first % 100:02d}."
-            )
-        else:
-            start = first
-            note = (
-                f"I took {first} as FY {first}-{(first + 1) % 100:02d} "
-                f"(April {first} to March {first + 1})."
-            )
-        label = f"{start}-{(start + 1) % 100:02d}"
-        key = "FY" + label
-        return (key, note, None) if key in INDIA_YEARS else (None, None, "FY " + label)
-    if country == "uk":
-        if second is not None:
-            return ("2025/26", None, None) if (first, second) == (2025, 2026) else (
-                None, None, f"{first}/{second % 100:02d}"
-            )
-        if first == 2025:
-            return "2025/26", "I took 2025 as the 2025/26 tax year (6 April 2025 to 5 April 2026).", None
-        return None, None, str(first)
-    if country == "singapore":
-        if kind == "ya":
-            return ("YA 2025", None, None) if first == 2025 and second is None else (
-                None, None, f"YA {span or first}"
-            )
-        if second is not None:
-            return None, None, span
-        if first == 2024:
-            return "YA 2025", "I took 2024 income as YA 2025.", None
-        if first == 2025:
-            return "YA 2025", "tax-break has YA 2025 (income earned in 2024) only, so I used that.", None
-        return None, None, str(first)
-    if second is None and first == 2025:
-        return "2025", None, None
-    return None, None, span or str(first)
+    if second is not None:
+        if second != first + 1:
+            return f"FY{first}-{second}", None
+        start = first - 1 if kind in ("ay", "ya") else first
+        return f"FY{start}-{(start + 1) % 100:02d}", None
+    if kind == "fy":
+        start = first - 1
+        note = f"I took FY {first} as FY {start}-{first % 100:02d} (April {start} to March {first})."
+    elif kind in ("ay", "ya"):
+        start = first - 1
+        note = (
+            f"I took AY {first} as AY {first}-{(first + 1) % 100:02d}, for income in "
+            f"FY {start}-{first % 100:02d}."
+        )
+    else:
+        start = first
+        note = (
+            f"I took {first} as FY {first}-{(first + 1) % 100:02d} "
+            f"(April {first} to March {first + 1})."
+        )
+    return f"FY{start}-{(start + 1) % 100:02d}", note
 
 
-def _resolve_year(country: str, facts: _Facts) -> Tuple[Optional[str], bool, List[str]]:
+def _asked_year_note(country: str, kind: str, first: int, second: Optional[int]) -> str:
+    """Say that tax-break's calculators outside India don't take a year."""
+
+    if second is None:
+        span = str(first)
+    else:
+        span = f"{first}{'/' if country == 'uk' else '-'}{second % 100:02d}"
+    asked = {"fy": "FY ", "ay": "AY ", "ya": "YA "}.get(kind, "") + span
+    return (
+        f"You asked about {asked}, but tax-break's calculator for {_COUNTRY_NAMES[country]} "
+        f"doesn't take a year, so this is for the year it's built for, which may not be {asked}."
+    )
+
+
+def _resolve_year(
+    country: str, facts: _Facts, meta: _Meta
+) -> Tuple[Optional[str], bool, List[str]]:
     """Return the India year key (None elsewhere), whether it was defaulted, and notes."""
 
     if not facts.years:
-        return (LATEST_INDIA_FY if country == "india" else None), True, []
+        return (meta.latest_year if country == "india" else None), True, []
     years = sorted(facts.years)
-    key, note, declined = _year_choice(country, *years[0][1:])
-    if declined:
-        raise _Reply(_year_decline(country, declined))
+    if country != "india":
+        return None, False, [_asked_year_note(country, *years[0][1:])]
+    key, note = _india_year(*years[0][1:])
+    if key not in dict(meta.years):
+        raise _Reply(_year_decline(meta, _fy(key)))
     notes = [note] if note else []
-    if any(_year_choice(country, *year[1:])[0] != key for year in years[1:]):
-        label = INDIA_YEARS[key].label if country == "india" else key
-        notes.append(f"I used {label}, the first year given.")
-    return (key if country == "india" else None), False, notes
+    if any(_india_year(*year[1:])[0] != key for year in years[1:]):
+        notes.append(f"I used {meta.year_label(key)}, the first year given.")
+    return key, False, notes
 
 
 _BOTH_REGIMES = re.compile(
@@ -3162,12 +2270,12 @@ def _apply_roles(
         elif role == "home_loan" and country == "india":
             notes.append(
                 f"I left out the {shown} for \"{keyword}\"; say whether it's interest (24(b)), e.g. "
-                '"home loan interest 2 lakh", or principal (80C).'
+                '"home loan interest 1.8 lakh", or principal (80C).'
             )
         else:
             hint = ""
             if country == "india" and keyword in ("deduction", "deductions"):
-                hint = '; name the section, e.g. "80C 1.5 lakh"'
+                hint = '; name the section, e.g. "80C 1 lakh"'
             notes.append(f'I left out the {shown} for "{keyword}"{hint}.')
 
 
@@ -3218,13 +2326,15 @@ def _estimate(text: str) -> Optional[str]:
         promoted = _promote(amounts)
         salaries = [promoted] if promoted else []
     salary = salaries[0] if salaries else None
-    places = _places(original)
+    # Only a salary needs tax-break; its US state names help find the place.
+    meta = _meta() if salary is not None else None
+    places = _places(original, meta.states if meta else ())
 
     try:
         country, notes = _decide(places, amounts, salary, low)
         if salary is None:
             return _no_salary(amounts, country)
-        if country is None:
+        if country is None or meta is None:
             return None
         symbol = _SYMBOLS[country]
         _check_currencies(country, amounts, notes)
@@ -3234,18 +2344,26 @@ def _estimate(text: str) -> Optional[str]:
         if country == "uk" and "scotland" in kinds:
             if "ewni" in kinds:
                 notes.append(
-                    "Scottish income tax isn't in tax-break, so I used the rates for England, "
-                    "Wales and Northern Ireland."
+                    "I can't do Scottish income tax with tax-break, so I used the rates for "
+                    "England, Wales and Northern Ireland."
                 )
             else:
                 scotland = True
         state: Optional[str] = None
         if country == "us":
-            codes = list(dict.fromkeys(kind[3:] for kind in kinds if kind.startswith("us:")))
+            named = list(dict.fromkeys(kind[3:] for kind in kinds if kind.startswith("us:")))
+            codes = [code for code in named if code in dict(meta.states)]
             if codes:
                 state = codes[0]
                 if len(codes) > 1:
-                    notes.append(f"I used {US_STATES[state].name} for state tax, the first state given.")
+                    notes.append(
+                        f"I used {meta.state_name(state)} for state tax, the first state given."
+                    )
+            elif named:
+                notes.append(
+                    "tax-break has no state tax figures for the place you named, so I left state "
+                    "tax out."
+                )
 
         annual, stated, period = _salary_per_year(salary, facts, symbol, notes)
         if len(salaries) > 1:
@@ -3253,7 +2371,7 @@ def _estimate(text: str) -> Optional[str]:
             notes.append(
                 f"I used {_describe(salary, symbol)}, the first salary given; ask again for {others}."
             )
-        fy, defaulted, year_notes = _resolve_year(country, facts)
+        fy, defaulted, year_notes = _resolve_year(country, facts, meta)
         notes.extend(year_notes)
 
         req = _Request(
@@ -3276,22 +2394,27 @@ def _estimate(text: str) -> Optional[str]:
             notes.append("The 30% ruling is Dutch, so I left it out.")
 
         if country == "india":
-            return _india_reply(req, fy or LATEST_INDIA_FY, defaulted, notes)
+            return _india_reply(req, meta, fy or meta.latest_year, defaulted, notes)
         if country == "uk":
-            return _scotland_reply(req) if scotland else _uk_reply(req, defaulted, notes)
+            return _scotland_reply(req) if scotland else _uk_reply(req, meta, notes)
         if country == "us":
-            return _us_reply(req, state, defaulted, notes)
+            return _us_reply(req, meta, state, notes)
         if country == "ireland":
-            return _ireland_reply(req, defaulted, notes)
+            return _ireland_reply(req, meta, notes)
         if country == "netherlands":
-            return _netherlands_reply(req, defaulted, notes)
-        return _singapore_reply(req, defaulted, notes)
+            return _netherlands_reply(req, meta, notes)
+        return _singapore_reply(req, meta, notes)
     except _Reply as reply:
         return reply.reply
 
 
 def estimate(text: str) -> Optional[str]:
-    """Answer a salary tax question with tax-break's tables, or None if it isn't one."""
+    """Answer a salary tax question with tax-break's engine, or None if it isn't one.
+
+    Raises :class:`jarvis.projects.ProjectUnavailable` when the project or
+    Node.js is missing, and :class:`jarvis.projects.ProjectError` when the
+    engine fails or answers in an unexpected shape.
+    """
 
     if not text or len(text) > _MAX_TEXT:
         return None
@@ -3304,9 +2427,9 @@ def estimate(text: str) -> Optional[str]:
 def usage() -> str:
     examples = "; ".join(f'"{example}"' for example in _EXAMPLES.values())
     return _finish([
-        "I can estimate income tax and take-home pay on a salary, using tax-break's tables.",
+        "I can estimate income tax and take-home pay on a salary with tax-break's tax engine.",
         f"It covers {_COVERAGE}.",
         f"Try: {examples}.",
-        'Add details such as "a month", a bonus, "old regime", "FY 2024-25", "80C 1.5 lakh", '
-        '"student loan plan 2", "married with 2 kids", a US state or "30% ruling".',
+        'Add details such as "a month", a bonus, "old regime", a financial year for India, '
+        '"80C 1 lakh", "student loan plan 2", "married with 2 kids", a US state or "30% ruling".',
     ])

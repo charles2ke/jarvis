@@ -1,661 +1,537 @@
-"""Tests for the live weather and hazard feeds ported from 5-Mins.
-
-Every request goes to a fake opener: these tests never use the network.
-"""
-
-import http.client
 import json
-import re
+import os
+import tempfile
 import unittest
-import urllib.error
-import urllib.parse
 from datetime import datetime, timezone
 from unittest import mock
 
-from jarvis import alerts, websearch
+from project_support import ProjectTestCase, fake_project, missing_projects
 
-NOW = datetime(2026, 11, 21, 1, 13, 30, 123456, tzinfo=timezone.utc)
-RETRIEVED = "retrieved 2026-11-21 01:13 UTC"
-SAFETY_LINE = (
-    "Jarvis is not an official warning system — follow your local authorities and official alerts."
-)
-CREDIT_LINE = "From 5-Mins: https://charles2ke.github.io/5-Mins/"
+from jarvis import alerts, projects
+from jarvis.alerts import CREDIT, SAFETY_NOTE, AlertsError
 
+NOW = datetime(2026, 11, 21, 9, 0, tzinfo=timezone.utc)
+SENT_NOW = "2026-11-21T09:00:00.000+00:00"
+ASKED_AT = "Asked through 5-Mins at 2026-11-21 09:00 UTC"
 
-class FakeHeaders:
-    def __init__(self, content_type):
-        self._content_type = content_type
-
-    def get_content_charset(self):
-        return "utf-8"
-
-    def get_content_type(self):
-        return self._content_type
-
-    def get(self, _name, default=None):
-        return default
-
-
-class FakeResponse:
-    def __init__(self, payload, content_type="application/json"):
-        self._payload = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-        self.headers = FakeHeaders(content_type)
-
-    def read(self, amount=None):
-        return self._payload if amount is None else self._payload[:amount]
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+# Made-up answers in the shapes bridges/five-mins.mjs returns.
+SAMPLETON = {
+    "id": "1",
+    "name": "Sampleton",
+    "country": "United States",
+    "region": "Oklahoma, United States",
+    "label": "Sampleton, Oklahoma, United States",
+    "lat": 35.5,
+    "lon": -97.5,
+}
+WHERE = "Sampleton, Oklahoma, United States (35.50°N, 97.50°W)"
+PARISES = [
+    {"id": "2", "name": "Paris", "country": "France", "region": "Île-de-France, France",
+     "label": "Paris, Île-de-France, France", "lat": 48.85, "lon": 2.35},
+    {"id": "3", "name": "Paris", "country": "United States", "region": "Texas, United States",
+     "label": "Paris, Texas, United States", "lat": 33.66, "lon": -95.56},
+    {"id": "4", "name": "Paris", "country": "United States", "region": "Tennessee, United States",
+     "label": "Paris, Tennessee, United States", "lat": 36.3, "lon": -88.33},
+]
 
 
-class FakeWeb:
-    """An opener that answers by URL prefix and records every request."""
-
-    def __init__(self, routes):
-        self.routes = routes
-        self.requests = []
-
-    def __call__(self, request, timeout=None):
-        self.requests.append(request)
-        for prefix, answer in self.routes:
-            if request.full_url.startswith(prefix):
-                if isinstance(answer, Exception):
-                    raise answer
-                return answer() if callable(answer) else answer
-        raise urllib.error.URLError("no route")
-
-    def params(self, index=0):
-        query = urllib.parse.urlsplit(self.requests[index].full_url).query
-        return dict(urllib.parse.parse_qsl(query))
-
-    def sent(self, prefix):
-        """The one request to ``prefix``; the hazard feeds are asked in parallel."""
-
-        found = [request for request in self.requests if request.full_url.startswith(prefix)]
-        if len(found) != 1:
-            raise AssertionError(f"expected one request to {prefix}, got {len(found)}")
-        return found[0]
-
-    def query(self, prefix):
-        return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.sent(prefix).full_url).query))
+def _reading(**changes):
+    reading = {
+        "label": "Grey and damp",
+        "temperature": 12.4,
+        "feelsLike": 10.6,
+        "humidity": 81,
+        "precipitation": 0.2,
+        "windSpeed": 14.2,
+        "high": 14.1,
+        "low": 7.9,
+        "observedAt": "2026-11-21T03:00",
+        "units": {"temperature": "°C", "wind": "km/h", "precipitation": "mm"},
+    }
+    reading.update(changes)
+    return reading
 
 
-def place(name, lat, lon, code, country, admin1, zone, **extra):
+def _weather_answer(place=SAMPLETON, **changes):
+    answer = {
+        "place": place,
+        "lookupError": None,
+        "weather": _reading(),
+        "error": None,
+        "shown": {"temperature": "12°C", "feelsLike": "11°C", "high": "14°C", "low": "8°C"},
+        "rough": False,
+        "asked": ["places.example", "forecast.example"],
+    }
+    answer.update(changes)
+    return answer
+
+
+def _alert(event, severity, headline="", area="", effective="2026-11-20T18:00:00.000Z", expires=None):
     return {
-        "name": name, "latitude": lat, "longitude": lon, "country_code": code,
-        "country": country, "admin1": admin1, "timezone": zone, **extra,
+        "id": event, "source": "Sample Feed", "event": event, "severity": severity,
+        "headline": headline, "area": area, "effective": effective, "expires": expires,
+        "url": "https://alerts.example/",
     }
 
 
-PARIS = place("Paris", 48.85341, 2.3488, "FR", "France", "Île-de-France", "Europe/Paris")
-PARIS_TX = place(
-    "Paris", 33.66094, -95.55551, "US", "United States", "Texas", "America/Chicago", admin2="Lamar"
-)
-MIAMI = place("Miami", 25.77427, -80.19366, "US", "United States", "Florida", "America/New_York")
-TOKYO = place("Tokyo", 35.6895, 139.69171, "JP", "Japan", "Tokyo", "Asia/Tokyo")
-TORONTO = place("Toronto", 43.70011, -79.4163, "CA", "Canada", "Ontario", "America/Toronto")
-
-
-def found(*results):
-    return FakeResponse({"results": list(results)})
-
-
-FORECAST = {
-    "timezone": "Europe/Paris",
-    "timezone_abbreviation": "CET",
-    "current_units": {"temperature_2m": "°C", "wind_speed_10m": "km/h", "precipitation": "mm"},
-    "current": {
-        "time": "2026-11-21T02:00", "temperature_2m": 12.4, "apparent_temperature": 9.6,
-        "relative_humidity_2m": 81, "precipitation": 0.4, "weather_code": 61,
-        "wind_speed_10m": 15.2, "is_day": 0,
-    },
-    "daily": {
-        "time": ["2026-11-21"], "temperature_2m_max": [14.5], "temperature_2m_min": [5.5],
-        "precipitation_probability_max": [80],
-    },
-}
-
-
-def forecast(**current):
-    payload = json.loads(json.dumps(FORECAST))
-    payload["current"].update(current)
-    return FakeResponse(payload)
-
-
-def ms(text):
-    """Milliseconds since 1970 for a UTC time, as USGS sends them."""
-
-    return int(datetime.fromisoformat(text).replace(tzinfo=timezone.utc).timestamp() * 1000)
-
-
-def point(lat, lon):
-    return {"type": "Point", "coordinates": [lon, lat]}
-
-
-def feed(*features):
-    return FakeResponse({"type": "FeatureCollection", "features": list(features)})
-
-
-def quake(ident, mag, when, lat=25.77427, lon=-80.19366, title=None):
+def _hazards_answer(found=(), errors=(), worldwide=0, feeds=5, place=SAMPLETON):
     return {
-        "id": ident,
-        "type": "Feature",
-        "properties": {
-            "mag": mag, "place": "Miami, Florida", "time": ms(when),
-            "title": title or f"M {mag} - Miami, Florida",
-        },
-        "geometry": {"type": "Point", "coordinates": [lon, lat, 10.0]},
+        "place": place, "lookupError": None, "days": 7, "alerts": list(found),
+        "worldwide": worldwide, "errors": list(errors), "feeds": feeds,
+        "asked": ["places.example", "feed-a.example", "feed-b.example"],
     }
 
 
-def disaster(kind, ident, level, name, lat, lon, country=""):
+def _space_answer(found=(), errors=(), feeds=4):
     return {
-        "type": "Feature",
-        "geometry": point(lat, lon),
-        "properties": {
-            "eventtype": kind, "eventid": ident, "alertlevel": level, "name": name,
-            "country": country, "fromdate": "2026-11-18T00:00:00", "todate": "2026-11-21T00:00:00",
-        },
+        "days": 7, "alerts": list(found), "errors": list(errors), "feeds": feeds,
+        "asked": ["feed-a.example", "feed-b.example"],
     }
 
 
-FLOOD_WATCH = {
-    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.1",
-    "type": "Feature",
-    "properties": {
-        "id": "urn:oid:2.49.0.1.840.0.1",
-        "areaDesc": "Coastal Miami-Dade",
-        "effective": "2026-11-20T17:00:00-05:00",
-        "expires": "2026-11-21T19:00:00-05:00",
-        "severity": "Moderate",
-        "event": "Flood Watch",
-        "headline": "Flood Watch issued November 20 by NWS Miami FL",
-    },
-}
-WILDFIRE = {
-    "id": "EONET_9001",
-    "title": "Wildfire North of Miami",
-    "description": None,
-    "closed": None,
-    "categories": [{"id": "wildfires", "title": "Wildfires"}],
-    "sources": [{"id": "InciWeb", "url": "https://inciweb.example/9001"}],
-    # Only the latest position is near Miami, and it is neither first nor last.
-    "geometry": [
-        {"date": "2026-11-15T00:00:00Z", "type": "Point", "coordinates": [-80.19366, 40.0]},
-        {"date": "2026-11-20T12:00:00Z", "type": "Point", "coordinates": [-80.19366, 28.77427]},
-        {"date": "2026-11-17T00:00:00Z", "type": "Point", "coordinates": [-80.19366, 41.0]},
-    ],
-}
-FAR_VOLCANO = {
-    "id": "EONET_9002",
-    "title": "Volcano in Japan",
-    "categories": [{"title": "Volcanoes"}],
-    "geometry": [{"date": "2026-11-20T00:00:00Z", "coordinates": [139.0, 35.0]}],
-}
-EMPTY_FEED = feed()
-NO_EVENTS = FakeResponse({"events": []})
+class WeatherTests(unittest.TestCase):
+    def ask(self, place, answer):
+        with fake_project("5-Mins", {"weather": answer}) as calls:
+            return alerts.weather(place, now=NOW).splitlines(), calls
 
-
-def hazard_web(geocoding=found(MIAMI), nws=EMPTY_FEED, usgs=EMPTY_FEED, gdacs=EMPTY_FEED,
-               eonet=NO_EVENTS):
-    return FakeWeb(
-        [
-            (alerts.GEOCODING_ENDPOINT, geocoding),
-            (alerts.NWS_ENDPOINT, nws),
-            (alerts.USGS_ENDPOINT, usgs),
-            (alerts.GDACS_ENDPOINT, gdacs),
-            (alerts.EONET_ENDPOINT, eonet),
-        ]
-    )
-
-
-def space(code, issued, body):
-    return {
-        "product_id": code,
-        "issue_datetime": issued,
-        "message": f"Space Weather Message Code: {code}\r\nSerial Number: 1\r\n\r\n{body}\r\n",
-    }
-
-
-class OfflineTestCase(unittest.TestCase):
-    def setUp(self):
-        # A request that bypasses the fake opener fails the test instead of going online.
-        patcher = mock.patch("urllib.request.urlopen", side_effect=AssertionError("network used"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def assertSigned(self, reply):
-        self.assertEqual(reply.splitlines()[-2:], [SAFETY_LINE, CREDIT_LINE])
-
-
-class GeocodeTests(OfflineTestCase):
-    def test_sends_only_the_encoded_name_and_takes_the_first_usable_result(self):
-        unusable = [{"name": "Paris"}, {"name": "", "latitude": 1, "longitude": 1},
-                    {"name": "Paris", "latitude": 91, "longitude": 0}, "junk"]
-        web = FakeWeb([(alerts.GEOCODING_ENDPOINT, found(*unusable, PARIS))])
-        paris = alerts.geocode("Paris&count=1#frag", opener=web)
+    def test_the_current_weather_with_both_scales(self):
+        lines, calls = self.ask("Sampleton", _weather_answer())
+        self.assertEqual(calls, [("weather", {"query": "Sampleton"})])
         self.assertEqual(
-            (paris.label, paris.coordinates, paris.country_code, paris.timezone),
-            ("Paris, Île-de-France, France", "48.85°N, 2.35°E", "FR", "Europe/Paris"),
-        )
-        request = web.requests[0]
-        self.assertEqual(urllib.parse.urlsplit(request.full_url).netloc, "geocoding-api.open-meteo.com")
-        self.assertIn("?name=Paris%26count%3D1%23frag&", request.full_url)
-        self.assertEqual(web.params()["count"], "10")
-        self.assertEqual(request.get_header("User-agent"), websearch.USER_AGENT)
-
-    def test_rejects_unusable_input_without_a_request(self):
-        web = FakeWeb([])
-        for text, message in (
-            ("", "Please name a place"),
-            ("  ?! ", "Please name a place"),
-            ("x, France", "Please name a place"),
-            ("near me", "does not know where you are"),
-            ("Here?", "does not know where you are"),
-            ("a" * 101, "too long"),
-            ("95, 10", "out of range"),
-        ):
-            with self.subTest(text=text), self.assertRaisesRegex(alerts.AlertsError, message):
-                alerts.geocode(text, opener=web)
-        self.assertEqual(web.requests, [])
-
-    def test_unknown_places_are_reported(self):
-        for payload in ({"generationtime_ms": 0.4}, {"results": "none"}):
-            with self.subTest(payload=payload):
-                web = FakeWeb([(alerts.GEOCODING_ENDPOINT, FakeResponse(payload))])
-                with self.assertRaisesRegex(
-                    alerts.AlertsError, r"^I could not find a place called 'Atlantis'\. "
-                ):
-                    alerts.geocode("Atlantis", opener=web)
-                self.assertEqual(len(web.requests), 1)
-
-    def test_a_region_or_country_after_a_comma_must_match(self):
-        web = FakeWeb([(alerts.GEOCODING_ENDPOINT, found(PARIS, PARIS_TX))])
-        for text, region in (
-            ("Paris", "Île-de-France"),
-            ("Paris, Texas", "Texas"),
-            ("Paris, TX", "Texas"),
-            ("Paris, USA", "Texas"),
-            ("Paris, Lamar, Texas", "Texas"),
-            ("Paris, france", "Île-de-France"),
-        ):
-            with self.subTest(text=text):
-                self.assertEqual(alerts.geocode(text, opener=web).admin1, region)
-        with self.assertRaisesRegex(alerts.AlertsError, "could not find a place called 'Paris, Narnia'"):
-            alerts.geocode("Paris, Narnia", opener=web)
-        self.assertEqual({web.params(index)["name"] for index in range(len(web.requests))}, {"Paris"})
-
-    def test_coordinates_need_no_lookup(self):
-        web = FakeWeb([])
-        north = alerts.geocode("40.7128, -74.006", opener=web)
-        self.assertEqual((north.latitude, north.longitude, north.label), (40.7128, -74.006, "40.71°N, 74.01°W"))
-        south = alerts.geocode("33.9°S 151.2°E", opener=web)
-        self.assertEqual((south.latitude, south.longitude), (-33.9, 151.2))
-        self.assertEqual(web.requests, [])
-
-    def test_retries_without_a_leading_the(self):
-        philippines = place("Philippines", 13.0, 122.0, "PH", "Philippines", "", "Asia/Manila")
-        web = FakeWeb(
+            lines,
             [
-                (alerts.GEOCODING_ENDPOINT + "?name=the+", found()),
-                (alerts.GEOCODING_ENDPOINT, found(philippines)),
-            ]
-        )
-        self.assertEqual(alerts.geocode("the Philippines", opener=web).label, "Philippines")
-        self.assertEqual([web.params(0)["name"], web.params(1)["name"]], ["the Philippines", "Philippines"])
-
-
-class WeatherTests(OfflineTestCase):
-    def test_reports_current_conditions_and_todays_range(self):
-        web = FakeWeb([(alerts.GEOCODING_ENDPOINT, found(PARIS)), (alerts.FORECAST_ENDPOINT, forecast())])
-        reply = alerts.weather("Paris", opener=web, now=NOW)
-        self.assertEqual(
-            reply,
-            "\n".join(
-                [
-                    "Weather in Paris, Île-de-France, France (48.85°N, 2.35°E):",
-                    "- Now: Light rain, 12°C (54°F), feels like 10°C (49°F).",
-                    "- Today: high 15°C (58°F), low 6°C (42°F), 80% chance of precipitation.",
-                    "- Wind 15 km/h (9 mph), humidity 81%, recent precipitation 0.4 mm.",
-                    "- As of 02:00 local time on 21 Nov 2026 (CET).",
-                    "",
-                    f"Sources: Open-Meteo geocoding and forecast (weather-model data), {RETRIEVED}.",
-                    SAFETY_LINE,
-                    CREDIT_LINE,
-                ]
-            ),
-        )
-        params = web.query(alerts.FORECAST_ENDPOINT)
-        self.assertEqual(
-            (params["latitude"], params["longitude"], params["timezone"]), ("48.85341", "2.3488", "auto")
-        )
-        self.assertIn("weather_code", params["current"])
-        self.assertIn("precipitation_probability_max", params["daily"])
-        self.assertEqual(web.sent(alerts.FORECAST_ENDPOINT).get_header("Accept"), "application/json")
-
-    def test_names_clear_nights_and_rough_weather(self):
-        for current, line in (
-            ({"weather_code": 0, "is_day": 0}, "- Now: Clear night, 12°C"),
-            ({"weather_code": 0, "is_day": 1}, "- Now: Clear sky, 12°C"),
-            ({"weather_code": 95, "wind_speed_10m": 45}, "- Rough weather now: thunderstorms and strong wind."),
-            ({"weather_code": 66}, "- Rough weather now: freezing rain or drizzle."),
-        ):
-            with self.subTest(current=current):
-                web = FakeWeb([(alerts.FORECAST_ENDPOINT, forecast(**current))])
-                reply = alerts.weather("48.85, 2.35", opener=web, now=NOW)
-                self.assertTrue(reply.startswith("Weather at 48.85°N, 2.35°E:\n"))
-                self.assertIn(line, reply)
-                self.assertIn(f"\nSources: Open-Meteo forecast (weather-model data), {RETRIEVED}.\n", reply)
-                self.assertSigned(reply)
-
-    def test_copes_with_missing_and_odd_fields(self):
-        sparse = {"current": {"temperature_2m": 20, "weather_code": 1234, "time": "soon"},
-                  "daily": {"temperature_2m_max": []}}
-        web = FakeWeb([(alerts.FORECAST_ENDPOINT, FakeResponse(sparse))])
-        reply = alerts.weather("48.85, 2.35", opener=web, now=NOW)
-        self.assertEqual(reply.splitlines()[:3], ["Weather at 48.85°N, 2.35°E:", "- Now: 20°C (68°F).", ""])
-        # Impossible readings are left out rather than shown.
-        absurd = {"current": {"temperature_2m": 1e308, "relative_humidity_2m": 140, "wind_speed_10m": -5,
-                              "weather_code": 3}}
-        web = FakeWeb([(alerts.FORECAST_ENDPOINT, FakeResponse(absurd))])
-        reply = alerts.weather("48.85, 2.35", opener=web, now=NOW)
-        self.assertEqual(reply.splitlines()[:3], ["Weather at 48.85°N, 2.35°E:", "- Now: Overcast.", ""])
-        for payload in ({}, {"current": "none"}, []):
-            with self.subTest(payload=payload):
-                web = FakeWeb([(alerts.FORECAST_ENDPOINT, FakeResponse(payload))])
-                with self.assertRaisesRegex(
-                    alerts.AlertsError, r"^Open-Meteo sent no current weather for 48\.85°N, 2\.35°E\.$"
-                ):
-                    alerts.weather("48.85, 2.35", opener=web, now=NOW)
-
-    def test_network_failures_become_readable_errors(self):
-        for answer, message in (
-            (
-                urllib.error.HTTPError(alerts.FORECAST_ENDPOINT, 503, "busy", {}, None),
-                r"^Open-Meteo refused the request \(HTTP 503\)\.$",
-            ),
-            (urllib.error.URLError("timed out"), r"^Open-Meteo could not be reached \(timed out\)\.$"),
-            # The server's bad status line is quoted without its escape codes.
-            (http.client.BadStatusLine("\x1b[2Jbad"), r"^Open-Meteo could not be reached \(\[2Jbad\)\.$"),
-            (FakeResponse(b"<html>"), r"^Open-Meteo sent a reply I could not read\.$"),
-        ):
-            with self.subTest(message=message):
-                web = FakeWeb([(alerts.FORECAST_ENDPOINT, answer)])
-                with self.assertRaisesRegex(alerts.AlertsError, message):
-                    alerts.weather("48.85, 2.35", opener=web, now=NOW)
-
-    def test_oversized_replies_are_refused(self):
-        web = FakeWeb([(alerts.FORECAST_ENDPOINT, forecast())])
-        with mock.patch.object(websearch, "MAX_RESPONSE_BYTES", 10):
-            with self.assertRaisesRegex(alerts.AlertsError, r"^Open-Meteo sent more data than I can read\.$"):
-                alerts.weather("48.85, 2.35", opener=web, now=NOW)
-
-
-class HazardTests(OfflineTestCase):
-    def test_asks_every_feed_for_a_us_place_and_ranks_the_alerts(self):
-        web = hazard_web(
-            nws=feed(FLOOD_WATCH),
-            usgs=feed(
-                quake("us6000small", 4.6, "2026-11-20T03:00:00"),
-                quake("us6000big", 6.2, "2026-11-19T06:30:00", lat=26.77427,
-                      title="M 6.2 - 111 km N of Miami, Florida"),
-            ),
-            gdacs=feed(
-                disaster("TC", 1001, "Orange", "Tropical Cyclone ALPHA-26", 27.77427, -80.19366, "Bahamas"),
-                disaster("EQ", 1002, "Red", "Earthquake in Japan", 35.7, 139.7, "Japan"),
-            ),
-            eonet=FakeResponse({"events": [WILDFIRE, FAR_VOLCANO]}),
-        )
-        reply = alerts.hazards("Miami", opener=web, now=NOW)
-        self.assertEqual(
-            reply,
-            "\n".join(
-                [
-                    "Hazard alerts near Miami, Florida, United States (25.77°N, 80.19°W) from the "
-                    "last 7 days, most severe first:",
-                    "- Magnitude 6.2 earthquake (Severe), 111 km away, 19 Nov 06:30 UTC",
-                    "  M 6.2 - 111 km N of Miami, Florida — USGS",
-                    "- Tropical cyclone (Severe), 222 km away, 18 Nov 00:00 to 21 Nov 00:00 UTC",
-                    "  Tropical Cyclone ALPHA-26 (Bahamas) — GDACS",
-                    "- Flood Watch (Moderate), covers this location, 20 Nov 22:00 to 22 Nov 00:00 UTC",
-                    "  Flood Watch issued November 20 by NWS Miami FL (Coastal Miami-Dade) — NWS",
-                    "- Magnitude 4.6 earthquake (Minor), less than 1 km away, 20 Nov 03:00 UTC",
-                    "  M 4.6 - Miami, Florida — USGS",
-                    "- Wildfires (severity unknown), 334 km away, 20 Nov 12:00 UTC",
-                    "  Wildfire North of Miami — NASA EONET",
-                    "",
-                    "Searched: NWS alerts for this point; USGS earthquakes of magnitude 4.5+ within "
-                    "300 km; GDACS disaster alerts within 1000 km; NASA EONET natural events within "
-                    "1000 km.",
-                    f"Sources: Open-Meteo geocoding, NWS, USGS, GDACS and NASA EONET, {RETRIEVED}.",
-                    SAFETY_LINE,
-                    CREDIT_LINE,
-                ]
-            ),
-        )
-        self.assertEqual(
-            web.query(alerts.NWS_ENDPOINT),
-            {
-                "point": "25.7743,-80.1937", "start": "2026-11-14T01:13:30Z",
-                "end": "2026-11-21T01:13:30Z", "status": "actual", "message_type": "alert",
-                "limit": "500",
-            },
-        )
-        self.assertEqual(
-            web.query(alerts.USGS_ENDPOINT),
-            {
-                "format": "geojson", "latitude": "25.77427", "longitude": "-80.19366",
-                "maxradiuskm": "300", "minmagnitude": "4.5",
-                "starttime": "2026-11-14T01:13:30.123Z", "orderby": "time",
-            },
-        )
-        self.assertEqual(web.query(alerts.GDACS_ENDPOINT), {"fromdate": "2026-11-14", "todate": "2026-11-21"})
-        self.assertEqual(web.query(alerts.EONET_ENDPOINT), {"status": "open", "days": "7"})
-        nws = web.sent(alerts.NWS_ENDPOINT)
-        self.assertEqual(nws.get_header("Accept"), "application/geo+json, application/json")
-        self.assertEqual(nws.get_header("User-agent"), websearch.USER_AGENT)
-        # The place name goes to the geocoder only; the feeds get coordinates.
-        self.assertEqual(
-            [request.full_url for request in web.requests if "Miami" in request.full_url],
-            [web.sent(alerts.GEOCODING_ENDPOINT).full_url],
-        )
-
-    def test_nws_is_only_asked_about_us_points(self):
-        for text, geocoding, first_line in (
-            (
-                "Tokyo", found(TOKYO),
-                "No alerts found from USGS, GDACS or NASA EONET near Tokyo, Japan "
-                "(35.69°N, 139.69°E) in the last 7 days.",
-            ),
-            (
-                # Inside the box NWS covers, but in Canada.
-                "Toronto", found(TORONTO),
-                "No alerts found from USGS, GDACS or NASA EONET near Toronto, Ontario, Canada "
-                "(43.70°N, 79.42°W) in the last 7 days.",
-            ),
-            (
-                "25.77, -80.19", AssertionError("coordinates need no geocoding"),
-                "No alerts found from NWS, USGS, GDACS or NASA EONET near 25.77°N, 80.19°W in the "
-                "last 7 days.",
-            ),
-        ):
-            with self.subTest(text=text):
-                reply = alerts.hazards(text, opener=hazard_web(geocoding=geocoding), now=NOW)
-                self.assertEqual(reply.splitlines()[0], first_line)
-                self.assertSigned(reply)
-        self.assertIn(f"\nSources: NWS, USGS, GDACS and NASA EONET, {RETRIEVED}.\n", reply)
-
-    def test_a_failing_feed_does_not_hide_the_others(self):
-        web = hazard_web(
-            nws=urllib.error.HTTPError(alerts.NWS_ENDPOINT, 400, "Bad Request", {}, None),
-            usgs=urllib.error.URLError("timed out"),
-            gdacs=FakeResponse(b""),
-            eonet=FakeResponse({"events": [WILDFIRE]}),
-        )
-        reply = alerts.hazards("Miami", opener=web, now=NOW)
-        self.assertEqual(
-            reply.splitlines()[1:9],
-            [
-                "- Wildfires (severity unknown), 334 km away, 20 Nov 12:00 UTC",
-                "  Wildfire North of Miami — NASA EONET",
+                f"Weather in {WHERE}:",
+                "- Now: Grey and damp, 12°C (54°F), feels like 11°C (51°F).",
+                "- Today: high 14°C (57°F), low 8°C (46°F).",
+                "- Wind 14 km/h (9 mph), humidity 81%, recent precipitation 0.2 mm.",
+                "- As of 03:00 local time on 21 Nov 2026.",
                 "",
-                "Some feeds did not answer, so this list may be incomplete:",
-                "- NWS refused the request (HTTP 400). It only covers US locations.",
-                "- USGS could not be reached (timed out).",
-                "- GDACS sent a reply I could not read.",
+                f"{ASKED_AT}: places.example and forecast.example.",
+                SAFETY_NOTE,
+                CREDIT,
+            ],
+        )
+
+    def test_fahrenheit_and_mph_get_celsius_and_kmh_beside_them(self):
+        reading = _reading(
+            temperature=54.3, feelsLike=51.1, high=57.4, low=46.2, windSpeed=8.8, precipitation=0.1,
+            units={"temperature": "°F", "wind": "mp/h", "precipitation": "inch"},
+        )
+        shown = {"temperature": "54°F", "feelsLike": "51°F", "high": "57°F", "low": "46°F"}
+        lines, _ = self.ask("Sampleton", _weather_answer(weather=reading, shown=shown))
+        self.assertEqual(lines[1], "- Now: Grey and damp, 54°F (12°C), feels like 51°F (11°C).")
+        self.assertEqual(lines[2], "- Today: high 57°F (14°C), low 46°F (8°C).")
+        self.assertEqual(lines[3], "- Wind 9 mph (14 km/h), humidity 81%, recent precipitation 0.1 inch.")
+
+    def test_rough_weather_and_missing_readings(self):
+        reading = _reading(
+            feelsLike=None, high=None, low=None, humidity=None, precipitation=None, observedAt=None
+        )
+        lines, _ = self.ask("Sampleton", _weather_answer(weather=reading, rough=True))
+        self.assertEqual(
+            lines[1:4],
+            [
+                "- Now: Grey and damp, 12°C (54°F).",
+                "- Wind 14 km/h (9 mph).",
+                "- 5-Mins rates the weather now as rough.",
+            ],
+        )
+        self.assertEqual(lines[4], "")
+
+    def test_no_readings_is_explained(self):
+        empty = _reading(temperature=None, feelsLike=None, humidity=None, precipitation=None, windSpeed=None)
+        with self.assertRaises(AlertsError) as raised:
+            self.ask("Sampleton", _weather_answer(weather=empty))
+        self.assertEqual(
+            str(raised.exception),
+            f"No current weather came through for {WHERE}; please try again later.",
+        )
+
+    def test_a_failed_forecast_or_lookup_is_explained(self):
+        failed = _weather_answer(weather=None, error="could not be reached (EAI_AGAIN)")
+        with self.assertRaises(AlertsError) as raised:
+            self.ask("Sampleton", failed)
+        self.assertEqual(
+            str(raised.exception),
+            f"I couldn't get the weather for {WHERE} just now: could not be reached (EAI_AGAIN).",
+        )
+        lost = _weather_answer(place=None, weather=None, lookupError="no answer within 10 seconds")
+        with self.assertRaises(AlertsError) as raised:
+            self.ask("Sampleton", lost)
+        self.assertEqual(
+            str(raised.exception),
+            "I couldn't look up 'Sampleton' just now: no answer within 10 seconds.",
+        )
+
+
+class PlaceTests(unittest.TestCase):
+    def test_unusable_places_are_refused_without_asking(self):
+        for text in ("", "  ?! ", "near me", "Here?", "a" * 101, "95, 10"):
+            with self.subTest(text=text[:20]), fake_project("5-Mins", {}) as calls:
+                with self.assertRaises(AlertsError):
+                    alerts.weather(text, now=NOW)
+                self.assertEqual(calls, [])
+
+    def test_an_unknown_place_is_explained(self):
+        nowhere = _weather_answer(place=None, weather=None, asked=["places.example"])
+        with fake_project("5-Mins", {"weather": nowhere}) as calls:
+            with self.assertRaises(AlertsError) as raised:
+                alerts.weather("Atlantis", now=NOW)
+        self.assertEqual(calls, [("weather", {"query": "Atlantis"})])
+        self.assertIn("I could not find a place called 'Atlantis'.", str(raised.exception))
+
+    def test_a_leading_the_is_dropped_when_nothing_is_found(self):
+        isles = dict(SAMPLETON, name="Sample Isles", region="", country="", label="Sample Isles")
+
+        def answer(payload):
+            return _weather_answer(place=isles if payload["query"] == "Sample Isles" else None)
+
+        with fake_project("5-Mins", {"weather": answer}) as calls:
+            reply = alerts.weather("the Sample Isles", now=NOW)
+        self.assertEqual([payload["query"] for _, payload in calls], ["the Sample Isles", "Sample Isles"])
+        self.assertTrue(reply.startswith("Weather in Sample Isles (35.50°N, 97.50°W):"))
+
+    def test_a_region_or_country_picks_the_place(self):
+        listing = {"cities": PARISES, "lookupError": None, "asked": ["places.example"]}
+        expected = {
+            "Paris, Texas": PARISES[1],
+            "Paris, TN": PARISES[2],
+            "Paris, U.S.A.": PARISES[1],
+            "Paris, France": PARISES[0],
+            "Paris, Île-de-France": PARISES[0],
+        }
+        for text, city in expected.items():
+            actions = {"places": listing, "weather": _weather_answer(place=None)}
+            with self.subTest(text=text), fake_project("5-Mins", actions) as calls:
+                reply = alerts.weather(text, now=NOW)
+                self.assertEqual(
+                    calls,
+                    [
+                        ("places", {"query": "Paris", "limit": 10}),
+                        ("weather", {"lat": city["lat"], "lon": city["lon"]}),
+                    ],
+                )
+                self.assertTrue(reply.startswith(f"Weather in {city['label']} ("))
+                self.assertIn(f"{ASKED_AT}: places.example and forecast.example.", reply)
+        with fake_project("5-Mins", {"places": listing}) as calls:
+            with self.assertRaises(AlertsError) as raised:
+                alerts.weather("Paris, Narnia", now=NOW)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("could not find a place called 'Paris, Narnia'", str(raised.exception))
+
+    def test_a_failed_place_lookup_is_explained(self):
+        listing = {"cities": [], "lookupError": "could not be reached (EAI_AGAIN)", "asked": ["places.example"]}
+        with fake_project("5-Mins", {"places": listing}), self.assertRaises(AlertsError) as raised:
+            alerts.hazards("Paris, Texas", now=NOW)
+        self.assertEqual(
+            str(raised.exception),
+            "I couldn't look up 'Paris, Texas' just now: could not be reached (EAI_AGAIN).",
+        )
+
+    def test_coordinates_are_used_as_they_are(self):
+        for text, point, where in (
+            ("40.7128, -74.006", {"lat": 40.7128, "lon": -74.006}, "40.71°N, 74.01°W"),
+            ("33.9°S 151.2°E", {"lat": -33.9, "lon": 151.2}, "33.90°S, 151.20°E"),
+        ):
+            answers = {"weather": _weather_answer(place=None)}
+            with self.subTest(text=text), fake_project("5-Mins", answers) as calls:
+                reply = alerts.weather(text, now=NOW)
+                self.assertEqual(calls, [("weather", point)])
+                self.assertTrue(reply.startswith(f"Weather at {where}:\n"))
+
+
+class HazardTests(unittest.TestCase):
+    def ask(self, place, answer):
+        with fake_project("5-Mins", {"hazards": answer}) as calls:
+            return alerts.hazards(place, now=NOW).splitlines(), calls
+
+    def test_alerts_in_the_projects_order_with_the_worldwide_count(self):
+        found = [
+            _alert("Sample Flood Watch", "Severe", "Rivers may rise", "Sample County",
+                   expires="2026-11-22T06:00:00.000Z"),
+            _alert("Sample Quake", "Minor", "A small quake near Sampleton", "near Sampleton",
+                   effective="2026-11-19T04:30:00.000Z"),
+        ]
+        lines, calls = self.ask("Sampleton", _hazards_answer(found, worldwide=2))
+        self.assertEqual(calls, [("hazards", {"query": "Sampleton", "now": SENT_NOW})])
+        self.assertEqual(
+            lines,
+            [
+                f"Hazard alerts near {WHERE} from the last 7 days, most severe first:",
+                "- Sample Flood Watch (severity: Severe), 20 Nov 18:00 to 22 Nov 06:00 UTC",
+                "  Rivers may rise (Sample County) — Sample Feed",
+                "- Sample Quake (severity: Minor), 19 Nov 04:30 UTC",
+                "  A small quake near Sampleton — Sample Feed",
+                "There are also 2 worldwide alerts, such as space weather; "
+                "ask for 'space weather' to see them.",
+                "",
+                f"{ASKED_AT}: places.example, feed-a.example and feed-b.example.",
+                SAFETY_NOTE,
+                CREDIT,
+            ],
+        )
+
+    def test_long_lists_are_cut_and_failed_feeds_listed(self):
+        found = [_alert(f"Sample Alert {number}", "Moderate") for number in range(10)]
+        errors = ["Feed A: could not be reached (EAI_AGAIN)"]
+        lines, _ = self.ask("Sampleton", _hazards_answer(found, errors, worldwide=1))
+        self.assertEqual(len([line for line in lines if line.startswith("- Sample Alert")]), alerts.MAX_ALERTS)
+        self.assertIn("Showing the first 8 of 10.", lines)
+        self.assertIn(
+            "There is also 1 worldwide alert, such as space weather; ask for 'space weather' to see it.", lines
+        )
+        index = lines.index("Some feeds did not answer, so this list may be incomplete:")
+        self.assertEqual(lines[index - 1: index + 3], ["", lines[index], f"- {errors[0]}", ""])
+
+    def test_no_alerts_and_no_answers(self):
+        lines, _ = self.ask("Sampleton", _hazards_answer())
+        self.assertEqual(lines[:2], [f"No hazard alerts near {WHERE} from the last 7 days.", ""])
+        errors = [f"Feed {name}: no answer within 10 seconds" for name in "ABCD"]
+        lines, _ = self.ask("Sampleton", _hazards_answer(errors=errors, feeds=4))
+        self.assertEqual(
+            lines[:6],
+            [
+                f"I can't tell whether there are hazard alerts near {WHERE}, "
+                "because none of the feeds answered:",
+                *[f"- {error}" for error in errors],
                 "",
             ],
         )
-        self.assertIn("\nSearched: NASA EONET natural events within 1000 km.\n", reply)
-        self.assertIn(f"\nSources: Open-Meteo geocoding and NASA EONET, {RETRIEVED}.\n", reply)
-        self.assertSigned(reply)
 
-    def test_says_so_when_no_feed_answers(self):
-        web = hazard_web(
-            nws=urllib.error.URLError("down"), usgs=urllib.error.URLError("down"),
-            gdacs=urllib.error.URLError("down"), eonet=urllib.error.URLError("down"),
-        )
-        reply = alerts.hazards("25.77, -80.19", opener=web, now=NOW)
+    def test_a_region_is_matched_before_the_feeds_are_asked(self):
+        listing = {"cities": [SAMPLETON], "lookupError": None, "asked": ["places.example"]}
+        actions = {"places": listing, "hazards": _hazards_answer(place=None)}
+        with fake_project("5-Mins", actions) as calls:
+            alerts.hazards("Sampleton, OK", now=NOW)
         self.assertEqual(
-            reply,
-            "\n".join(
-                [
-                    "I can't tell whether there are hazard alerts near 25.77°N, 80.19°W, because "
-                    "none of the feeds answered:",
-                    "- NWS could not be reached (down).",
-                    "- USGS could not be reached (down).",
-                    "- GDACS could not be reached (down).",
-                    "- NASA EONET could not be reached (down).",
-                    "",
-                    "Sources: none answered (tried 2026-11-21 01:13 UTC).",
-                    SAFETY_LINE,
-                    CREDIT_LINE,
-                ]
+            calls,
+            [
+                ("places", {"query": "Sampleton", "limit": 10}),
+                ("hazards", {"lat": 35.5, "lon": -97.5, "now": SENT_NOW}),
+            ],
+        )
+
+
+class SpaceWeatherTests(unittest.TestCase):
+    def ask(self, answer):
+        with fake_project("5-Mins", {"space_weather": answer}) as calls:
+            return alerts.space_weather(now=NOW).splitlines(), calls
+
+    def test_worldwide_alerts_without_their_area(self):
+        found = [_alert(f"Sample Solar Alert {number}", "Moderate", "Charged particles", "Worldwide")
+                 for number in range(7)]
+        lines, calls = self.ask(_space_answer(found))
+        self.assertEqual(calls, [("space_weather", {"now": SENT_NOW})])
+        self.assertEqual(
+            lines[:3],
+            [
+                "Space weather and other worldwide alerts from the last 7 days, most severe first:",
+                "- Sample Solar Alert 0 (severity: Moderate), 20 Nov 18:00 UTC",
+                "  Charged particles — Sample Feed",
+            ],
+        )
+        self.assertEqual(len([line for line in lines if line.startswith("- ")]), alerts.MAX_SPACE_ALERTS)
+        self.assertIn("Showing the first 5 of 7.", lines)
+        self.assertEqual(
+            lines[-4:], ["", f"{ASKED_AT}: feed-a.example and feed-b.example.", SAFETY_NOTE, CREDIT]
+        )
+
+    def test_none_found_or_none_answered(self):
+        lines, _ = self.ask(_space_answer(errors=["Feed A: the reply could not be read"]))
+        self.assertEqual(
+            lines[:4],
+            [
+                "No space weather or other worldwide alerts from the last 7 days.",
+                "",
+                "Some feeds did not answer, so this list may be incomplete:",
+                "- Feed A: the reply could not be read",
+            ],
+        )
+        lines, _ = self.ask(_space_answer(errors=["Feed A: down", "Feed B: down"], feeds=2))
+        self.assertEqual(
+            lines[:3],
+            ["I can't tell whether there are space weather alerts, because none of the feeds answered:",
+             "- Feed A: down", "- Feed B: down"],
+        )
+
+
+class ProjectProblemTests(unittest.TestCase):
+    def test_missing_project_explains_the_setup(self):
+        with missing_projects(), self.assertRaises(projects.ProjectUnavailable) as raised:
+            alerts.weather("Sampleton", now=NOW)
+        self.assertIn("git submodule update --init projects/5-Mins", str(raised.exception))
+        self.assertIn("https://charles2ke.github.io/5-Mins/", str(raised.exception))
+
+    def test_unexpected_answers_are_errors(self):
+        broken = {
+            "weather": (
+                None,
+                _weather_answer(weather="warm"),
+                _weather_answer(weather=_reading(temperature="12")),
+                _weather_answer(weather=_reading(units=None)),
+                _weather_answer(shown={}),
+                _weather_answer(asked=None),
+                _weather_answer(place={"name": "Sampleton", "lat": "35.5", "lon": -97.5}),
             ),
-        )
-
-    def test_lists_the_eight_most_severe_and_recent_once_each(self):
-        quakes = [
-            quake(f"us{n}", round(4.5 + n / 10, 1), f"2026-11-{14 + n % 7}T12:00:00") for n in range(10)
-        ]
-        # A repeated id keeps the first report, so this one is not shown as Extreme.
-        repeat = quake("us9", 7.5, "2026-11-20T12:00:00")
-        reply = alerts.hazards("Miami", opener=hazard_web(usgs=feed(*quakes, repeat)), now=NOW)
-        shown = re.findall(r"^- Magnitude (\S+) earthquake \((\w+)\)", reply, re.MULTILINE)
-        self.assertEqual(
-            shown,
-            [("5.1", "Moderate"), ("5.0", "Moderate"), ("5.4", "Moderate"), ("5.3", "Moderate"),
-             ("5.2", "Moderate"), ("4.9", "Minor"), ("4.8", "Minor"), ("4.7", "Minor")],
-        )
-        self.assertIn("\nShowing the 8 most severe and recent of 10 alerts.\n", reply)
-
-    def test_odd_entries_are_cleaned_or_skipped(self):
-        storm = {
-            "properties": {
-                "event": "Storm\u202e Warning",
-                "severity": "Catastrophic",
-                "headline": "<b>Storm</b> &lt;script&gt;alert(1)&lt;/script&gt; ahead\x1b[2J "
-                + "very " * 40,
-                "effective": "not a date",
-            }
-        }
-        shapeless = {
-            "id": "us-odd",
-            "properties": {"mag": None, "time": "yesterday"},
-            "geometry": {"coordinates": [-80.19, 500]},
-        }
-        web = hazard_web(
-            nws=feed("junk", None, storm, 7),
-            usgs=feed(shapeless),
-            gdacs=FakeResponse({"features": "none"}),
-            eonet=FakeResponse({"events": [None, {"geometry": "none"}]}),
-        )
-        reply = alerts.hazards("Miami", opener=web, now=NOW)
-        lines = reply.splitlines()
-        self.assertEqual(lines[1], "- Storm Warning (severity unknown), covers this location, time unknown")
-        self.assertTrue(lines[2].startswith("  Storm alert(1) ahead[2J very very"))
-        self.assertTrue(lines[2].endswith("very… — NWS"))
-        self.assertLess(len(lines[2]), 120)
-        self.assertEqual(
-            lines[3:5], ["- Earthquake (severity unknown), distance unknown, time unknown", "  Earthquake — USGS"]
-        )
-        for unwanted in ("<", ">", "\x1b", "\u202e"):
-            self.assertNotIn(unwanted, reply)
-        self.assertNotIn("did not answer", reply)
-
-
-class SpaceWeatherTests(OfflineTestCase):
-    def test_lists_recent_alerts_newest_first_with_noaa_scales(self):
-        storm = space("ALTK07", "2026-11-20 18:30:00.000", "ALERT: Geomagnetic K-index of 7\r\nNOAA Scale: G3 - Strong")
-        entries = [
-            space("ALTEF3", "2026-11-20 06:10:00.000", "ALERT: Electron 2MeV Integral Flux exceeded 1000pfu"),
-            space("WARK05", "2026-11-20 12:00:00.000",
-                  "WARNING: Geomagnetic K-index of 5 expected\r\nNOAA Scale: G1 - Minor"),
-            storm,
-            storm,
-            space("SUMX01", "2026-11-20 20:00:00.000", "SUMMARY: X-ray Event exceeded X1\r\nNOAA Scale: R3 - Strong"),
-            space("WARK04", "2026-11-13 23:59:00.000", "WARNING: Geomagnetic K-index of 4 expected"),
-            "junk",
-            {"issue_datetime": "2026-11-20 21:00:00.000"},
-        ]
-        web = FakeWeb([(alerts.SWPC_ENDPOINT, FakeResponse(entries))])
-        reply = alerts.space_weather(opener=web, now=NOW)
-        self.assertEqual(
-            reply,
-            "\n".join(
-                [
-                    "Latest NOAA space weather alerts, watches and warnings (last 7 days, newest first):",
-                    "- 20 Nov 18:30 UTC — Alert (G3 Strong): Geomagnetic K-index of 7",
-                    "- 20 Nov 12:00 UTC — Warning (G1 Minor): Geomagnetic K-index of 5 expected",
-                    "- 20 Nov 06:10 UTC — Alert: Electron 2MeV Integral Flux exceeded 1000pfu",
-                    "NOAA scales: G = geomagnetic storm, S = solar radiation storm, R = radio blackout; "
-                    "1 is minor and 5 extreme.",
-                    "",
-                    f"Sources: NOAA Space Weather Prediction Center, {RETRIEVED}.",
-                    SAFETY_LINE,
-                    CREDIT_LINE,
-                ]
+            "hazards": (
+                _hazards_answer() | {"alerts": "none"},
+                _hazards_answer() | {"days": 0},
+                _hazards_answer() | {"feeds": -1},
+                _hazards_answer() | {"worldwide": "2"},
+                _hazards_answer(found=["a quake"]),
             ),
+            "space_weather": (None, _space_answer() | {"errors": "oops"}),
+        }
+        ask = {
+            "weather": lambda: alerts.weather("Sampleton", now=NOW),
+            "hazards": lambda: alerts.hazards("Sampleton", now=NOW),
+            "space_weather": lambda: alerts.space_weather(now=NOW),
+        }
+        for action, answers in broken.items():
+            for answer in answers:
+                with self.subTest(action=action, answer=str(answer)[:80]):
+                    with fake_project("5-Mins", {action: answer}), self.assertRaises(projects.ProjectError):
+                        ask[action]()
+
+    def test_usage_needs_no_project(self):
+        with fake_project("5-Mins", {}) as calls:
+            lines = alerts.usage().splitlines()
+        self.assertEqual(calls, [])
+        self.assertIn("web search must be on", " ".join(lines))
+        self.assertEqual(lines[-2:], [SAFETY_NOTE, CREDIT])
+
+
+# Small made-up answers in each public API's format, keyed by host, for the
+# fetch fixtures of jarvis.projects (no request leaves the machine).
+PLACES_URL = "https://geocoding-api.open-meteo.com/"
+FORECAST_URL = "https://api.open-meteo.com/"
+GDACS_URL = "https://www.gdacs.org/"
+EONET_URL = "https://eonet.gsfc.nasa.gov/"
+PLACES = {PLACES_URL: {"results": [
+    {"id": 101, "name": "Sampleton", "latitude": 35.5, "longitude": -97.5,
+     "country": "United States", "admin1": "Oklahoma"},
+]}}
+FORECAST = {FORECAST_URL: {
+    "current": {"time": "2026-11-21T03:00", "temperature_2m": 12.4, "apparent_temperature": 10.6,
+                "relative_humidity_2m": 81, "precipitation": 0.2, "weather_code": 3,
+                "wind_speed_10m": 14.2, "is_day": 0},
+    "current_units": {"temperature_2m": "°C", "wind_speed_10m": "km/h", "precipitation": "mm"},
+    "daily": {"temperature_2m_max": [14.1], "temperature_2m_min": [7.9]},
+}}
+FEEDS = {
+    "https://api.weather.gov/": {"features": [{"properties": {
+        "id": "https://alerts.example/1", "event": "Made-up Storm Warning", "severity": "Severe",
+        "headline": "A made-up storm warning for a test", "areaDesc": "Sample County",
+        "effective": "2026-11-20T18:00:00+00:00", "expires": "2026-11-21T18:00:00+00:00",
+    }}]},
+    "https://earthquake.usgs.gov/": {"features": [{
+        "id": "test1",
+        "properties": {"mag": 4.8, "place": "12 km N of Sampleton",
+                       "title": "Made-up quake 12 km N of Sampleton",
+                       "time": 1795176000000, "url": "https://quakes.example/test1"},
+        "geometry": {"type": "Point", "coordinates": [-97.5, 35.6, 5]},
+    }]},
+    GDACS_URL: {"features": []},
+    EONET_URL: {"events": []},
+    "https://services.swpc.noaa.gov/": [
+        {"product_id": "TST1", "issue_datetime": "2026-11-20 12:00:00.000",
+         "message": "WARNING: Made-up solar storm for a test"},
+    ],
+}
+
+
+class AlertsProjectTests(ProjectTestCase):
+    """Runs the real 5-Mins code from projects/5-Mins with Node.js on fetch fixtures."""
+
+    project = "5-Mins"
+
+    def answer_with(self, bodies, statuses=None):
+        statuses = statuses or {}
+        fixtures = {url: {"status": statuses.get(url, 200), "body": body} for url, body in bodies.items()}
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = os.path.join(folder.name, "fixtures.json")
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(fixtures, file)
+        patched = mock.patch.dict(os.environ, {"JARVIS_PROJECTS_FETCH_FIXTURES": path})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_weather_by_name(self):
+        self.answer_with({**PLACES, **FORECAST})
+        lines = alerts.weather("Sampleton", now=NOW).splitlines()
+        self.assertEqual(lines[0], f"Weather in {WHERE}:")
+        self.assertRegex(lines[1], r"^- Now: .+, 12°C \(54°F\), feels like 11°C \(51°F\)\.$")
+        self.assertEqual(
+            lines[2:5],
+            [
+                "- Today: high 14°C (57°F), low 8°C (46°F).",
+                "- Wind 14 km/h (9 mph), humidity 81%, recent precipitation 0.2 mm.",
+                "- As of 03:00 local time on 21 Nov 2026.",
+            ],
         )
-        self.assertEqual(len(web.requests), 1)
+        self.assertEqual(lines[-3], f"{ASKED_AT}: geocoding-api.open-meteo.com and api.open-meteo.com.")
 
-    def test_caps_the_list_and_says_when_there_is_nothing(self):
-        watches = [
-            space(f"WATA{n}", f"2026-11-{14 + n} 12:00:00.000", "WATCH: Geomagnetic storm watch")
-            for n in range(7)
-        ]
-        reply = alerts.space_weather(opener=FakeWeb([(alerts.SWPC_ENDPOINT, FakeResponse(watches))]), now=NOW)
-        lines = reply.splitlines()
-        self.assertEqual(lines[1], "- 20 Nov 12:00 UTC — Watch: Geomagnetic storm watch")
-        self.assertTrue(lines[5].startswith("- 16 Nov 12:00 UTC"))
-        self.assertEqual(lines[6], "Showing the 5 newest of 7.")
-        self.assertNotIn("NOAA scales", reply)
-        for payload in ([], {"alerts": []}):
-            with self.subTest(payload=payload):
-                web = FakeWeb([(alerts.SWPC_ENDPOINT, FakeResponse(payload))])
-                reply = alerts.space_weather(opener=web, now=NOW)
-                self.assertEqual(
-                    reply.splitlines()[0],
-                    "No NOAA space weather alerts, watches or warnings in the last 7 days "
-                    "(summaries of past events are left out).",
-                )
-                self.assertSigned(reply)
+    def test_weather_by_coordinates_needs_no_lookup(self):
+        self.answer_with(FORECAST)
+        reply = alerts.weather("35.5, -97.5", now=NOW)
+        self.assertTrue(reply.startswith("Weather at 35.50°N, 97.50°W:\n- Now: "))
+        self.assertIn(f"{ASKED_AT}: api.open-meteo.com.", reply)
 
-    def test_feed_failures_raise_readable_errors(self):
-        web = FakeWeb([(alerts.SWPC_ENDPOINT, urllib.error.HTTPError(alerts.SWPC_ENDPOINT, 502, "bad", {}, None))])
-        with self.assertRaisesRegex(alerts.AlertsError, r"^NOAA SWPC refused the request \(HTTP 502\)\.$"):
-            alerts.space_weather(opener=web, now=NOW)
+    def test_weather_problems_are_explained(self):
+        self.answer_with({**PLACES, **FORECAST}, {FORECAST_URL: 503})
+        with self.assertRaises(AlertsError) as raised:
+            alerts.weather("Sampleton", now=NOW)
+        self.assertIn(f"I couldn't get the weather for {WHERE} just now", str(raised.exception))
+        self.assertIn("503", str(raised.exception))
+        self.answer_with({})
+        with self.assertRaises(AlertsError) as raised:
+            alerts.weather("Sampleton", now=NOW)
+        self.assertIn("I couldn't look up 'Sampleton' just now: could not be reached", str(raised.exception))
+        self.answer_with({PLACES_URL: {"results": []}})
+        with self.assertRaises(AlertsError) as raised:
+            alerts.weather("Atlantis", now=NOW)
+        self.assertIn("I could not find a place called 'Atlantis'.", str(raised.exception))
 
+    def test_hazards_from_every_feed(self):
+        self.answer_with({**PLACES, **FEEDS})
+        lines = alerts.hazards("Sampleton", now=NOW).splitlines()
+        self.assertEqual(lines[0], f"Hazard alerts near {WHERE} from the last 7 days, most severe first:")
+        reply = "\n".join(lines)
+        storm = reply.index("Made-up Storm Warning (severity: Severe), 20 Nov 18:00 to 21 Nov 18:00 UTC")
+        self.assertIn("  A made-up storm warning for a test (Sample County) — ", reply)
+        self.assertLess(storm, reply.index("Made-up quake 12 km N of Sampleton"))
+        self.assertNotIn("Made-up solar storm", reply)
+        self.assertIn("There is also 1 worldwide alert", reply)
+        self.assertNotIn("may be incomplete", reply)
+        asked = lines[-3].removeprefix(f"{ASKED_AT}: ").rstrip(".").replace(" and ", ", ").split(", ")
+        self.assertEqual(set(asked), {url.split("/")[2] for url in [PLACES_URL, *FEEDS]})
 
-class UsageTests(unittest.TestCase):
-    def test_usage_gives_examples_and_ends_with_the_credit(self):
-        text = alerts.usage()
-        self.assertIn("'weather in Paris'", text)
-        self.assertIn("--web-search", text)
-        self.assertEqual(text.splitlines()[-2:], [SAFETY_LINE, CREDIT_LINE])
+    def test_hazards_when_feeds_fail(self):
+        feeds = {url: body for url, body in FEEDS.items() if url != EONET_URL}
+        self.answer_with({**PLACES, **feeds}, {GDACS_URL: 503})
+        lines = alerts.hazards("Sampleton", now=NOW).splitlines()
+        self.assertIn("Made-up Storm Warning (severity: Severe), 20 Nov 18:00 to 21 Nov 18:00 UTC", lines[1])
+        index = lines.index("Some feeds did not answer, so this list may be incomplete:")
+        failed = lines[index + 1: lines.index("", index)]
+        self.assertEqual(len(failed), 2)
+        self.assertTrue(any("503" in line for line in failed))
+        self.assertTrue(any("could not be reached" in line for line in failed))
+        self.answer_with({})
+        lines = alerts.hazards("35.5, -97.5", now=NOW).splitlines()
+        self.assertEqual(
+            lines[0],
+            "I can't tell whether there are hazard alerts near 35.50°N, 97.50°W, "
+            "because none of the feeds answered:",
+        )
+
+    def test_space_weather(self):
+        self.answer_with(FEEDS)
+        reply = alerts.space_weather(now=NOW)
+        self.assertTrue(reply.startswith("Space weather and other worldwide alerts from the last 7 days"))
+        self.assertIn("20 Nov 12:00 UTC\n  Made-up solar storm for a test — ", reply)
+        self.assertNotIn("Made-up quake", reply)
+        self.assertNotIn("may be incomplete", reply)
 
 
 if __name__ == "__main__":

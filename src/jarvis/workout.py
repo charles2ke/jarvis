@@ -1,44 +1,24 @@
-"""The 7-day workout plan from the user's workout project, available offline.
+"""Answer questions about the weekly plan in the user's workout project.
 
 workout (https://charles2ke.github.io/workout/, source at
-https://github.com/charles2ke/workout) is the user's own "7-Day Longevity &
-Strength Program". :data:`WEEK` is ``WORKOUT_DATA`` from its ``workout.js``
-at commit 0c0d42575909 (19 September 2026), without the exercise ids and
-illustrations. Replies show each exercise's stats with commas in place of the
-original "•" separators.
+https://github.com/charles2ke/workout) is the user's own weekly training plan.
+Jarvis keeps no copy of it: the plan is ``WORKOUT_DATA`` in the project's
+``workout.js``, read from the ``projects/workout`` submodule by
+``bridges/workout.mjs`` with Node.js, together with the project's own rule for
+which plan day each weekday shows and the program's name from its page title.
+Replies show each exercise's stats with commas in place of the "•" separators.
 
 :func:`plan` answers "what's my workout today?", "tomorrow's workout",
 "Friday workout", "when is leg day?", "is today a rest day?" and "weekly
 workout plan". It returns ``None`` when the text is not a question about the
 plan — "work out what day it is", "what's a good workout for abs?", "I just
 finished my workout", "what should I eat after my workout?" — so the caller can
-fall back to something else. Single-day replies end with a short safety note, and
-they say that the Zone 2 heart-rate target is the original author's own.
+fall back to something else; those checks need neither the project nor Node.js.
+Single-day replies end with a short safety note, and say that a heart-rate
+target in the plan is the original author's own.
 
-workout is MIT-licensed, and its notice covers the plan data here:
-
-    MIT License
-
-    Copyright (c) 2026 Charles Gomes
-
-    Permission is hereby granted, free of charge, to any person obtaining a
-    copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to permit
-    persons to whom the Software is furnished to do so, subject to the
-    following conditions:
-
-    The above copyright notice and this permission notice shall be included
-    in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-    NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-    OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-    USE OR OTHER DEALINGS IN THE SOFTWARE.
+When the project or Node.js is missing, :func:`plan` raises
+:class:`jarvis.projects.ProjectUnavailable` with setup steps.
 """
 
 from __future__ import annotations
@@ -46,15 +26,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, List, Optional, Tuple
 
+from jarvis import projects
 from jarvis.dates import WEEKDAY_NAMES
 
 PROJECT = "workout"
-SITE_URL = "https://charles2ke.github.io/workout/"
-REPO_URL = "https://github.com/charles2ke/workout"
+SITE_URL = projects.PROJECTS[PROJECT].site
+REPO_URL = projects.PROJECTS[PROJECT].repo
 CREDIT = f"From {PROJECT}: {SITE_URL}"
-PROGRAM = "7-Day Longevity & Strength Program"
 SAFETY_NOTE = (
     "Warm up first, stop if you feel pain, dizziness or chest discomfort, and check "
     "with a doctor before starting a new exercise programme if you have a health "
@@ -64,7 +45,7 @@ SAFETY_NOTE = (
 
 @dataclass(frozen=True)
 class Exercise:
-    """One exercise; ``stats`` keeps the original "•" separators."""
+    """One exercise; ``stats`` keeps the project's "•" separators."""
 
     name: str
     stats: str
@@ -92,139 +73,71 @@ class Day:
         return self.title.partition(": ")[2] or self.title
 
 
-# Monday first, as in the source, so ``WEEK[when.weekday()]`` is the day's
-# workout, just like the source's DAY_IDS_BY_INDEX[date.getDay()].
-WEEK: Tuple[Day, ...] = (
-    Day(
-        "mon",
-        "Mon",
-        "Monday: Upper Body Push & Pull",
-        "Upper body strength and joint stability.",
-        45,
-        (
-            Exercise(
-                "Bench Press / Push-ups",
-                "3 Sets • 8–12 Reps • 90s Rest",
-                "Retract shoulder blades; elbows tucked at 45°.",
-                "Moderate",
-                90,
-                3,
-            ),
-            Exercise(
-                "Lat Pulldowns / Pull-ups",
-                "3 Sets • 8–10 Reps • 90s Rest",
-                "Drive with elbows down smoothly to upper chest.",
-                "Moderate",
-                90,
-                3,
-            ),
-        ),
-    ),
-    Day(
-        "tue",
-        "Tue",
-        "Tuesday: Lower Body & Core",
-        "Leg power with spine protection.",
-        40,
-        (
-            Exercise(
-                "Goblet Squats",
-                "3 Sets • 10–12 Reps • 90s Rest",
-                "Upright chest, sit between hips, knees out.",
-                "Moderate",
-                90,
-                3,
-            ),
-        ),
-    ),
-    Day(
-        "wed",
-        "Wed",
-        "Wednesday: Active Recovery",
-        "Aerobic base and joint mobility work.",
-        30,
-        (
-            Exercise(
-                "Zone 2 Cardio",
-                "30 Mins • HR 105–120 BPM",
-                "Brisk walk, light cycling, or light rowing.",
-                "Easy",
-                30,
-                1,
-            ),
-        ),
-    ),
-    Day(
-        "thu",
-        "Thu",
-        "Thursday: Upper Body Hypertrophy",
-        "Posture strengthening and back alignment.",
-        40,
-        (
-            Exercise(
-                "Single-Arm DB Rows",
-                "3 Sets • 10 Reps/side • 60s Rest",
-                "Pull dumbbell to hip, keeping elbow close.",
-                "Moderate",
-                60,
-                3,
-            ),
-        ),
-    ),
-    Day(
-        "fri",
-        "Fri",
-        "Friday: Lower Body & Posterior Chain",
-        "Glutes and hamstrings for joint support.",
-        40,
-        (
-            Exercise(
-                "Bulgarian Split Squats",
-                "3 Sets • 8 Reps/leg • 90s Rest",
-                "Keep front foot flat; controls hip stability.",
-                "Hard",
-                90,
-                3,
-            ),
-        ),
-    ),
-    Day(
-        "sat",
-        "Sat",
-        "Saturday: Full Body Conditioning",
-        "Endurance circuit and core strength.",
-        35,
-        (
-            Exercise(
-                "Kettlebell Swings",
-                "3 Rounds • 12–15 Reps",
-                "Explode from the hips; power comes from glutes.",
-                "Moderate",
-                45,
-                3,
-            ),
-        ),
-    ),
-    Day(
-        "sun",
-        "Sun",
-        "Sunday: Rest & Recovery",
-        "Full rest day for total muscle recovery.",
-        20,
-        (
-            Exercise(
-                "Foam Rolling & Walk",
-                "15–20 Mins • Light Pressure",
-                "Focus on upper back, quads, and calves.",
-                "Easy",
-                30,
-                1,
-            ),
-        ),
-    ),
-)
+@dataclass(frozen=True)
+class Program:
+    """The plan as the project defines it; ``week[0]`` is Monday's day."""
 
-DAYS: Tuple[str, ...] = tuple(day.title for day in WEEK)
+    title: str
+    week: Tuple[Day, ...]
+
+
+def _text(item: Any, key: str) -> str:
+    value = item.get(key) if isinstance(item, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise projects.ProjectError(f"workout's plan has no usable {key!r}")
+    return value.strip()
+
+
+def _count(item: Any, key: str) -> int:
+    value = item.get(key) if isinstance(item, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise projects.ProjectError(f"workout's plan has no usable {key!r}")
+    return int(value)
+
+
+def _day(item: Any) -> Day:
+    exercises = item.get("exercises") if isinstance(item, dict) else None
+    if not isinstance(exercises, list) or not exercises:
+        raise projects.ProjectError("workout's plan has a day without exercises")
+    return Day(
+        _text(item, "id"),
+        _text(item, "label"),
+        _text(item, "title"),
+        _text(item, "description"),
+        _count(item, "estimatedMinutes"),
+        tuple(
+            Exercise(
+                _text(exercise, "name"),
+                _text(exercise, "stats"),
+                _text(exercise, "notes"),
+                _text(exercise, "difficulty"),
+                _count(exercise, "restSeconds"),
+                _count(exercise, "rounds"),
+            )
+            for exercise in exercises
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def program() -> Program:
+    """Read the plan from the workout project (once per process)."""
+
+    data = projects.call(PROJECT, "program")
+    week = data.get("week") if isinstance(data, dict) else None
+    if not isinstance(week, list) or len(week) != 7:
+        raise projects.ProjectError("workout's plan doesn't cover the seven weekdays")
+    title = data.get("title")
+    return Program(
+        title.strip() if isinstance(title, str) and title.strip() else "workout plan",
+        tuple(_day(item) for item in week),
+    )
+
+
+def days() -> Tuple[str, ...]:
+    """The title of each day of the plan, Monday first."""
+
+    return tuple(day.title for day in program().week)
 
 
 # ---------------------------------------------------------------------------
@@ -331,31 +244,37 @@ _TODAY_RE = re.compile(
 )
 
 
+def _ids_with(week: Tuple[Day, ...], words: Tuple[str, ...]) -> Tuple[str, ...]:
+    return tuple(
+        day.id
+        for day in week
+        if any(re.search(rf"\b{word}\b", day.focus.lower()) for word in words)
+    )
+
+
 @dataclass(frozen=True)
 class _Kind:
-    """A kind of day, such as the lower-body days."""
+    """A kind of day, such as the lower-body days, found by words in the day titles."""
 
     name: str
     noun: str
-    ids: Tuple[str, ...]
+    words: Tuple[str, ...]
     pattern: "re.Pattern[str]"
     # Days listed alongside, without counting as this kind.
-    also: Tuple[str, ...] = ()
+    also_words: Tuple[str, ...] = ()
 
+    def ids(self, week: Tuple[Day, ...]) -> Tuple[str, ...]:
+        return _ids_with(week, self.words)
 
-def _ids_with(*words: str) -> Tuple[str, ...]:
-    return tuple(
-        day.id
-        for day in WEEK
-        if any(re.search(rf"\b{word}\b", day.focus.lower()) for word in words)
-    )
+    def also(self, week: Tuple[Day, ...]) -> Tuple[str, ...]:
+        return _ids_with(week, self.also_words)
 
 
 _KINDS: Tuple[_Kind, ...] = (
     _Kind(
         "lower-body",
         "a lower-body day",
-        _ids_with("lower body"),
+        ("lower body",),
         re.compile(
             rf"\blegs?\s+days?\b|\blower[- ]body\b|\blegs?\s+{_WORKOUT}\b"
             rf"|\b{_WORKOUT}\s+for\s+(?:my\s+|the\s+)?legs\b"
@@ -364,7 +283,7 @@ _KINDS: Tuple[_Kind, ...] = (
     _Kind(
         "upper-body",
         "an upper-body day",
-        _ids_with("upper body"),
+        ("upper body",),
         re.compile(
             rf"\barms?\s+days?\b|\bupper[- ]body\b|\barms?\s+{_WORKOUT}\b"
             rf"|\b{_WORKOUT}\s+for\s+(?:my\s+|the\s+)?arms\b"
@@ -373,14 +292,14 @@ _KINDS: Tuple[_Kind, ...] = (
     _Kind(
         "rest",
         "the rest day",
-        _ids_with("rest"),
+        ("rest",),
         re.compile(r"\brest\s+days?\b|\brest\s+(?:and|&)\s+recovery\b"),
-        also=_ids_with("recovery"),
+        also_words=("recovery",),
     ),
     _Kind(
         "recovery",
         "a recovery day",
-        _ids_with("recovery"),
+        ("recovery",),
         re.compile(r"\brecovery\s+days?\b|\bactive\s+recovery\b"),
     ),
 )
@@ -393,7 +312,7 @@ def _prepare(text: str) -> str:
 
 
 def _day_reference(text: str, today: int) -> Optional[Tuple[int, str]]:
-    """The first day the text names, as (index in WEEK, how to say it)."""
+    """The first day the text names, as (weekday index, Monday 0, and how to say it)."""
 
     found: List[Tuple[int, int, str]] = []
     for pattern, offset, when in _RELATIVE_DAYS:
@@ -458,26 +377,31 @@ def _brief(day: Day) -> str:
     return f"- {day.label}: {day.focus}, {day.estimated_minutes} min — {names}"
 
 
-def _kind_reply(kind: _Kind, reference: Optional[Tuple[int, str]], today: int) -> str:
+def _kind_reply(
+    kind: _Kind, reference: Optional[Tuple[int, str]], today: int, week: Tuple[Day, ...]
+) -> str:
+    ids, also = kind.ids(week), kind.also(week)
+    if not ids:
+        return f"workout's plan has no {kind.name} day this week.\n{CREDIT}"
     lines = []
     if reference is not None:
         index, when = reference
-        day = WEEK[index]
-        if day.id in kind.ids:
+        day = week[index]
+        if day.id in ids:
             return _day_reply(day, when, first=f"Yes, {when} is {kind.noun}.")
         if when in WEEKDAY_NAMES:
             lines.append(f"No, {when} is {day.focus}.")
         else:
             lines.append(f"No, {when} is {day.title}.")
-    days = [(index, day) for index, day in enumerate(WEEK) if day.id in kind.ids]
+    days = [(index, day) for index, day in enumerate(week) if day.id in ids]
     names = [WEEKDAY_NAMES[index] for index, _ in days]
     are = "day is" if len(days) == 1 else "days are"
     heading = f"The plan's {kind.name} {are} {_join(names)}"
-    for index, day in enumerate(WEEK):
-        if day.id in kind.also and day.id not in kind.ids:
+    for index, day in enumerate(week):
+        if day.id in also and day.id not in ids:
             heading += f", with {day.focus} on {WEEKDAY_NAMES[index]}"
     lines.append(f"{heading}:")
-    lines += [_brief(day) for day in WEEK if day.id in kind.ids or day.id in kind.also]
+    lines += [_brief(day) for day in week if day.id in ids or day.id in also]
     wait, index = min(((index - today) % 7, index) for index, _ in days)
     if wait == 0:
         lines.append("Today is one of them.")
@@ -493,9 +417,9 @@ def _kind_reply(kind: _Kind, reference: Optional[Tuple[int, str]], today: int) -
     return "\n".join(lines)
 
 
-def _week_reply(today: int) -> str:
-    lines = [f"The {PROGRAM}:"]
-    for index, day in enumerate(WEEK):
+def _week_reply(today: int, plan_: Program) -> str:
+    lines = [f"The {plan_.title}:"]
+    for index, day in enumerate(plan_.week):
         mark = " (today)" if index == today else ""
         lines.append(f"- {day.label}: {day.focus}, {day.estimated_minutes} min{mark}")
     lines.append("Say 'today's workout' or a day, like 'Friday workout', for the exercises.")
@@ -508,7 +432,7 @@ def usage() -> str:
 
     return "\n".join(
         [
-            f"I can show the {PROGRAM} from workout:",
+            "I can show the weekly plan from the workout project:",
             "- 'today's workout' or 'tomorrow's workout'",
             "- 'Friday workout' for any day's exercises",
             "- 'when is leg day?' or 'is today a rest day?'",
@@ -521,7 +445,10 @@ def usage() -> str:
 def plan(text: str, now: date) -> Optional[str]:
     """Answer a question about the workout plan, or ``None`` if it isn't one.
 
-    ``now`` (a datetime or date) decides what "today" and "tomorrow" mean.
+    ``now`` (a datetime or date) decides what "today" and "tomorrow" mean. A
+    reply needs the workout project, so it can raise
+    :class:`~jarvis.projects.ProjectUnavailable` or
+    :class:`~jarvis.projects.ProjectError`; ``None`` never does.
     """
 
     prepared = whole = _prepare(text)
@@ -554,14 +481,14 @@ def plan(text: str, now: date) -> Optional[str]:
         if kind.pattern.search(prepared):
             if reference is None and _IS_IT_RE.search(prepared):
                 reference = (today, "today")
-            return _kind_reply(kind, reference, today)
+            return _kind_reply(kind, reference, today, program().week)
     if reference is not None:
         index, when = reference
-        return _day_reply(WEEK[index], when)
+        return _day_reply(program().week[index], when)
     if _GENERIC_RE.search(prepared):
         return None
     if _WEEK_RE.search(prepared):
-        return _week_reply(today)
+        return _week_reply(today, program())
     if _TODAY_RE.search(prepared):
-        return _day_reply(WEEK[today], "today")
+        return _day_reply(program().week[today], "today")
     return None

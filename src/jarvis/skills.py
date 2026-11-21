@@ -6,7 +6,7 @@ import calendar
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
+from functools import partial, wraps
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence, Tuple
 
 from jarvis import (
@@ -22,6 +22,7 @@ from jarvis import (
     knowledge,
     papertrade,
     percentages,
+    projects,
     signlanguage,
     sketch,
     tax,
@@ -2754,11 +2755,37 @@ def _emergency_share(
 
 
 # --- Connected projects -------------------------------------------------------
-# beat-it, workout and 5-Mins are the author's own apps. Their data and logic
-# live in jarvis.cancer, jarvis.workout and jarvis.alerts, and every reply ends
-# with a link back to the app it came from.
+# beat-it, workout, Portfolio-Watcher, OpenTrading, tax-break and 5-Mins are the
+# author's own apps. Jarvis uses them straight from their repositories (git
+# submodules in projects/, see jarvis.projects): jarvis.cancer, jarvis.workout,
+# jarvis.investing, jarvis.papertrade, jarvis.tax and jarvis.alerts only read
+# the question and word the project's answer, and every reply ends with a link
+# back to the app it came from.
+
+_Handler = Callable[[Match[str], SkillContext], str]
 
 
+def _uses_project(name: str) -> Callable[[_Handler], _Handler]:
+    """Reply with set-up steps, or what failed, when project ``name`` can't answer."""
+
+    site = projects.PROJECTS[name].site
+
+    def wrap(handler: _Handler) -> _Handler:
+        @wraps(handler)
+        def run(match: Match[str], context: SkillContext) -> str:
+            try:
+                return handler(match, context)
+            except projects.ProjectUnavailable as exc:
+                return str(exc)
+            except projects.ProjectError as exc:
+                return f"Sorry, I couldn't use {name} for that ({exc}). The app is at {site}"
+
+        return run
+
+    return wrap
+
+
+@_uses_project("beat-it")
 def _cancer_info(match: Match[str], context: SkillContext) -> str:
     text = match.string
     if any(
@@ -2769,33 +2796,37 @@ def _cancer_info(match: Match[str], context: SkillContext) -> str:
     return cancer.answer(text) or _continue_after("cancer-info", match, context)
 
 
+@_uses_project("beat-it")
 def _cancer_topics(match: Match[str], context: SkillContext) -> str:
     return cancer.topics()
 
 
+@_uses_project("workout")
 def _workout_plan(match: Match[str], context: SkillContext) -> str:
     return workout.plan(match.string, context.now()) or _continue_after(
         "workout-plan", match, context
     )
 
 
-# Portfolio-Watcher's investment maths and OpenTrading's paper trading live in
-# jarvis.investing and jarvis.papertrade. Paper trades use demo prices and
-# pretend cash; Jarvis never places a real order.
+# Paper trades use OpenTrading's demo prices and pretend cash; Jarvis never
+# places a real order.
 
 
+@_uses_project("Portfolio-Watcher")
 def _investment_math(match: Match[str], context: SkillContext) -> str:
     return investing.solve(match.string) or _continue_after(
         "investment-math", match, context, default=investing.usage()
     )
 
 
+@_uses_project("OpenTrading")
 def _paper_trading(match: Match[str], context: SkillContext) -> str:
     return papertrade.handle(match.string, context.memory) or _continue_after(
         "paper-trading", match, context
     )
 
 
+@_uses_project("tax-break")
 def _tax_estimate(match: Match[str], context: SkillContext) -> str:
     reply = tax.estimate(match.string)
     if reply:
@@ -2835,15 +2866,20 @@ def _live_feed(context: SkillContext, text: str, note: str, fetch: Callable[[], 
         return f"{exc}\n{alerts.CREDIT}"
 
 
+@_uses_project("5-Mins")
 def _weather(match: Match[str], context: SkillContext) -> str:
     place = _feed_place(match)
     if not place:
         return alerts.usage()
     return _live_feed(
-        context, match.string, f"checking Open-Meteo for '{place}'", partial(alerts.weather, place)
+        context,
+        match.string,
+        f"checking the weather in '{place}' with 5-Mins",
+        partial(alerts.weather, place),
     )
 
 
+@_uses_project("5-Mins")
 def _hazard_alerts(match: Match[str], context: SkillContext) -> str:
     place = _feed_place(match)
     if not place:
@@ -2851,13 +2887,16 @@ def _hazard_alerts(match: Match[str], context: SkillContext) -> str:
     return _live_feed(
         context,
         match.string,
-        f"checking hazard feeds near '{place}'",
+        f"checking alerts near '{place}' with 5-Mins",
         partial(alerts.hazards, place),
     )
 
 
+@_uses_project("5-Mins")
 def _space_weather(match: Match[str], context: SkillContext) -> str:
-    return _live_feed(context, match.string, "checking NOAA SWPC", alerts.space_weather)
+    return _live_feed(
+        context, match.string, "checking worldwide alerts with 5-Mins", alerts.space_weather
+    )
 
 
 _END = r"\s*[?!.]*\s*$"
@@ -3644,8 +3683,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
             Skill(
                 name="space-weather",
                 description=(
-                    "Read the latest NOAA space weather alerts, watches and warnings "
-                    "(online)."
+                    "Read the latest space weather and other worldwide alerts (online)."
                 ),
                 patterns=[
                     r"^\s*(?:(?:what(?:'s|\s+is)|how(?:'s|\s+is)|show(?:\s+me)?|check|get|any"
@@ -4515,7 +4553,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 name="tax-estimate",
                 description=(
                     "Estimate income tax and take-home pay on a salary in India, the UK, "
-                    "the US, Ireland, the Netherlands or Singapore with tax-break's tables."
+                    "the US, Ireland, the Netherlands or Singapore with tax-break's tax engine."
                 ),
                 patterns=[
                     r"^(?=[\s\S]*\d)(?=[\s\S]*\b(?:income[- ]?tax(?:es)?|tax(?:es|ed|ation)?"

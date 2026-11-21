@@ -1,26 +1,29 @@
-"""Curated cancer information from beat-it, available offline.
+"""Answer questions about cancer from the user's beat-it project.
 
 beat-it (https://charles2ke.github.io/beat-it/, source at
 https://github.com/charles2ke/beat-it) is the user's own cancer information
-site. :mod:`jarvis.cancer_data` is generated from its
-``site/data/cancers.json``, ``site/data/faq.json`` and
-``site/data/facts.json`` at commit 647f8d154681 (AGPL-3.0; the package
-metadata says AGPL-3.0-only) by ``scripts/import_beat_it.py``. The daily
-``updates.json`` feed (research, trials and news) and each entry's search
-``query`` are not ported.
+site. Jarvis keeps no copy of it: every reply is built from the project's own
+``site/data/cancers.json`` (its cancer types), ``site/data/faq.json`` and
+``site/data/facts.json`` (worldwide figures), read from the
+``projects/beat-it`` submodule once per process. beat-it is a static site, so
+this needs no Node.js. Its research, trial and news updates are not read.
 
 :func:`answer` turns a question into a short plain-text reply: an overview of
-one of 22 cancer types, one part of it (symptoms, risk factors, screening,
-treatments, medicines or recent FDA approvals), one of beat-it's FAQs or its
+one of beat-it's cancer types, one part of it (symptoms, risk factors,
+screening, treatments, medicines or FDA approvals), one of its FAQs or its
 worldwide figures. It returns ``None`` when the text is not about cancer in
 people — the star sign, the Tropic of Cancer, "a cancer on society" — so the
-caller can fall back to something else.
+caller can fall back to something else; those checks don't need the project.
 
 Nothing here is medical advice, and Jarvis never diagnoses. Questions about
 someone's own symptoms get a gentle "please see a doctor" reply, people who
 say that they or someone close to them has cancer get a kind acknowledgement
-first, and every reply ends with a disclaimer and a credit line. The data is
-a snapshot, so replies say when beat-it last reviewed it.
+first, and replies end with a disclaimer and a credit line. Replies about a
+type say when beat-it last reviewed it, when the project gives that date.
+
+When the project is missing, :func:`answer`, :func:`topics` and :func:`names`
+raise :class:`jarvis.projects.ProjectUnavailable` with setup steps; data they
+can't use raises :class:`jarvis.projects.ProjectError`.
 """
 
 from __future__ import annotations
@@ -28,32 +31,27 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from difflib import get_close_matches
-from typing import Dict, List, Optional, Sequence, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from jarvis.cancer_data import CANCERS as _RAW_CANCERS
-from jarvis.cancer_data import FACTS as _RAW_FACTS
-from jarvis.cancer_data import FAQS as _RAW_FAQS
+from jarvis import projects
 from jarvis.dates import MONTH_NAMES
 
 PROJECT = "beat-it"
-SITE_URL = "https://charles2ke.github.io/beat-it/"
-REPO_URL = "https://github.com/charles2ke/beat-it"
+SITE_URL = projects.PROJECTS[PROJECT].site
+REPO_URL = projects.PROJECTS[PROJECT].repo
 CREDIT = f"From {PROJECT}: {SITE_URL}"
 DISCLAIMER = (
     "General information, not medical advice or a diagnosis — talk to a "
     "doctor about your own situation."
 )
+_CARE_TEAM_NOTE = "Which of these suits someone is for their care team to decide."
 
-# beat-it's own wording, from its type pages.
-TREATMENT_NOTE = (
-    "Treatment depends on the cancer's type, stage, biomarkers and the "
-    "individual."
-)
-MEDICINES_NOTE = (
-    "Examples of approved medicines, not a complete list or a recommendation. "
-    "Eligibility depends on stage, biomarkers and prior treatment."
-)
+_CANCERS_FILE = "site/data/cancers.json"
+_FAQ_FILE = "site/data/faq.json"
+_FACTS_FILE = "site/data/facts.json"
 
 
 @dataclass(frozen=True)
@@ -66,7 +64,7 @@ class Link:
 
 @dataclass(frozen=True)
 class Medicine:
-    """An example medicine; ``since`` is the date of a new FDA approval."""
+    """An example medicine; ``since`` is the date of its FDA approval, if given."""
 
     name: str
     use: str
@@ -80,12 +78,11 @@ class Approval:
     date: str
     drug: str
     text: str
-    url: str
 
 
 @dataclass(frozen=True)
 class Cancer:
-    """One cancer type as beat-it describes it."""
+    """One cancer type as beat-it describes it; empty fields weren't given."""
 
     id: str
     name: str
@@ -100,28 +97,42 @@ class Cancer:
     treatments: Tuple[str, ...]
     medicines: Tuple[Medicine, ...]
     approvals: Tuple[Approval, ...]  # newest first
-    reviewed: str
+    reviewed: Optional[str]
 
     @property
     def short(self) -> str:
-        """The name to suggest in follow-up requests, e.g. ``lung cancer``."""
+        """The name to suggest in follow-up requests, e.g. ``lung cancer``.
 
-        return _SHORT_NAMES.get(self.id) or _strip_parenthetical(self.name).lower()
+        A long name gives way to an alias made of its first and last words, so
+        "Nose and throat tumors" would be "nose tumor" if that were an alias.
+        """
+
+        words = _singular(_normalise(_strip_parenthetical(self.name))).split()
+        if len(words) > 2:
+            brief = f"{words[0]} {words[-1]}"
+            if any(_singular(_normalise(alias)) == brief for alias in self.aliases):
+                return brief
+        return " ".join(words)
 
     @property
     def label(self) -> str:
-        """The name in running text, e.g. ``skin cancer (melanoma)``."""
+        """The name in running text, e.g. ``bone cancer (osteosarcoma)``."""
 
         return self.name[:1].lower() + self.name[1:]
 
 
 @dataclass(frozen=True)
 class Faq:
-    """One of beat-it's frequently asked questions."""
+    """One of beat-it's frequently asked questions.
+
+    ``topic`` is the name of the first of Jarvis's FAQ topics (see
+    ``_FAQ_TOPICS``) the question is about, or empty.
+    """
 
     question: str
     answer: str
     link: str
+    topic: str = ""
 
 
 @dataclass(frozen=True)
@@ -131,57 +142,176 @@ class Fact:
     value: str
     label: str
     source: str
-    url: str
-
-
-_SHORT_NAMES: Dict[str, str] = {"brain": "brain tumor", "childhood": "childhood cancer"}
 
 
 def _strip_parenthetical(name: str) -> str:
     return re.sub(r"\s*\([^)]*\)", "", name).strip()
 
 
-def _cancer(raw: Dict) -> Cancer:
-    source = raw["screening_source"]
-    approvals = sorted(
-        (Approval(**approval) for approval in raw["approvals"]),
-        key=lambda approval: approval.date,
-        reverse=True,
-    )
+def _singular(text: str) -> str:
+    """``bone cancer`` for ``bone cancers``."""
+
+    return re.sub(r"\b(cancer|tumor|carcinoma)s$", r"\1", text)
+
+
+# ---------------------------------------------------------------- beat-it's data
+
+
+def _problem(file: str, what: str) -> projects.ProjectError:
+    return projects.ProjectError(f"beat-it's {file} {what}")
+
+
+def _text(item: Any, key: str, file: str, *, required: bool = True) -> str:
+    value = item.get(key) if isinstance(item, dict) else None
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or (required and not value.strip()):
+        raise _problem(file, f"has no usable {key!r}")
+    return value.strip()
+
+
+def _texts(item: Dict[str, Any], key: str, file: str) -> Tuple[str, ...]:
+    value = item.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        raise _problem(file, f"has an unusable {key!r} list")
+    return tuple(v.strip() for v in value)
+
+
+def _objects(item: Dict[str, Any], key: str, file: str) -> List[Dict[str, Any]]:
+    value = item.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        raise _problem(file, f"has an unusable {key!r} list")
+    return value
+
+
+def _iso_date(item: Dict[str, Any], key: str, file: str) -> Optional[str]:
+    """``item[key]`` as a ``YYYY-MM-DD`` date, or ``None`` when it isn't given."""
+
+    value = item.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            pass
+        else:
+            return value
+    raise _problem(file, f"has an unusable {key!r} date: {value!r}")
+
+
+def _read_approval(raw: Dict[str, Any], file: str) -> Approval:
+    when = _iso_date(raw, "date", file)
+    if when is None:
+        raise _problem(file, "has an approval without a 'date'")
+    return Approval(when, _text(raw, "drug", file), _text(raw, "text", file))
+
+
+def _cancer(item: Any) -> Cancer:
+    file = "cancers.json"
+    if not isinstance(item, dict):
+        raise _problem(file, "has a cancer type that isn't an object")
+    source = item.get("screeningSource")
+    if source is not None and not isinstance(source, dict):
+        raise _problem(file, "has an unusable 'screeningSource'")
+    approvals = [_read_approval(raw, file) for raw in _objects(item, "approvals", file)]
     return Cancer(
-        id=raw["id"],
-        name=raw["name"],
-        group=raw["group"],
-        aliases=tuple(raw["aliases"]),
-        nci=raw["nci"],
-        summary=raw["summary"],
-        symptoms=tuple(raw["symptoms"]),
-        risk_factors=tuple(raw["risk_factors"]),
-        screening=raw["screening"],
-        screening_source=Link(source["name"], source["url"]) if source else None,
-        treatments=tuple(raw["treatments"]),
-        medicines=tuple(
-            Medicine(item["name"], item["use"], item["since"]) for item in raw["medicines"]
+        id=_text(item, "id", file),
+        name=_text(item, "name", file),
+        group=_text(item, "group", file),
+        aliases=_texts(item, "aliases", file),
+        nci=_text(item, "nci", file, required=False),
+        summary=_text(item, "summary", file),
+        symptoms=_texts(item, "symptoms", file),
+        risk_factors=_texts(item, "riskFactors", file),
+        screening=_text(item, "screening", file, required=False),
+        screening_source=(
+            Link(_text(source, "name", file), _text(source, "url", file)) if source else None
         ),
-        approvals=tuple(approvals),
-        reviewed=raw["reviewed"],
+        treatments=_texts(item, "treatments", file),
+        medicines=tuple(
+            Medicine(_text(raw, "name", file), _text(raw, "use", file), _iso_date(raw, "since", file))
+            for raw in _objects(item, "medicines", file)
+        ),
+        approvals=tuple(sorted(approvals, key=lambda approval: approval.date, reverse=True)),
+        reviewed=_iso_date(item, "reviewed", file),
     )
 
 
-CANCERS: Tuple[Cancer, ...] = tuple(_cancer(raw) for raw in _RAW_CANCERS)
-FAQS: Tuple[Faq, ...] = tuple(Faq(raw["q"], raw["a"], raw["link"]) for raw in _RAW_FAQS)
-FACTS_TITLE: str = _RAW_FACTS["title"]
-FACTS_INTRO: str = _RAW_FACTS["intro"]
-FACTS: Tuple[Fact, ...] = tuple(
-    Fact(raw["value"], raw["label"], raw["source"], raw["url"]) for raw in _RAW_FACTS["facts"]
-)
+@lru_cache(maxsize=1)
+def _entries() -> Tuple[Cancer, ...]:
+    """beat-it's cancer types, in its order (read once per process)."""
 
-#: Entry display names, in beat-it's order, for the site topic index.
-NAMES: Tuple[str, ...] = tuple(cancer.name for cancer in CANCERS)
-#: The latest date beat-it reviewed an entry (ISO format).
-REVIEWED: str = max(cancer.reviewed for cancer in CANCERS)
+    data = projects.read_json(PROJECT, _CANCERS_FILE)
+    if not isinstance(data, list) or not data:
+        raise _problem("cancers.json", "lists no cancer types")
+    entries = tuple(_cancer(item) for item in data)
+    if len({entry.id for entry in entries}) != len(entries):
+        raise _problem("cancers.json", "lists a cancer type twice")
+    return entries
 
-_FAQ_BY_QUESTION: Dict[str, Faq] = {faq.question: faq for faq in FAQS}
+
+@lru_cache(maxsize=1)
+def _faqs() -> Tuple[Faq, ...]:
+    """beat-it's FAQs, in its order (read once per process)."""
+
+    data = projects.read_json(PROJECT, _FAQ_FILE)
+    if not isinstance(data, list):
+        raise _problem("faq.json", "isn't a list of questions")
+    faqs = []
+    for item in data:
+        question = _text(item, "q", "faq.json")
+        prepared = _prepare(question)
+        topic = next((name for name, pattern, _ in _FAQ_TOPICS if pattern.search(prepared)), "")
+        faqs.append(
+            Faq(
+                question,
+                _text(item, "a", "faq.json"),
+                _text(item, "link", "faq.json", required=False),
+                topic,
+            )
+        )
+    return tuple(faqs)
+
+
+@lru_cache(maxsize=1)
+def _figures() -> Tuple[str, Tuple[Fact, ...]]:
+    """beat-it's heading for its worldwide figures, and the figures (read once)."""
+
+    file = "facts.json"
+    data = projects.read_json(PROJECT, _FACTS_FILE)
+    items = data.get("facts") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        raise _problem(file, "lists no figures")
+    title = _text(data, "title", file, required=False)
+    intro = _text(data, "intro", file, required=False)
+    facts = tuple(
+        Fact(_text(item, "value", file), _text(item, "label", file),
+             _text(item, "source", file, required=False))
+        for item in items
+    )
+    return ": ".join(part for part in (title, intro) if part), facts
+
+
+def _clear_cache() -> None:
+    """Forget what was read from beat-it, so it is read again (for tests)."""
+
+    for cached in (_entries, _faqs, _figures, _lookup):
+        cached.cache_clear()
+
+
+def names() -> Tuple[str, ...]:
+    """The names of beat-it's cancer types, in its order (e.g. for a topic index)."""
+
+    return tuple(entry.name for entry in _entries())
+
+
+def _latest_review(entries: Sequence[Cancer]) -> Optional[str]:
+    return max((entry.reviewed for entry in entries if entry.reviewed), default=None)
 
 
 def _date(iso: str) -> str:
@@ -191,29 +321,7 @@ def _date(iso: str) -> str:
     return f"{day} {MONTH_NAMES[month]} {year}"
 
 
-def _months_between(earlier: str, later: str) -> int:
-    first = [int(part) for part in earlier.split("-")]
-    second = [int(part) for part in later.split("-")]
-    months = (second[0] - first[0]) * 12 + second[1] - first[1]
-    return months - (1 if second[2] < first[2] else 0)
-
-
 # ---------------------------------------------------------------- normalising
-
-# beat-it's own British-to-US folding, so "tumour" finds "tumor".
-_SPELLINGS = tuple(
-    (re.compile(pattern), replacement)
-    for pattern, replacement in (
-        (r"tumour", "tumor"),
-        (r"leukaem", "leukem"),
-        (r"oesophag", "esophag"),
-        (r"paediatr", "pediatr"),
-        (r"haem", "hem"),
-        (r"anaem", "anem"),
-        (r"oestr", "estr"),
-        (r"foetal", "fetal"),
-    )
-)
 
 _CONTRACTIONS = tuple(
     (re.compile(pattern), replacement)
@@ -277,7 +385,11 @@ _NOT_PERSONAL = (
 )
 _D = rf"\b{_DISEASE}\b{_NOT_PERSONAL}"
 
+# Long disease names whose typos are fixed, including British spellings such
+# as "tumour" and "leukaemia".
 _FUZZY_NAMES = (
+    "tumor",
+    "tumors",
     "leukemia",
     "lymphoma",
     "myeloma",
@@ -298,13 +410,11 @@ _FUZZY_NAMES = (
 
 
 def _normalise(text: str) -> str:
-    """Lower-case ``text``, fold accents and spellings, and drop punctuation."""
+    """Lower-case ``text``, fold accents and drop punctuation."""
 
     folded = unicodedata.normalize("NFKD", text or "")
     folded = "".join(ch for ch in folded if not unicodedata.combining(ch)).lower()
     folded = re.sub(r"[\u2018\u2019`]", "'", folded)
-    for pattern, replacement in _SPELLINGS:
-        folded = pattern.sub(replacement, folded)
     folded = re.sub(r"[^a-z0-9']+", " ", folded)
     folded = re.sub(r"(?<![a-z0-9])'+|'+(?![a-z0-9])", " ", folded)
     return re.sub(r"\s+", " ", folded).strip()
@@ -404,25 +514,19 @@ _OWN_PET_RE = re.compile(
 
 # ---------------------------------------------------------------- entry lookup
 
-# Extra names from beat-it's search synonyms. Organ words are "generic": they
-# only pick an entry when the text is clearly about cancer.
-_SYNONYMS: Dict[str, Tuple[str, ...]] = {
-    "colorectal": ("bowel", "colon", "rectal", "rectum"),
-    "stomach": ("gastric",),
-    "uterine": ("womb", "uterus", "endometrial"),
-    "cervical": ("cervix",),
-    "ovarian": ("ovaries",),
-    "pancreatic": ("pancreas",),
-    "prostate": ("prostrate",),
-    "esophageal": ("esophagus", "gullet"),
-    "brain": ("spinal cord", "brain tumor", "spinal cord tumor"),
-    "childhood": ("childhood cancer", "kids", "kid", "child", "children", "pediatric"),
-}
+# Names, ids and aliases from beat-it are the keys. Keys with a disease word
+# ("lung cancer", "NSCLC") are "specific"; organ words and markers ("stomach",
+# "HER2", "children") are "generic" and only pick an entry when the text is
+# clearly about cancer.
 _PERSON_KEYS = frozenset({"child", "children", "kid", "kids"})
 _POSSESSIVE_BEFORE = re.compile(r"\b(?:my|our|your|his|her|their)\s+$")
 _SPREAD_BEFORE = re.compile(
     r"\b(?:spread\w*|metasta\w*)\s+(?:to|into|in)\s+(?:(?:the|my|his|her|their|your)\s+)?$"
 )
+# "A and B tumor" also names "A tumor" and "B tumor".
+_AND_NAME_RE = re.compile(r"(?P<first>.+?) and (?P<second>.+) (?P<noun>cancer|tumor|carcinoma)")
+# "colon cancer" is also "cancer of the colon".
+_ORGAN_NAME_RE = re.compile(r"(?P<organ>.+) (?:cancer|tumor|carcinoma)")
 
 
 @dataclass(frozen=True)
@@ -433,44 +537,123 @@ class _Key:
     pattern: "re.Pattern[str]"
 
 
-def _keys() -> Tuple[_Key, ...]:
-    keys: List[_Key] = []
-    for cancer in CANCERS:
-        names = [cancer.name, _strip_parenthetical(cancer.name), cancer.id, *cancer.aliases]
-        names += re.findall(r"\(([^)]*)\)", cancer.name)
-        names += _SYNONYMS.get(cancer.id, ())
-        seen = set()
-        for name in names:
-            text = _normalise(name)
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            words = r"\s+".join(re.escape(word) for word in text.split())
-            pattern = re.compile(rf"(?<![a-z0-9']){words}(?:'s|s|es)?(?![a-z0-9'])")
-            keys.append(_Key(text, cancer, bool(_CONTEXT_RE.search(text)), pattern))
-    return tuple(keys)
+@dataclass(frozen=True)
+class _Lookup:
+    """What is built from beat-it's names to find them in a message."""
+
+    keys: Tuple[_Key, ...]
+    typo_targets: Tuple[str, ...]  # long words of the keys, for fixing slips
+    self_checks: Tuple["re.Pattern[str]", ...]
+    my_disease: "re.Pattern[str]"
 
 
-_KEYS = _keys()
-_KEY_WORDS = sorted(
-    {word for key in _KEYS for word in key.text.split() if not _DISEASE_ONLY_RE.fullmatch(word)},
-    key=len,
-    reverse=True,
-)
-_KEY_WORD_ALT = "|".join(re.escape(word) for word in _KEY_WORDS)
+def _words_pattern(text: str) -> str:
+    """``text`` as a pattern whose last word may be plural ("ovary", "ovaries")."""
+
+    *head, last = text.split()
+    if re.search(r"[^aeiou]y$", last):
+        ending = re.escape(last[:-1]) + "(?:y|ies)"
+    else:
+        ending = re.escape(last) + "(?:s|es)?"
+    return r"\s+".join([*(re.escape(word) for word in head), ending])
+
+
+def _key_texts(entry: Cancer) -> List[str]:
+    names = [entry.name, _strip_parenthetical(entry.name), entry.id, *entry.aliases]
+    names += re.findall(r"\(([^)]*)\)", entry.name)
+    texts: List[str] = []
+    for name in names:
+        text = _singular(_normalise(name))
+        both = _AND_NAME_RE.fullmatch(text)
+        found = [text]
+        if both:
+            found += [f"{both['first']} {both['noun']}", f"{both['second']} {both['noun']}"]
+        texts += [item for item in found if item and item not in texts]
+    return texts
+
+
+def _key(text: str, entry: Cancer) -> _Key:
+    pattern = _words_pattern(text) + "(?:'s)?"
+    organ = _ORGAN_NAME_RE.fullmatch(text)
+    if organ:
+        pattern += (
+            r"|(?:cancers?|tumors?|carcinomas?)\s+of\s+"
+            rf"(?:(?:the|my|his|her|their|your|our|a|an)\s+)?{_words_pattern(organ['organ'])}"
+        )
+    compiled = re.compile(rf"(?<![a-z0-9'])(?:{pattern})(?![a-z0-9'])")
+    return _Key(text, entry, bool(_CONTEXT_RE.search(text)), compiled)
+
+
+@lru_cache(maxsize=1)
+def _lookup() -> _Lookup:
+    """The keys and patterns built from beat-it's names (built once per process)."""
+
+    keys = tuple(_key(text, entry) for entry in _entries() for text in _key_texts(entry))
+    words = sorted(
+        {word for key in keys for word in key.text.split() if not _DISEASE_ONLY_RE.fullmatch(word)},
+        key=lambda word: (-len(word), word),
+    )
+    alternation = "|".join(re.escape(word) for word in words) or "(?!)"
+    return _Lookup(
+        keys=keys,
+        typo_targets=tuple(word for word in words if len(word) >= 6),
+        self_checks=_self_check_patterns(alternation),
+        my_disease=_my_disease_pattern(alternation),
+    )
+
+
+def _one_edit_apart(first: str, second: str) -> bool:
+    """Whether adding, dropping, changing or swapping one letter turns one into the other."""
+
+    if first == second or abs(len(first) - len(second)) > 1:
+        return False
+    short, long = sorted((first, second), key=len)
+    start = 0
+    while start < len(short) and short[start] == long[start]:
+        start += 1
+    if len(short) < len(long):
+        return short[start:] == long[start + 1 :]
+    if short[start + 1 :] == long[start + 1 :]:
+        return True
+    swapped = short[start : start + 2] == long[start : start + 2][::-1]
+    return swapped and short[start + 2 :] == long[start + 2 :]
+
+
+def _fix_typos(prepared: str, targets: Sequence[str]) -> str:
+    """Fix one-letter slips in long words of beat-it's names ("prostrate", "oesophagus")."""
+
+    words = []
+    for word in prepared.split():
+        if len(word) >= 7 and word not in targets and not _DISEASE_ONLY_RE.fullmatch(word):
+            word = next((target for target in targets if _one_edit_apart(word, target)), word)
+        words.append(word)
+    return " ".join(words)
 
 
 def _find_entry(prepared: str, *, context: bool, gist: bool) -> Optional[Cancer]:
     """Return the cancer type ``prepared`` is about, or ``None``.
 
-    Names and specific aliases ("lung cancer", "NSCLC") always count; generic
-    ones ("stomach", "HER2", "children") only count when the text is clearly
-    about cancer. Ties go to specific keys, then the earliest, then the longest.
+    Specific keys always count; generic ones only count when the text is
+    clearly about cancer (``context``). Ties go to specific keys, then the
+    earliest, then the longest. When nothing matches, one-letter slips in long
+    words are fixed and the keys tried again.
     """
 
+    lookup = _lookup()
+    found = _match_entry(lookup.keys, prepared, context=context, gist=gist)
+    if found is None:
+        fixed = _fix_typos(prepared, lookup.typo_targets)
+        if fixed != prepared:
+            found = _match_entry(lookup.keys, fixed, context=context, gist=gist)
+    return found
+
+
+def _match_entry(
+    keys: Sequence[_Key], prepared: str, *, context: bool, gist: bool
+) -> Optional[Cancer]:
     best: Optional[Tuple[int, int, int]] = None
     found: Optional[Cancer] = None
-    for key in _KEYS:
+    for key in keys:
         if key.text == "gist":
             if not gist:
                 continue
@@ -706,12 +889,14 @@ _SYMPTOM_THING = (
     r"|warts?|marks?|blemish\w*|hoarseness)"
 )
 _SYMPTOM_ANY = rf"(?:{_SYMPTOM_THING}|symptoms?|signs?)"
-_GAP = (
-    r"(?:be|been|mean|means|indicate|indicates|signal|signals|a|an|the|sign|signs|symptom"
+# Words that may come between "could this be" and "cancer"; the words of
+# beat-it's names are added when the patterns are built (_self_check_patterns).
+_GAP_WORDS = (
+    r"be|been|mean|means|indicate|indicates|signal|signals|a|an|the|sign|signs|symptom"
     r"|symptoms|of|early|turn|turning|into|become|develop|developing|that|i|have|has|got"
     r"|possibly|actually|really|just|maybe|definitely|probably|some|lump|lumps|bump|mole"
     r"|moles|spot|spots|growth|swelling|cough|pain|rash|sore|bleeding|thing|benign|or|not"
-    rf"|stage|\d+|{_KEY_WORD_ALT})"
+    r"|stage|\d+"
 )
 _TRAIL = (
     r"(?:\s+(?:or|in|on|of|and|because|since|from|like|if|when|though|even|too|then|right"
@@ -720,35 +905,44 @@ _TRAIL = (
 _WHO_REL = rf"my\s+(?P<mods>{_MODS})(?P<rel>{_REL})"
 _FILLER = r"(?:\s+[a-z0-9']+)"
 
-# Each pattern describes someone asking whether a symptom, or they, have cancer.
-_SELF_CHECK_RES = tuple(
-    re.compile(pattern)
-    for pattern in (
-        rf"\b(?:do|could|might|may|would) i (?:have|have got|got|be getting|be developing"
-        rf"|be having)\b(?!\s+to\b){_FILLER}{{0,4}}?\s+{_D}",
-        rf"\bam i (?:getting|developing|showing signs of)\b{_FILLER}{{0,3}}?\s+{_D}",
-        rf"\bwhat if (?:it is|this is|that is|i have|i have got|i am getting|i got)\b"
-        rf"{_FILLER}{{0,3}}?\s+{_D}",
-        rf"(?:^|\s)(?:is|are|could|might|may|can|would|will|does|do)\s+(?:this|that|it|these"
-        rf"|those)\s+(?:{_GAP}\s+){{0,6}}{_D}{_TRAIL}",
-        rf"(?:^|\s)(?:it|this|that|they|these)\s+(?:might|could|may|must)\s+(?:be|mean"
-        rf"|indicate)\b(?:\s+{_GAP})*?\s+{_D}{_TRAIL}",
-        rf"\b(?:is|are|could|might|may|can|would|will|does|do)\s+(?P<who>my|his|her|their"
-        rf"|this|that|these|those)\s+(?:[a-z0-9']+\s+){{0,2}}?{_SYMPTOM_ANY}\b"
-        rf"{_FILLER}{{0,6}}?\s+{_D}",
-        rf"\b(?:is|are|could|might|may|can|would|will|does|do)\s+the\s+(?:[a-z0-9']+\s+){{0,2}}?"
-        rf"{_SYMPTOM_THING}\b{_FILLER}{{0,6}}?\s+{_D}",
-        rf"\b{_THINK}\b(?:\s+(?:that|about|if|whether|like|maybe|really))*"
-        rf"\s+(?P<who>i|it|this|that|he|she|they|{_WHO_REL})\s+(?:(?:might|may|could|must"
-        r"|probably|really|actually|already|now|also|do|does|will|would)\s+)*(?:have|has|had"
-        rf"|got|is|am|are|be|been|getting|developing|get)\b{_FILLER}{{0,5}}?\s+{_D}",
-        rf"\bhow (?:do|would|can|could|will) i (?:know|tell|find out|check|be sure)\b"
-        rf"(?:\s+(?:if|whether))?\s+i (?:have|have got|might have|got|had)\b{_FILLER}{{0,4}}?"
-        rf"\s+{_D}",
-        rf"\b(?:does|do|could|might|may|would)\s+(?P<who>he|she|they|{_WHO_REL})\s+(?:have"
-        rf"|have got|got|be getting|be developing)\b(?!\s+to\b){_FILLER}{{0,4}}?\s+{_D}",
+
+def _self_check_patterns(name_words: str) -> Tuple["re.Pattern[str]", ...]:
+    """Patterns for someone asking whether a symptom, or they, have cancer.
+
+    ``name_words`` matches any word of beat-it's names ("breast", "cell").
+    """
+
+    gap = rf"(?:{_GAP_WORDS}|{name_words})"
+    return tuple(
+        re.compile(pattern)
+        for pattern in (
+            rf"\b(?:do|could|might|may|would) i (?:have|have got|got|be getting|be developing"
+            rf"|be having)\b(?!\s+to\b){_FILLER}{{0,4}}?\s+{_D}",
+            rf"\bam i (?:getting|developing|showing signs of)\b{_FILLER}{{0,3}}?\s+{_D}",
+            rf"\bwhat if (?:it is|this is|that is|i have|i have got|i am getting|i got)\b"
+            rf"{_FILLER}{{0,3}}?\s+{_D}",
+            rf"(?:^|\s)(?:is|are|could|might|may|can|would|will|does|do)\s+(?:this|that|it|these"
+            rf"|those)\s+(?:{gap}\s+){{0,6}}{_D}{_TRAIL}",
+            rf"(?:^|\s)(?:it|this|that|they|these)\s+(?:might|could|may|must)\s+(?:be|mean"
+            rf"|indicate)\b(?:\s+{gap})*?\s+{_D}{_TRAIL}",
+            rf"\b(?:is|are|could|might|may|can|would|will|does|do)\s+(?P<who>my|his|her|their"
+            rf"|this|that|these|those)\s+(?:[a-z0-9']+\s+){{0,2}}?{_SYMPTOM_ANY}\b"
+            rf"{_FILLER}{{0,6}}?\s+{_D}",
+            rf"\b(?:is|are|could|might|may|can|would|will|does|do)\s+the\s+(?:[a-z0-9']+\s+){{0,2}}?"
+            rf"{_SYMPTOM_THING}\b{_FILLER}{{0,6}}?\s+{_D}",
+            rf"\b{_THINK}\b(?:\s+(?:that|about|if|whether|like|maybe|really))*"
+            rf"\s+(?P<who>i|it|this|that|he|she|they|{_WHO_REL})\s+(?:(?:might|may|could|must"
+            r"|probably|really|actually|already|now|also|do|does|will|would)\s+)*(?:have|has|had"
+            rf"|got|is|am|are|be|been|getting|developing|get)\b{_FILLER}{{0,5}}?\s+{_D}",
+            rf"\bhow (?:do|would|can|could|will) i (?:know|tell|find out|check|be sure)\b"
+            rf"(?:\s+(?:if|whether))?\s+i (?:have|have got|might have|got|had)\b{_FILLER}{{0,4}}?"
+            rf"\s+{_D}",
+            rf"\b(?:does|do|could|might|may|would)\s+(?P<who>he|she|they|{_WHO_REL})\s+(?:have"
+            rf"|have got|got|be getting|be developing)\b(?!\s+to\b){_FILLER}{{0,4}}?\s+{_D}",
+        )
     )
-)
+
+
 # These need a disease word somewhere else in the message as well.
 _SYMPTOM_STATEMENT_RES = tuple(
     re.compile(pattern)
@@ -769,7 +963,7 @@ def _self_check(clauses: Sequence[str], prepared: str) -> Optional[_Person]:
 
     risky = bool(_RISK_WORDS_RE.search(prepared))
     for clause in clauses:
-        for index, pattern in enumerate(_SELF_CHECK_RES):
+        for index, pattern in enumerate(_lookup().self_checks):
             if index == 0 and risky:
                 continue
             match = pattern.search(clause)
@@ -989,13 +1183,18 @@ _POSSESSIVE_DISCLOSURE_RE = re.compile(
     rf"{_MY_REL}'s\s+(?:(?!(?:has|have|had|is|was|were|are|got|gets)\b)[a-z0-9]+\s+){{0,3}}?"
     rf"(?:{_DISEASE}|{_TREATMENT})\b{_NOT_PERSONAL}"
 )
-_MY_DISEASE_RE = re.compile(
-    rf"\bmy\s+(?:(?:{_KEY_WORD_ALT}|stage|\d+|metastatic|advanced|early|recurrent|secondary"
-    rf"|terminal|aggressive|rare)\s+){{0,3}}(?:{_DISEASE}|{_TREATMENT})\b"
-    r"(?!\s+(?:risks?|screening|tests?|scans?|scare|fears?|worr\w*|symptoms?|signs?|essays?"
-    r"|projects?|research|class|charit\w*|insurance|polic\w*|awareness|knowledge|questions?"
-    r"|homework|assignments?|reports?|presentations?)\b)"
-)
+def _my_disease_pattern(name_words: str) -> "re.Pattern[str]":
+    """A pattern for "my (breast) cancer"; ``name_words`` matches a word of beat-it's names."""
+
+    return re.compile(
+        rf"\bmy\s+(?:(?:{name_words}|stage|\d+|metastatic|advanced|early|recurrent|secondary"
+        rf"|terminal|aggressive|rare)\s+){{0,3}}(?:{_DISEASE}|{_TREATMENT})\b"
+        r"(?!\s+(?:risks?|screening|tests?|scans?|scare|fears?|worr\w*|symptoms?|signs?|essays?"
+        r"|projects?|research|class|charit\w*|insurance|polic\w*|awareness|knowledge|questions?"
+        r"|homework|assignments?|reports?|presentations?)\b)"
+    )
+
+
 _LOST_RE = re.compile(rf"\blost\s+(?:my|our)\s+(?P<mods>{_MODS})(?P<rel>{_REL})\s+to\b")
 _TOOK_RE = re.compile(
     rf"{_D}\s+(?:took|killed|claimed|stole|took away)\s+(?:my|our)\s+(?P<mods>{_MODS})"
@@ -1081,7 +1280,7 @@ def _disclosure(clauses: Sequence[str], prepared: str) -> Optional[_Disclosure]:
         if match and _clause_ok(match.group("verb"), match.group("clause")):
             verb = re.sub(r"\s+", " ", match.group("verb"))
             return _Disclosure(_YOU, _tense(verb, match.group("clause")), _disclosed(match))
-    match = _MY_DISEASE_RE.search(prepared)
+    match = _lookup().my_disease.search(prepared)
     if match:
         tense = "past" if _PAST_CLAUSE_RE.search(prepared) else "present"
         return _Disclosure(_YOU, tense, match.group(0))
@@ -1129,14 +1328,15 @@ _CONTAGIOUS_RE = re.compile(
     r"\bcontagious\b|\binfectious\b|\btransmissible\b|\bcatch(?:ing|able)?\b(?!\s+(?:it\s+"
     r"|cancer\s+)?early\b)|\bspread (?:from |between )(?:person|people)\b"
 )
-# Common types beat-it has no entry for, so they aren't mistaken for one it has
-# ("small bowel cancer" is not colorectal cancer).
+# Common cancer types that are easily mistaken for another ("small bowel
+# cancer" isn't colorectal cancer). One counts as covered when one of beat-it's
+# names starts the phrase (see _uncovered_name).
 _UNCOVERED_RE = re.compile(
     r"\b(?:mesotheliomas?|(?:testicular|testis|anal|vulvar|vulval|vaginal|penile|eye|ocular"
     r"|uveal|adrenal|appendix|appendiceal|gallbladder|gall bladder|thymus|thymic"
     r"|small intestine|small bowel|carcinoid|heart) (?:cancers?|tumors?|carcinomas?))\b"
 )
-# beat-it has no history of cancer research, so these get the honest fallback.
+# Questions about the history of cancer research get the fallback reply.
 _HISTORY_RE = re.compile(
     r"\b(?:who|when)\s+(?:[a-z0-9']+\s+){0,4}?(?:discovered|invented|developed|founded)\b"
     r"|\bhistory\s+of\b|\b(?:discovery|invention)\s+of\b"
@@ -1151,96 +1351,101 @@ _FILLER_WORDS = frozenset(
     " simple terms briefly quick quickly so ok okay".split()
 )
 
-# (question, pattern, when) — "always" applies even when a cancer type is
-# named, "define" only for "what is/does … mean" questions in that case, and
-# "no_entry" only when no type is named.
-_FAQ_RULES: Tuple[Tuple[str, str, str], ...] = (
-    (
-        "What is biomarker testing?",
-        r"\bbiomarker\w*|\bgenomic (?:test\w*|profil\w*)|\bmolecular (?:test\w*|profil\w*)"
-        r"|\btumor (?:genomic |genetic |molecular )?(?:test\w*|profil\w*)"
-        r"|\bgenetic (?:test\w*|profil\w*) (?:of|on) (?:the |a |my )?tumor",
-        "always",
-    ),
-    (
-        "What is immunotherapy?",
-        r"\bimmunotherap\w*|\bcheckpoint inhibitors?\b|\bcar t\b|\bbispecific\w*",
-        "always",
-    ),
-    (
-        "What is targeted therapy?",
-        r"\btargeted (?:therap\w*|drugs?|treatments?|medicines?)\b",
-        "always",
-    ),
-    (
-        "What does accelerated approval mean?",
-        r"\baccelerated approval\w*|\bfast track\w*|\bbreakthrough therap\w*|\bpriority review\b",
-        "define",
-    ),
-    (
-        "How can I find a clinical trial?",
-        r"\bclinical (?:trials?|studies|study)\b|\btrials?\b|\bresearch stud(?:y|ies)\b",
-        "always",
-    ),
-    (
-        "What is cancer staging?",
-        r"\bstaging\b|\btnm\b|\bstages\b|\bwhat (?:is|are|does) (?:a |the )?stages?\b"
-        r"|\bstage (?:[a-z0-9]+ )?mean",
-        "always",
-    ),
-    (
-        "What are common side effects of treatment?",
-        r"\bside effects?\b|\bhair loss\b|\blos(?:e|ing) (?:my |your |their |his |her )?hair\b"
-        r"|\bnausea\b|\bneuropathy\b|\bafter effects?\b|\b(?:pain|tired\w*|fatigue|sick"
-        r"|nause\w*|sore\w*|rash\w*|numb\w*|tingl\w*)\b.*\b(?:from|after|since|during"
-        rf"|because of)\s+(?:my\s+|the\s+|his\s+|her\s+)?(?:{_CHEMO}|radiotherapy|radiation"
-        r"|immunotherap\w*|treatment)",
-        "always",
-    ),
-    (
-        "What is palliative care?",
-        r"\bpalliative\b|\bhospice\b|\bend of life\b|\bcomfort care\b|\bsupportive care\b",
-        "always",
-    ),
-    (
-        "Is cancer hereditary?",
-        r"\bhereditar\w*|\binherit\w*|\bgenetic\w*|\bgenes?\b|\bruns? in (?:the |my |our |your "
-        r"|his |her |their )?famil\w*|\bfamily history\b|\bbrca\w*|\blynch\b"
-        r"|\bpass(?:ed)? (?:it )?(?:on|down)\b|\bin (?:my|our|the|his|her|their) family\b",
-        "always",
-    ),
-    (
-        "Where can I get support?",
-        r"\bsupport\b|\bhelplines?\b|\bhotlines?\b|\bhelp line\b|\bcounsel+ing\b"
-        r"|\bsomeone to talk to\b|\bcop(?:e|ing)\b|\bcaregivers?\b|\bcarers?\b|\bcaring for\b"
-        r"|\bcharit(?:y|ies)\b|\bfinancial help\b",
-        "always",
-    ),
-    (
-        "Can cancer be prevented?",
-        r"\bprevent\w*|\b(?:reduce|lower|cut) (?:my |your |the |our )?(?:risk|chances?)\b"
-        r"|\bavoid (?:getting )?(?:cancer|it)\b",
-        "no_entry",
-    ),
-    (
-        "Are there new ways to get screened for cancer?",
-        r"\bnew (?:ways?|tests?|methods?|options?)\b.*\bscreen\w*|\bscreen\w*.*\bnew\b"
-        r"|\bself (?:collect\w*|sampl\w*|test\w*)|\bhome (?:test\w*|kits?|screening)\b"
-        r"|\bblood tests?\b",
-        "no_entry",
-    ),
+# Jarvis's FAQ topics as (topic, pattern, when): "always" applies even when a
+# cancer type is named, "define" only to "what is/does … mean" questions then,
+# and "no_entry" only when no type is named. Each of beat-it's questions is on
+# the first topic its wording matches, if any.
+_FAQ_TOPICS: Tuple[Tuple[str, "re.Pattern[str]", str], ...] = tuple(
+    (topic, re.compile(pattern), when)
+    for topic, pattern, when in (
+        (
+            "biomarkers",
+            r"\bbiomarker\w*|\bgenomic (?:test\w*|profil\w*)|\bmolecular (?:test\w*|profil\w*)"
+            r"|\btumor (?:genomic |genetic |molecular )?(?:test\w*|profil\w*)"
+            r"|\bgenetic (?:test\w*|profil\w*) (?:of|on) (?:the |a |my )?tumor",
+            "always",
+        ),
+        (
+            "immunotherapy",
+            r"\bimmunotherap\w*|\bcheckpoint inhibitors?\b|\bcar t\b|\bbispecific\w*",
+            "always",
+        ),
+        (
+            "targeted therapy",
+            r"\btargeted (?:therap\w*|drugs?|treatments?|medicines?)\b",
+            "always",
+        ),
+        (
+            "accelerated approval",
+            r"\baccelerated approval\w*|\bfast track\w*|\bbreakthrough therap\w*"
+            r"|\bpriority review\b",
+            "define",
+        ),
+        (
+            "clinical trials",
+            r"\bclinical (?:trials?|studies|study)\b|\btrials?\b|\bresearch stud(?:y|ies)\b",
+            "always",
+        ),
+        (
+            "staging",
+            r"\bstaging\b|\btnm\b|\bstages\b|\bwhat (?:is|are|does) (?:a |the )?stages?\b"
+            r"|\bstage (?:[a-z0-9]+ )?mean",
+            "always",
+        ),
+        (
+            "side effects",
+            r"\bside effects?\b|\bhair loss\b|\blos(?:e|ing) (?:my |your |their |his |her )?hair\b"
+            r"|\bnausea\b|\bneuropathy\b|\bafter effects?\b|\b(?:pain|tired\w*|fatigue|sick"
+            r"|nause\w*|sore\w*|rash\w*|numb\w*|tingl\w*)\b.*\b(?:from|after|since|during"
+            rf"|because of)\s+(?:my\s+|the\s+|his\s+|her\s+)?(?:{_CHEMO}|radiotherapy|radiation"
+            r"|immunotherap\w*|treatment)",
+            "always",
+        ),
+        (
+            "palliative care",
+            r"\bpalliative\b|\bhospice\b|\bend of life\b|\bcomfort care\b|\bsupportive care\b",
+            "always",
+        ),
+        (
+            "heredity",
+            r"\bhereditar\w*|\binherit\w*|\bgenetic\w*|\bgenes?\b|\bruns? in (?:the |my |our "
+            r"|your |his |her |their )?famil\w*|\bfamily history\b|\bbrca\w*|\blynch\b"
+            r"|\bpass(?:ed)? (?:it )?(?:on|down)\b|\bin (?:my|our|the|his|her|their) family\b",
+            "always",
+        ),
+        (
+            "support",
+            r"\bsupport\b|\bhelplines?\b|\bhotlines?\b|\bhelp line\b|\bcounsel+ing\b"
+            r"|\bsomeone to talk to\b|\bcop(?:e|ing)\b|\bcaregivers?\b|\bcarers?\b"
+            r"|\bcaring for\b|\bcharit(?:y|ies)\b|\bfinancial help\b",
+            "always",
+        ),
+        (
+            "prevention",
+            r"\bprevent\w*|\b(?:reduce|lower|cut) (?:my |your |the |our )?(?:risk|chances?)\b"
+            r"|\bavoid (?:getting )?(?:cancer|it)\b",
+            "no_entry",
+        ),
+        (
+            "new screening",
+            r"\bnew (?:ways?|tests?|methods?|options?)\b.*\bscreen\w*|\bscreen\w*.*\bnew\b"
+            r"|\bself (?:collect\w*|sampl\w*|test\w*)|\bhome (?:test\w*|kits?|screening)\b"
+            r"|\bblood tests?\b",
+            "no_entry",
+        ),
+    )
 )
-_FAQ_RES = tuple((question, re.compile(pattern), when) for question, pattern, when in _FAQ_RULES)
 _DEFINE_RE = re.compile(r"\bwhat (?:is|are|does)\b|\bmean(?:s|ing)?\b|\bexplain\b|\bdefin\w*")
-# A follow-up to suggest when an FAQ answers a question about one type.
+# A follow-up to suggest when an FAQ on one of these topics answers a question
+# about one type.
 _FAQ_POINTERS: Dict[str, str] = {
-    "What is biomarker testing?": "treatments",
-    "What is immunotherapy?": "medicines",
-    "What is targeted therapy?": "medicines",
-    "What does accelerated approval mean?": "approvals",
-    "How can I find a clinical trial?": "approvals",
-    "What are common side effects of treatment?": "treatments",
-    "Is cancer hereditary?": "risk factors",
+    "biomarkers": "treatments",
+    "immunotherapy": "medicines",
+    "targeted therapy": "medicines",
+    "accelerated approval": "approvals",
+    "clinical trials": "approvals",
+    "side effects": "treatments",
+    "heredity": "risk factors",
 }
 
 _SECTION_ORDER = ("symptoms", "risk factors", "screening", "treatments", "medicines", "approvals")
@@ -1290,7 +1495,7 @@ _WEAK_TREATMENT_RE = re.compile(r"\boptions?\b")
 
 
 def _sections(prepared: str) -> List[str]:
-    """Return the entry sections asked about, in beat-it's page order."""
+    """Return the entry sections asked about, in ``_SECTION_ORDER``."""
 
     found = set()
     remaining = prepared
@@ -1306,19 +1511,45 @@ def _sections(prepared: str) -> List[str]:
 
 
 def _faq(prepared: str, entry: Optional[Cancer]) -> Optional[Faq]:
-    for question, pattern, when in _FAQ_RES:
+    for topic, pattern, when in _FAQ_TOPICS:
         if not pattern.search(prepared):
             continue
-        if entry is None or when == "always":
-            return _FAQ_BY_QUESTION[question]
-        if when == "define" and _DEFINE_RE.search(prepared):
-            return _FAQ_BY_QUESTION[question]
+        if entry is not None and when != "always":
+            if when != "define" or not _DEFINE_RE.search(prepared):
+                continue
+        faq = _topic_faq(topic)
+        if faq is not None:
+            return faq
     if entry is None:
-        questions = {_prepare(faq.question): faq for faq in FAQS}
+        questions = {_prepare(faq.question): faq for faq in _faqs()}
         close = get_close_matches(prepared, list(questions), n=1, cutoff=0.88)
         if close:
             return questions[close[0]]
     return None
+
+
+def _topic_faq(topic: str) -> Optional[Faq]:
+    return next((faq for faq in _faqs() if faq.topic == topic), None)
+
+
+def _faq_matching(pattern: "re.Pattern[str]") -> Optional[Faq]:
+    return next((faq for faq in _faqs() if pattern.search(_prepare(faq.question))), None)
+
+
+def _bare_faq() -> Optional[Faq]:
+    """beat-it's "what is cancer?" question, if it has one."""
+
+    return next((faq for faq in _faqs() if _is_bare(_prepare(faq.question))), None)
+
+
+def _treatment_faq() -> Optional[Faq]:
+    """beat-it's general question about treatment, if it has one."""
+
+    treatments = dict(_SECTION_RES)["treatments"]
+    return next(
+        (faq for faq in _faqs() if not faq.topic and treatments.search(_prepare(faq.question))),
+        None,
+    )
 
 
 def _is_bare(prepared: str) -> bool:
@@ -1330,9 +1561,38 @@ def _is_bare(prepared: str) -> bool:
 
 
 def _preview(items: Sequence[str], count: int = 3) -> str:
+    if not items:
+        return "none listed"
     shown = "; ".join(items[:count])
     extra = len(items) - count
     return f"{shown}; and {extra} more" if extra > 0 else shown
+
+
+def _join(items: Sequence[str], word: str = "and") -> str:
+    """``a``, ``a and b`` or ``a, b and c``."""
+
+    if len(items) < 2:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} {word} {items[-1]}"
+
+
+def _count(number: int, noun: str) -> str:
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
+
+
+def _asked(faq: Faq) -> str:
+    """One of beat-it's questions, quoted the way someone would ask it."""
+
+    return f"'{faq.question[:1].lower()}{faq.question[1:]}'"
+
+
+def _example(attribute: str = "", skip: int = 0) -> str:
+    """A cancer type to suggest asking about, preferring ones with ``attribute``."""
+
+    entries = _entries()
+    having = [entry for entry in entries if attribute and getattr(entry, attribute)]
+    choices = having or list(entries)
+    return choices[skip % len(choices)].short
 
 
 def _finish(lines: List[str], disclaimer: bool = True) -> str:
@@ -1342,27 +1602,46 @@ def _finish(lines: List[str], disclaimer: bool = True) -> str:
     return "\n".join(lines)
 
 
-def _reviewed(entry: Cancer) -> str:
-    return f"Reviewed by beat-it on {_date(entry.reviewed)}."
+def _reviewed(entry: Cancer) -> List[str]:
+    return [f"Reviewed by beat-it on {_date(entry.reviewed)}."] if entry.reviewed else []
+
+
+def _as_listed(reviewed: Optional[str]) -> str:
+    when = f" on {_date(reviewed)}" if reviewed else ""
+    return f"As listed by beat-it{when}; newer approvals may be missing."
+
+
+def _items(entry: Cancer, section: str) -> Sequence[Any]:
+    """What ``entry`` lists under ``section`` (the screening text is one item)."""
+
+    if section == "screening":
+        return [entry.screening] if entry.screening else []
+    return getattr(entry, section.replace(" ", "_"))
 
 
 def _overview(entry: Cancer) -> List[str]:
-    also = ["risk factors", "screening", f"{len(entry.medicines)} example medicines"]
+    lines = [f"{entry.name} ({entry.group})", entry.summary]
+    if entry.symptoms:
+        lines.append(f"- Symptoms: {_preview(entry.symptoms)}")
+    if entry.treatments:
+        lines.append(f"- Treatments: {_preview(entry.treatments)}")
+    also = [name for name in ("risk factors", "screening") if _items(entry, name)]
+    if entry.medicines:
+        also.append(_count(len(entry.medicines), "medicine"))
     if entry.approvals:
-        since = min(approval.date for approval in entry.approvals)[:4]
-        also.append(f"{len(entry.approvals)} FDA approvals since {since}")
-    listed = ", ".join(also[:-1]) + " and " + also[-1]
-    return [
-        f"{entry.name} ({entry.group})",
-        entry.summary,
-        f"- Common symptoms: {_preview(entry.symptoms)}",
-        f"- Treatments: {_preview(entry.treatments)}",
-        f"- Also listed: {listed}",
-        f"Say '{entry.short} treatments' for more, or ask about its symptoms, risk factors, "
-        "screening, medicines or approvals.",
-        f"NCI: {entry.nci}",
-        _reviewed(entry),
-    ]
+        oldest = entry.approvals[-1].date[:4]
+        also.append(f"{_count(len(entry.approvals), 'FDA approval')} since {oldest}")
+    if also:
+        lines.append(f"- Also listed: {_join(also)}")
+    sections = [name for name in _SECTION_ORDER if _items(entry, name)]
+    if sections:
+        first = "treatments" if "treatments" in sections else sections[0]
+        others = [name for name in sections if name != first]
+        ask = f"Say '{entry.short} {first}' for more"
+        lines.append(f"{ask}, or ask about its {_join(others, 'or')}." if others else f"{ask}.")
+    if entry.nci:
+        lines.append(f"NCI: {entry.nci}")
+    return lines + _reviewed(entry)
 
 
 def _bullets(items: Sequence[str], limit: int) -> List[str]:
@@ -1372,176 +1651,189 @@ def _bullets(items: Sequence[str], limit: int) -> List[str]:
     return lines
 
 
-def _medicine(entry: Cancer, medicine: Medicine) -> str:
-    label = medicine.name
-    if medicine.since and _months_between(medicine.since, entry.reviewed) < 24:
-        label += f" (new FDA approval: {_date(medicine.since)})"
-    return f"{label} — {medicine.use}"
+def _medicine(medicine: Medicine) -> str:
+    approved = f" (FDA approved {_date(medicine.since)})" if medicine.since else ""
+    return f"{medicine.name}{approved} — {medicine.use}"
 
 
 def _approval(approval: Approval) -> str:
     return f"{_date(approval.date)} — {approval.drug}: {approval.text}"
 
 
+# Headings, list lengths and closing notes for the listed sections.
+_LISTS: Dict[str, Tuple[str, int, str]] = {
+    "symptoms": (
+        "Symptoms of {label} that beat-it lists:",
+        8,
+        "These can have other causes too; see a doctor about any that last or worry you.",
+    ),
+    "risk factors": (
+        "Risk factors for {label} that beat-it lists:",
+        8,
+        "Having a risk factor doesn't mean you'll get cancer.",
+    ),
+    "treatments": ("Treatments for {label} that beat-it lists:", 8, _CARE_TEAM_NOTE),
+    "medicines": ("Medicines beat-it gives as examples for {label} ({count}):", 6, _CARE_TEAM_NOTE),
+}
+
+
 def _section(entry: Cancer, name: str) -> List[str]:
-    if name == "symptoms":
-        return [
-            f"Common symptoms of {entry.label}, as listed by beat-it:",
-            *_bullets(entry.symptoms, 8),
-            "These can have other causes too; see a doctor about any that last or worry you.",
-            _reviewed(entry),
-        ]
-    if name == "risk factors":
-        return [
-            f"Risk factors for {entry.label}, as listed by beat-it:",
-            *_bullets(entry.risk_factors, 8),
-            "Having a risk factor doesn't mean you'll get cancer.",
-            _reviewed(entry),
-        ]
+    if name == "approvals":
+        return _approvals(entry)
+    if not _items(entry, name):
+        what = "describe screening" if name == "screening" else f"list {name}"
+        return [f"beat-it doesn't {what} for {entry.label}.", *_reviewed(entry)]
     if name == "screening":
         lines = [f"Screening for {entry.label}:", entry.screening]
         if entry.screening_source:
             source = entry.screening_source
-            lines.append(f"Source: {source.name} ({source.url})")
-        return lines + [_reviewed(entry)]
-    if name == "treatments":
-        return [
-            f"Treatment options for {entry.label}, as listed by beat-it:",
-            *_bullets(entry.treatments, 8),
-            TREATMENT_NOTE,
-            _reviewed(entry),
-        ]
-    if name == "medicines":
-        total = len(entry.medicines)
-        shown = min(total, 6)
-        count = f"{shown} of {total}" if shown < total else str(total)
-        return [
-            f"Example medicines for {entry.label} ({count}):",
-            *_bullets([_medicine(entry, medicine) for medicine in entry.medicines], 6),
-            MEDICINES_NOTE,
-            "Medicines and approvals last updated from official sources (FDA, NCI) on "
-            f"{_date(entry.reviewed)}.",
-        ]
-    if not entry.approvals:
-        return [
-            f"beat-it lists no recent FDA approvals for {entry.label}.",
-            _reviewed(entry),
-        ]
-    total = len(entry.approvals)
-    header = (
-        f"Recent FDA approvals for {entry.label} (newest {min(total, 5)} of {total}):"
-        if total > 5
-        else f"Recent FDA approvals for {entry.label}:"
-    )
+            lines.append(f"Guidance from {source.name}: {source.url}")
+        return lines + _reviewed(entry)
+    heading, limit, note = _LISTS[name]
+    items = _items(entry, name)
+    shown = [_medicine(item) for item in items] if name == "medicines" else list(items)
+    count = f"{limit} of {len(items)}" if len(items) > limit else str(len(items))
     return [
-        header,
+        heading.format(label=entry.label, count=count),
+        *_bullets(shown, limit),
+        note,
+        *_reviewed(entry),
+    ]
+
+
+def _approvals(entry: Cancer) -> List[str]:
+    if not entry.approvals:
+        return [f"beat-it lists no FDA approvals for {entry.label}.", *_reviewed(entry)]
+    total = len(entry.approvals)
+    count = f" (newest 5 of {total})" if total > 5 else ""
+    return [
+        f"FDA approvals beat-it lists for {entry.label}{count}:",
         *_bullets([_approval(approval) for approval in entry.approvals], 5),
-        f"As listed by beat-it on {_date(entry.reviewed)}; newer approvals may be missing.",
+        _as_listed(entry.reviewed),
     ]
 
 
 _COMPACT_LABELS = {
     "symptoms": "Symptoms",
     "risk factors": "Risk factors",
+    "screening": "Screening",
     "treatments": "Treatments",
+    "medicines": "Medicines",
+    "approvals": "FDA approvals",
 }
 
 
 def _compact(entry: Cancer, names: Sequence[str]) -> List[str]:
     lines = [entry.name]
     for name in names:
-        if name in _COMPACT_LABELS:
-            items = getattr(entry, name.replace(" ", "_"))
-            lines.append(f"- {_COMPACT_LABELS[name]}: {_preview(items)}")
-        elif name == "screening":
-            lines.append(f"- Screening: {entry.screening}")
+        if name == "screening":
+            summary = entry.screening or "none listed"
         elif name == "medicines":
-            lines.append(f"- Medicines: {_preview([m.name for m in entry.medicines])}")
-        elif entry.approvals:
-            newest = entry.approvals[0]
-            lines.append(
-                f"- Recent FDA approvals: {len(entry.approvals)}, newest "
-                f"{_date(newest.date)} ({newest.drug})"
+            summary = _preview([medicine.name for medicine in entry.medicines])
+        elif name == "approvals":
+            newest = entry.approvals[0] if entry.approvals else None
+            summary = (
+                f"{len(entry.approvals)}, newest {_date(newest.date)} ({newest.drug})"
+                if newest
+                else "none listed"
             )
+        else:
+            summary = _preview(_items(entry, name))
+        lines.append(f"- {_COMPACT_LABELS[name]}: {summary}")
     asks = " or ".join(f"'{entry.short} {name}'" for name in names[:2])
     lines.append(f"Say {asks} for the full list.")
-    lines.append(_reviewed(entry))
-    return lines
+    return lines + _reviewed(entry)
 
 
 def _faq_lines(faq: Faq, entry: Optional[Cancer]) -> List[str]:
-    lines = [faq.question, faq.answer, f"More: {faq.link}"]
+    lines = [faq.question, faq.answer]
+    if faq.link:
+        lines.append(f"More: {faq.link}")
     if entry is not None:
-        follow = _FAQ_POINTERS.get(faq.question)
+        follow = _FAQ_POINTERS.get(faq.topic)
         ask = f"{entry.short} {follow}" if follow else entry.short
         lines.append(f"For {entry.label} specifically, say '{ask}'.")
     return lines
 
 
 def _fact_line(fact: Fact) -> str:
-    return f"- {fact.value} {fact.label.rstrip('.')} ({fact.source})"
+    source = f" ({fact.source})" if fact.source else ""
+    return f"- {fact.value} {fact.label.rstrip('.')}{source}"
 
 
 _GENERIC_FACT_WORDS = frozenset({"cancer", "cancers", "tumor", "tumors"})
 
 
 def _facts(entry: Optional[Cancer]) -> List[str]:
-    lines = [f"{FACTS_TITLE}: {FACTS_INTRO}"]
+    heading, facts = _figures()
+    lines = [heading or "Worldwide figures from beat-it:"]
     if entry is not None:
         names = {entry.id, *re.findall(r"[a-z]+", _strip_parenthetical(entry.name).lower())}
         words = {word for word in names if len(word) > 3} - _GENERIC_FACT_WORDS
         matching = [
-            fact for fact in FACTS if words & set(re.findall(r"[a-z]+", fact.label.lower()))
+            fact for fact in facts if words & set(re.findall(r"[a-z]+", fact.label.lower()))
         ]
         if matching:
             return lines + [_fact_line(fact) for fact in matching]
         lines.append(f"beat-it's worldwide figures don't break out {entry.label}. Overall:")
-    return lines + [_fact_line(fact) for fact in FACTS]
+    return lines + [_fact_line(fact) for fact in facts]
 
 
 def _survival(entry: Optional[Cancer]) -> List[str]:
     lines = [
-        "beat-it doesn't list survival rates or outlook. They depend on the type, the stage "
-        "and the person, so a care team is the best source.",
+        "beat-it doesn't give survival rates or outlook, which vary a lot from one person to "
+        "another — a care team is the best source for that.",
     ]
-    if entry is not None:
+    if entry is not None and entry.nci:
         lines.append(f"NCI's page on {entry.label}: {entry.nci}")
-    return lines
-
-
-def _contagious() -> List[str]:
-    lines = [
-        "beat-it's notes don't say whether cancer itself can pass from person to person — a "
-        "doctor or NCI (https://www.cancer.gov) can answer that.",
-        "It does list some infections as risk factors:",
-    ]
-    for cancer in CANCERS:
-        found = [risk for risk in cancer.risk_factors if _INFECTION_RE.search(risk)]
-        if found:
-            lines.append(f"- {cancer.name}: {'; '.join(found)}")
-    lines.append("Say 'can cancer be prevented?' for ways to lower risk.")
     return lines
 
 
 _INFECTION_RE = re.compile(r"infection|hepatitis|virus|\bhpv\b|pylori", re.IGNORECASE)
 
 
+def _contagious() -> List[str]:
+    lines = [
+        "beat-it's notes don't say whether cancer itself can pass from person to person — a "
+        "doctor or NCI (https://www.cancer.gov) can answer that.",
+    ]
+    found = []
+    for entry in _entries():
+        risks = [risk for risk in entry.risk_factors if _INFECTION_RE.search(risk)]
+        if risks:
+            found.append(f"- {entry.name}: {'; '.join(risks)}")
+    if found:
+        lines += ["It does list some infections as risk factors:", *found]
+    prevention = _topic_faq("prevention")
+    if prevention is not None:
+        lines.append(f"Say {_asked(prevention)} for ways to lower risk.")
+    return lines
+
+
+def _uncovered_name(prepared: str) -> str:
+    """The first type in ``prepared`` that beat-it has no entry for, or ``""``."""
+
+    keys = _lookup().keys
+    for found in _UNCOVERED_RE.finditer(prepared):
+        if not any(key.pattern.match(found.group(0)) for key in keys):
+            return found.group(0)
+    return ""
+
+
 def _uncovered(name: str) -> List[str]:
     return [
-        f"beat-it doesn't have an entry for {name}. It covers {len(CANCERS)} types — say "
-        "'cancer topics' for the list.",
+        f"beat-it doesn't have an entry for {name}. It covers {_count(len(_entries()), 'type')} "
+        "— say 'cancer topics' for the list.",
         "NCI covers many more types: https://www.cancer.gov/types",
     ]
 
 
 def _feeds(entry: Optional[Cancer]) -> List[str]:
-    lines = [
-        "beat-it's research, trial and news feeds are refreshed daily on its site, so they "
-        "aren't available offline here.",
-    ]
+    lines = ["beat-it's research, trial and news updates are on its site; I don't read those here."]
     if entry is None:
         lines.append(
-            "I can share the FDA approvals beat-it lists — say e.g. 'lung cancer approvals'."
+            "I can share the FDA approvals beat-it lists — say e.g. "
+            f"'{_example('approvals')} approvals'."
         )
         return lines
     return lines + _section(entry, "approvals")
@@ -1550,44 +1842,55 @@ def _feeds(entry: Optional[Cancer]) -> List[str]:
 def _general_section(name: str) -> List[str]:
     """Answer a section question when no cancer type is named."""
 
+    entries = _entries()
     if name == "approvals":
         newest: Dict[Tuple[str, str], Tuple[Approval, Cancer]] = {}
-        for cancer in CANCERS:
-            for approval in cancer.approvals:
-                newest.setdefault((approval.date, approval.drug), (approval, cancer))
+        for entry in entries:
+            for approval in entry.approvals:
+                newest.setdefault((approval.date, approval.drug), (approval, entry))
+        if not newest:
+            return ["beat-it lists no FDA approvals."]
         latest = sorted(newest.values(), key=lambda pair: pair[0].date, reverse=True)[:5]
         return [
             "The newest FDA cancer approvals beat-it lists:",
-            *(f"- {_approval(approval)} ({cancer.name})" for approval, cancer in latest),
-            f"As listed by beat-it on {_date(REVIEWED)}; newer approvals may be missing.",
-            "Say e.g. 'lung cancer approvals' for one type.",
+            *(f"- {_approval(approval)} ({entry.name})" for approval, entry in latest),
+            _as_listed(_latest_review(entries)),
+            f"Say e.g. '{_example('approvals')} approvals' for one type.",
         ]
     if name == "screening":
-        sourced = [cancer.name for cancer in CANCERS if cancer.screening_source]
-        return [
-            "Screening advice depends on the cancer type. beat-it cites a guideline source "
-            f"for: {', '.join(sourced)}.",
-            "Say e.g. 'breast cancer screening' for details, or ask 'are there new ways to get "
-            "screened for cancer?'.",
-        ]
+        sourced = [entry.name for entry in entries if entry.screening_source]
+        lines = ["Screening differs from one type of cancer to another."]
+        if sourced:
+            lines[0] += f" beat-it names the guideline behind it for: {', '.join(sourced)}."
+        ask = f"Say e.g. '{_example('screening')} screening' for details"
+        new = _topic_faq("new screening")
+        lines.append(f"{ask}, or ask {_asked(new)}." if new else f"{ask}.")
+        return lines
     if name == "symptoms":
         return [
-            f"Symptoms depend on the type of cancer. beat-it lists them for each of its "
-            f"{len(CANCERS)} types — say e.g. 'lung cancer symptoms'.",
+            "Symptoms differ from one type of cancer to another; beat-it lists them by type — "
+            f"say e.g. '{_example('symptoms', 1)} symptoms'.",
             "If you've noticed a change that worries you, please see a doctor.",
         ]
     if name == "medicines":
         return [
-            f"beat-it lists example medicines for each of its {len(CANCERS)} cancer types — say "
-            "e.g. 'breast cancer medicines'.",
+            "beat-it lists medicines by cancer type — say e.g. "
+            f"'{_example('medicines')} medicines'.",
         ]
     if name == "risk factors":
+        prevention = _topic_faq("prevention")
         return [
-            f"Risk factors depend on the type of cancer. beat-it lists them for each of its "
-            f"{len(CANCERS)} types — say e.g. 'lung cancer risk factors'.",
-            *_faq_lines(_FAQ_BY_QUESTION["Can cancer be prevented?"], None),
+            "Risk factors differ from one type of cancer to another; beat-it lists them by type "
+            f"— say e.g. '{_example('risk_factors', 1)} risk factors'.",
+            *(_faq_lines(prevention, None) if prevention else []),
         ]
-    return _faq_lines(_FAQ_BY_QUESTION["What are the main types of cancer treatment?"], None)
+    general = _treatment_faq()
+    if general is not None:
+        return _faq_lines(general, None)
+    return [
+        "Treatments differ from one type of cancer to another; beat-it lists them by type — say "
+        f"e.g. '{_example('treatments', 1)} treatments'.",
+    ]
 
 
 def _body(prepared: str, entry: Optional[Cancer]) -> Optional[List[str]]:
@@ -1596,11 +1899,13 @@ def _body(prepared: str, entry: Optional[Cancer]) -> Optional[List[str]]:
     if _TOPICS_RE.search(prepared):
         return _topic_lines()
     if _SURVIVAL_RE.search(prepared):
-        return _survival(entry)
+        faq = _faq_matching(_SURVIVAL_RE)
+        return _faq_lines(faq, entry) if faq else _survival(entry)
     if _FACTS_RE.search(prepared):
         return _facts(entry)
     if _CONTAGIOUS_RE.search(prepared):
-        return _contagious()
+        faq = _faq_matching(_CONTAGIOUS_RE)
+        return _faq_lines(faq, entry) if faq else _contagious()
     faq = _faq(prepared, entry)
     if faq is not None:
         return _faq_lines(faq, entry)
@@ -1611,7 +1916,8 @@ def _body(prepared: str, entry: Optional[Cancer]) -> Optional[List[str]]:
         if sections:
             return _general_section(sections[0])
         if _is_bare(prepared):
-            return _faq_lines(_FAQ_BY_QUESTION["What is cancer?"], None)
+            bare = _bare_faq()
+            return _faq_lines(bare, None) if bare else _topic_lines()
         return None
     if len(sections) == 1:
         return _section(entry, sections[0])
@@ -1621,19 +1927,39 @@ def _body(prepared: str, entry: Optional[Cancer]) -> Optional[List[str]]:
 
 
 def _topic_lines() -> List[str]:
-    lines = [f"beat-it covers {len(CANCERS)} cancer types (reviewed {_date(REVIEWED)}):"]
+    entries = _entries()
+    reviewed = _latest_review(entries)
+    when = f" (reviewed {_date(reviewed)})" if reviewed else ""
+    lines = [f"beat-it covers {_count(len(entries), 'cancer type')}{when}:"]
     groups: List[str] = []
-    for cancer in CANCERS:
-        if cancer.group not in groups:
-            groups.append(cancer.group)
+    for entry in entries:
+        if entry.group not in groups:
+            groups.append(entry.group)
     for group in groups:
-        names = ", ".join(cancer.name for cancer in CANCERS if cancer.group == group)
+        names = ", ".join(entry.name for entry in entries if entry.group == group)
         lines.append(f"- {group}: {names}")
-    lines.append(
-        "Ask e.g. 'lung cancer', 'leukemia symptoms', 'breast cancer medicines' or "
-        "'is cancer hereditary?'."
-    )
+    asks = [
+        f"'{_example()}'",
+        f"'{_example('symptoms', 1)} symptoms'",
+        f"'{_example('medicines', 2)} medicines'",
+    ]
+    heredity = _topic_faq("heredity")
+    if heredity is not None:
+        asks.append(_asked(heredity))
+    lines.append(f"Ask e.g. {_join(asks, 'or')}.")
     return lines
+
+
+def _not_covered() -> str:
+    preferred = (_bare_faq(), _topic_faq("prevention"), _topic_faq("heredity"))
+    chosen = [faq for faq in preferred if faq is not None]
+    chosen += [faq for faq in _faqs() if faq not in chosen][: 3 - len(chosen)]
+    questions = [_asked(faq) for faq in chosen]
+    like = f" It answers questions like {_join(questions)}, and" if questions else " It"
+    return (
+        f"beat-it's notes don't cover that question.{like} covers "
+        f"{_count(len(_entries()), 'cancer type')} — say 'cancer topics' for the list."
+    )
 
 
 # ---------------------------------------------------------------- replies
@@ -1683,7 +2009,7 @@ def _self_check_reply(entry: Optional[Cancer], person: _Person, prepared: str) -
     if entry is not None and entry.symptoms:
         lines.append(f"General warning signs beat-it lists for {entry.label}:")
         lines += [f"- {symptom}" for symptom in entry.symptoms]
-        lines.append(_reviewed(entry))
+        lines += _reviewed(entry)
     return _finish(lines)
 
 
@@ -1707,7 +2033,7 @@ def _disclosure_reply(
 ) -> str:
     person = disclosure.person
     if entry is None and person.child:
-        entry = next(cancer for cancer in CANCERS if cancer.id == "childhood")
+        entry = _find_entry(_prepare("childhood cancer"), context=True, gist=False)
     lines = [_acknowledge(disclosure)]
     # Answer what else was asked: "my wife has breast cancer, what are the
     # treatments?" wants treatments, but "I'm on chemo" alone doesn't.
@@ -1725,7 +2051,7 @@ def _disclosure_reply(
     elif entry is not None:
         lines += [
             f"{entry.name}: {entry.summary}",
-            "I can show its treatments, medicines or recent FDA approvals — say "
+            "I can show its treatments, medicines or FDA approvals — say "
             f"'{entry.short} treatments', '{entry.short} medicines' or "
             f"'{entry.short} approvals'.",
         ]
@@ -1733,8 +2059,8 @@ def _disclosure_reply(
         lines += _uncovered(uncovered)
     else:
         lines += [
-            "If you tell me the type — for example 'lung cancer' — I can share an overview, "
-            "treatments, medicines or recent FDA approvals.",
+            f"If you tell me the type — for example '{_example()}' — I can share an overview, "
+            "treatments, medicines or FDA approvals.",
             "For helplines and support groups, say 'cancer support'.",
         ]
     if _symptom_statement(prepared):
@@ -1749,7 +2075,9 @@ def _disclosure_reply(
             f"{person.possessive()} care team."
         )
     if body is None and entry is not None:
-        lines.append(f"{_reviewed(entry)} NCI: {entry.nci}")
+        closing = _reviewed(entry) + ([f"NCI: {entry.nci}"] if entry.nci else [])
+        if closing:
+            lines.append(" ".join(closing))
     return _finish(lines)
 
 
@@ -1775,9 +2103,10 @@ def _worry_reply(entry: Optional[Cancer], prepared: str) -> str:
     if body is not None:
         lines += body
     else:
-        lines.append(
-            "For general guidance, ask 'can cancer be prevented?' or 'is cancer hereditary?'."
-        )
+        found = (_topic_faq("prevention"), _topic_faq("heredity"))
+        questions = [_asked(faq) for faq in found if faq is not None]
+        if questions:
+            lines.append(f"For general guidance, ask {_join(questions, 'or')}.")
     lines.append(
         "If you've noticed a symptom that worries you, please get it checked soon — urgently "
         "if it's severe or came on suddenly."
@@ -1821,14 +2150,13 @@ def answer(text: str) -> Optional[str]:
     if _PET_RE.search(prepared):
         return _pet_reply(prepared)
     clauses = _clauses(text) or [prepared]
-    found = _UNCOVERED_RE.search(prepared)
-    uncovered = found.group(0) if found else ""
+    uncovered = _uncovered_name(prepared)
     lookup = prepared.replace(uncovered, " ") if uncovered else prepared
     lookup = _ACRONYM_ELSEWHERE_RE.sub(" ", lookup)
     entry = _find_entry(lookup, context=True, gist=gist)
 
     possessive = _POSSESSIVE_DISCLOSURE_RE.search(prepared)
-    mine = _MY_DISEASE_RE.search(prepared)
+    mine = _lookup().my_disease.search(prepared)
     if not (possessive or mine):
         person = _self_check(clauses, prepared)
         if person is not None:
@@ -1852,9 +2180,5 @@ def answer(text: str) -> Optional[str]:
         faq = _faq(prepared, None)
         body = _uncovered(uncovered) + (_faq_lines(faq, None) if faq else [])
     if body is None:
-        body = [
-            "beat-it's notes don't cover that question. It answers questions like 'what is "
-            "cancer?', 'can cancer be prevented?' and 'is cancer hereditary?', and covers "
-            f"{len(CANCERS)} cancer types — say 'cancer topics' for the list.",
-        ]
+        body = [_not_covered()]
     return _finish(body)

@@ -1,34 +1,39 @@
 """Investment maths on numbers you type: DCF, CAPM, technicals, risk and DRIP.
 
-Ported from Portfolio-Watcher by charles2ke
-(https://github.com/charles2ke/Portfolio-Watcher) at commit
-4dddc15734246445eedb7b040b0722bcbe49bc02, MIT licence, "Copyright (c) 2026
-Charles Gomes". The formulas follow these files:
+Portfolio-Watcher (https://charles2ke.github.io/Portfolio-Watcher/, source at
+https://github.com/charles2ke/Portfolio-Watcher) is the user's own research
+app. Jarvis keeps no copy of its maths: the figures in every reply, default
+rates and settings included, come from the project's TypeScript in
+``src/research/``, run from the ``projects/Portfolio-Watcher`` submodule by
+``bridges/portfolio-watcher.mjs`` with Node.js, once per reply. This module
+reads the request and words the answer.
 
-* ``src/research/dcf.ts``: ``terminalValuePerpetuity``, the discounting in
-  ``valueDcf`` and the 4.2% risk-free rate and 5% equity risk premium.
-* ``src/research/technicals.ts``: ``sma``, ``ema``, ``rsi`` (Wilder),
-  ``macd``, ``bollinger`` and ``fibonacciLevels``.
-* ``src/research/risk.ts``: ``annualisedVolatility``, ``historicalVar``,
-  ``expectedShortfall`` and ``maxDrawdown``.
-* ``src/research/quant.ts``: ``mean``, ``median``, ``stdDev``,
-  ``skewness``, ``kurtosis`` and ``tStatistic``.
-* ``src/research/dividends.ts``: ``simulateDrip``.
-* ``src/research/universe.ts``: ``standardDeviation`` and ``dailyReturns``.
+:func:`solve` answers discounted cash flow (DCF) valuations, CAPM cost of
+equity, Fibonacci retracements, moving averages, RSI, MACD, Bollinger bands,
+risk and return statistics, and dividend reinvestment (DRIP) projections.
+Where a request doesn't map one to one onto the project's functions:
 
-Deliberate differences from the original:
+* A DCF runs through the project's revenue-based model with the typed free
+  cash flow standing in for revenue at a 100% margin with nothing taken off,
+  so the forecast is that cash flow growing at the typed rate. An exit
+  multiple applies to EBITDA, which is the same cash flow here.
+* A beta becomes a cost of equity the way the project estimates a company's
+  discount rate, with the project's own risk-free rate and equity risk
+  premium; typed rates or a market return can't be used, and the reply says
+  so.
+* Settings left out take the project's defaults: DCF horizon and terminal
+  growth, RSI, MACD and Bollinger settings, VaR confidence and DRIP horizons.
+  A moving average with no period uses every value typed. Volatility is
+  annualised the project's way, which treats the numbers as daily.
+* There is no Sharpe ratio: the project has none for typed numbers. An
+  annualised return comes only from typed prices, through the project's
+  return profile, which treats them as daily.
 
-* The DCF starts from a free cash flow you type instead of
-  Portfolio-Watcher's revenue and margin model, and it does not round each
-  year's cash flow to cents, so results can differ from it by a few cents.
-  An exit multiple applies to final-year free cash flow, not EV/EBITDA.
-* ``sharpe_ratio`` subtracts a risk-free rate; ``sharpeLike`` does not.
-* ``simulate_drip`` takes every rate as a fraction and returns unrounded
-  rows, with yield on cost as a fraction rather than a rounded percent.
-* A period below 1 raises ``ValueError`` instead of returning nonsense.
-
-Nothing here fetches market data. :func:`solve` uses only the numbers in the
-request, and every reply says it is general education, not advice.
+Nothing here fetches market data: only the numbers in the request are used,
+and every reply says it is general education, not advice. :func:`solve`
+returns ``None`` for other text without needing the project. When the
+project or Node.js is missing it raises
+:class:`jarvis.projects.ProjectUnavailable` with setup steps.
 """
 
 from __future__ import annotations
@@ -36,85 +41,28 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from jarvis import projects
 
 __all__ = [
-    "BollingerBands",
     "CREDIT",
     "DISCLAIMER",
-    "DcfResult",
-    "DcfYear",
-    "DripYear",
-    "MacdResult",
     "PROJECT",
     "REPO_URL",
     "SITE_URL",
     "TOPICS",
-    "annualised_volatility",
-    "bollinger",
-    "capm_cost_of_equity",
-    "dcf_value",
-    "ema",
-    "expected_shortfall",
-    "fibonacci_levels",
-    "historical_var",
-    "kurtosis",
-    "macd",
-    "max_drawdown",
-    "mean",
-    "median",
-    "rsi",
-    "sharpe_ratio",
-    "simple_returns",
-    "simulate_drip",
-    "skewness",
-    "sma",
     "solve",
-    "std_dev",
-    "t_statistic",
-    "terminal_value_perpetuity",
     "usage",
 ]
 
 PROJECT = "Portfolio-Watcher"
-SITE_URL = "https://charles2ke.github.io/Portfolio-Watcher/"
-REPO_URL = "https://github.com/charles2ke/Portfolio-Watcher"
-SOURCE_COMMIT = "4dddc15734246445eedb7b040b0722bcbe49bc02"
+SITE_URL = projects.PROJECTS[PROJECT].site
+REPO_URL = projects.PROJECTS[PROJECT].repo
 CREDIT = f"From {PROJECT}: {SITE_URL}"
 DISCLAIMER = (
     "General education only, not investment advice — past performance and "
     "model outputs do not predict future returns."
-)
-
-RISK_FREE_RATE = 0.042
-EQUITY_RISK_PREMIUM = 0.05
-DEFAULT_TERMINAL_GROWTH = 0.025
-FORECAST_YEARS = 5
-MAX_DCF_YEARS = 50
-DEFAULT_DRIP_YEARS = 10
-MAX_DRIP_YEARS = 100
-TRADING_DAYS_PER_YEAR = 252
-DEFAULT_CONFIDENCE = 0.95
-SIGNIFICANCE_T = 1.96
-MIN_SIGNIFICANT_OBSERVATIONS = 20
-RSI_PERIOD = 14
-RSI_OVERBOUGHT = 70
-RSI_OVERSOLD = 30
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
-BOLLINGER_PERIOD = 20
-BOLLINGER_MULTIPLE = 2.0
-MOVING_AVERAGE_PERIOD = 20
-
-FIBONACCI_RATIOS: Tuple[Tuple[str, float], ...] = (
-    ("0%", 0.0),
-    ("23.6%", 0.236),
-    ("38.2%", 0.382),
-    ("50%", 0.5),
-    ("61.8%", 0.618),
-    ("78.6%", 0.786),
-    ("100%", 1.0),
 )
 
 TOPICS: Tuple[str, ...] = (
@@ -130,483 +78,93 @@ TOPICS: Tuple[str, ...] = (
     "Value at risk (VaR)",
     "Expected shortfall",
     "Max drawdown",
-    "Sharpe ratio",
     "Return statistics",
     "Dividend reinvestment (DRIP)",
 )
 
+# Jarvis's own limits on a typed horizon.
+_MAX_DCF_YEARS = 50
+_MAX_DRIP_YEARS = 100
+
 Series = List[Optional[float]]
 
 
-def round_to(value: float, decimals: int = 2) -> float:
-    """Round half up like JavaScript's ``Math.round`` (PW's ``roundTo``)."""
-    factor = 10 ** decimals
-    return math.floor(value * factor + 0.5) / factor
+# ---------------------------------------------------- asking the project
 
 
-def _total(values: Sequence[float]) -> float:
-    # A plain left-to-right sum like JavaScript's reduce; Python 3.12's sum()
-    # compensates rounding and would differ from the original in the last digit.
-    total = 0.0
-    for value in values:
-        total += value
-    return total
+def _finite(value: Any) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_finite(item) for item in value.values())
+    if isinstance(value, list):
+        return all(_finite(item) for item in value)
+    return True
 
 
-def _check_period(period: int, name: str = "period") -> None:
-    if isinstance(period, bool) or not isinstance(period, int) or period < 1:
-        raise ValueError(f"the {name} must be a whole number of at least 1")
+def _ask(action: str, payload: Dict[str, Any]) -> Any:
+    """Run one of the adapter's actions on the numbers read from the request."""
+    if not _finite(payload):
+        raise ValueError("one of those numbers is too large to work with")
+    return projects.call(PROJECT, action, payload)
 
 
-# ------------------------------------------------------------- technicals
+def _unusable(key: str) -> projects.ProjectError:
+    return projects.ProjectError(f"{PROJECT} gave no usable {key!r}")
 
 
-def sma(values: Sequence[float], period: int) -> Series:
-    """Simple moving average; ``None`` until a full window is available."""
-    _check_period(period)
-    out: Series = []
-    for i in range(len(values)):
-        if i < period - 1:
-            out.append(None)
-            continue
-        total = 0.0
-        for j in range(i - period + 1, i + 1):
-            total += values[j]
-        out.append(total / period)
-    return out
-
-
-def ema(values: Sequence[float], period: int) -> Series:
-    """Exponential moving average seeded with the first window's SMA."""
-    _check_period(period)
-    out: Series = [None] * len(values)
-    if len(values) < period:
-        return out
-    k = 2 / (period + 1)
-    running = 0.0
-    for i in range(period):
-        running += values[i]
-    running /= period
-    out[period - 1] = running
-    for i in range(period, len(values)):
-        running = values[i] * k + running * (1 - k)
-        out[i] = running
-    return out
-
-
-def rsi(values: Sequence[float], period: int = RSI_PERIOD) -> Series:
-    """Wilder's relative strength index (0-100); needs ``period + 1`` values."""
-    _check_period(period)
-    out: Series = [None] * len(values)
-    if len(values) <= period:
-        return out
-    gain = 0.0
-    loss = 0.0
-    for i in range(1, period + 1):
-        change = values[i] - values[i - 1]
-        if change >= 0:
-            gain += change
-        else:
-            loss -= change
-    gain /= period
-    loss /= period
-    out[period] = 100.0 if loss == 0 else 100 - 100 / (1 + gain / loss)
-    for i in range(period + 1, len(values)):
-        change = values[i] - values[i - 1]
-        up = change if change > 0 else 0.0
-        down = -change if change < 0 else 0.0
-        gain = (gain * (period - 1) + up) / period
-        loss = (loss * (period - 1) + down) / period
-        out[i] = 100.0 if loss == 0 else 100 - 100 / (1 + gain / loss)
-    return out
-
-
-@dataclass(frozen=True)
-class MacdResult:
-    """MACD line, signal line and histogram, aligned with the input."""
-
-    macd: Tuple[Optional[float], ...]
-    signal: Tuple[Optional[float], ...]
-    histogram: Tuple[Optional[float], ...]
-
-
-def macd(
-    values: Sequence[float],
-    fast: int = MACD_FAST,
-    slow: int = MACD_SLOW,
-    signal: int = MACD_SIGNAL,
-) -> MacdResult:
-    """Fast EMA minus slow EMA, its signal-line EMA and the histogram."""
-    _check_period(signal, "signal period")
-    ema_fast = ema(values, fast)
-    ema_slow = ema(values, slow)
-    line: Series = [
-        f - s if f is not None and s is not None else None
-        for f, s in zip(ema_fast, ema_slow)
-    ]
-    signal_line: Series = [None] * len(values)
-    first = next((i for i, value in enumerate(line) if value is not None), -1)
-    if first != -1:
-        compact = [value for value in line[first:] if value is not None]
-        for i, value in enumerate(ema(compact, signal)):
-            if value is not None:
-                signal_line[first + i] = value
-    histogram = [
-        m - s if m is not None and s is not None else None
-        for m, s in zip(line, signal_line)
-    ]
-    return MacdResult(tuple(line), tuple(signal_line), tuple(histogram))
-
-
-@dataclass(frozen=True)
-class BollingerBands:
-    """Upper, middle (SMA) and lower bands, aligned with the input."""
-
-    upper: Tuple[Optional[float], ...]
-    middle: Tuple[Optional[float], ...]
-    lower: Tuple[Optional[float], ...]
-
-
-def bollinger(
-    values: Sequence[float],
-    period: int = BOLLINGER_PERIOD,
-    multiple: float = BOLLINGER_MULTIPLE,
-) -> BollingerBands:
-    """SMA plus/minus ``multiple`` population standard deviations."""
-    middle = sma(values, period)
-    upper: Series = []
-    lower: Series = []
-    for i, centre in enumerate(middle):
-        if centre is None:
-            upper.append(None)
-            lower.append(None)
-            continue
-        variance = 0.0
-        for j in range(i - period + 1, i + 1):
-            variance += (values[j] - centre) ** 2
-        sd = math.sqrt(variance / period)
-        upper.append(centre + multiple * sd)
-        lower.append(centre - multiple * sd)
-    return BollingerBands(tuple(upper), tuple(middle), tuple(lower))
-
-
-def fibonacci_levels(low: float, high: float) -> List[Tuple[str, float]]:
-    """Retracement levels from ``high`` down to ``low``, rounded to cents."""
-    span = high - low
-    return [
-        (label, round_to(high - span * ratio, 2)) for label, ratio in FIBONACCI_RATIOS
-    ]
-
-
-# ------------------------------------------------------ statistics and risk
-
-
-def mean(values: Sequence[float]) -> float:
-    """Arithmetic mean; 0 for an empty series."""
-    if not values:
-        return 0.0
-    return _total(values) / len(values)
-
-
-def median(values: Sequence[float]) -> float:
-    """Median; 0 for an empty series."""
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    middle = len(ordered) // 2
-    if len(ordered) % 2 == 0:
-        return (ordered[middle - 1] + ordered[middle]) / 2
-    return ordered[middle]
-
-
-def std_dev(values: Sequence[float]) -> float:
-    """Sample standard deviation (divides by n - 1); 0 below two values."""
-    if len(values) < 2:
-        return 0.0
-    centre = mean(values)
-    return math.sqrt(_total([(v - centre) ** 2 for v in values]) / (len(values) - 1))
-
-
-def _population_sd(values: Sequence[float], centre: float) -> float:
-    return math.sqrt(_total([(v - centre) ** 2 for v in values]) / len(values))
-
-
-def skewness(values: Sequence[float]) -> float:
-    """Population skewness; 0 below three values or with no spread."""
-    if len(values) < 3:
-        return 0.0
-    centre = mean(values)
-    sd = _population_sd(values, centre)
-    if sd == 0:
-        return 0.0
-    return _total([((v - centre) / sd) ** 3 for v in values]) / len(values)
-
-
-def kurtosis(values: Sequence[float]) -> float:
-    """Population excess kurtosis; 0 below four values or with no spread."""
-    if len(values) < 4:
-        return 0.0
-    centre = mean(values)
-    sd = _population_sd(values, centre)
-    if sd == 0:
-        return 0.0
-    return _total([((v - centre) / sd) ** 4 for v in values]) / len(values) - 3
-
-
-def t_statistic(values: Sequence[float]) -> Optional[float]:
-    """One-sample t-statistic against a zero mean; ``None`` if undefined."""
-    if len(values) < 3:
-        return None
-    sd = std_dev(values)
-    if sd == 0:
-        return None
-    return mean(values) * math.sqrt(len(values)) / sd
-
-
-def simple_returns(prices: Sequence[float]) -> List[float]:
-    """Period-over-period returns as fractions, from prices above zero."""
-    if any(price <= 0 for price in prices):
-        raise ValueError("prices must all be above zero")
-    return [(prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices))]
-
-
-def annualised_volatility(
-    returns: Sequence[float], periods_per_year: float = TRADING_DAYS_PER_YEAR
-) -> float:
-    """Sample standard deviation of returns scaled by sqrt(periods a year)."""
-    return std_dev(returns) * math.sqrt(periods_per_year)
-
-
-def _tail(returns: Sequence[float], confidence: float) -> List[float]:
-    ordered = sorted(returns)
-    cutoff = max(1, math.floor((1 - confidence) * len(ordered)))
-    return ordered[:cutoff]
-
-
-def _check_confidence(confidence: float) -> None:
-    if not 0 < confidence < 1:
-        raise ValueError("the confidence level must be between 0% and 100%")
-
-
-def historical_var(returns: Sequence[float], confidence: float = DEFAULT_CONFIDENCE) -> float:
-    """Historical value at risk as a positive loss fraction (0 if no loss)."""
-    _check_confidence(confidence)
-    if not returns:
-        return 0.0
-    quantile = _tail(returns, confidence)[-1]
-    return -quantile if quantile < 0 else 0.0
-
-
-def expected_shortfall(
-    returns: Sequence[float], confidence: float = DEFAULT_CONFIDENCE
-) -> float:
-    """Average loss in the VaR tail as a positive fraction (0 if no loss)."""
-    _check_confidence(confidence)
-    if not returns:
-        return 0.0
-    tail = _tail(returns, confidence)
-    average = _total(tail) / len(tail)
-    return -average if average < 0 else 0.0
-
-
-def max_drawdown(returns: Sequence[float]) -> float:
-    """Largest peak-to-trough fall of the compounded return path."""
-    cumulative = 1.0
-    peak = 1.0
-    drawdown = 0.0
-    for value in returns:
-        cumulative *= 1 + value
-        if cumulative > peak:
-            peak = cumulative
-        current = (peak - cumulative) / peak
-        if current > drawdown:
-            drawdown = current
-    return drawdown
-
-
-def sharpe_ratio(
-    returns: Sequence[float],
-    risk_free: float = RISK_FREE_RATE,
-    periods_per_year: float = TRADING_DAYS_PER_YEAR,
-) -> Optional[float]:
-    """(Annualised mean return - risk-free) / annualised volatility."""
-    volatility = annualised_volatility(returns, periods_per_year)
-    if volatility == 0:
-        return None
-    return (mean(returns) * periods_per_year - risk_free) / volatility
-
-
-# -------------------------------------------------------------- valuation
-
-
-def terminal_value_perpetuity(
-    last_fcf: float, discount_rate: float, terminal_growth: float
-) -> Optional[float]:
-    """Gordon growth terminal value; ``None`` unless discount > growth."""
-    if discount_rate <= terminal_growth:
-        return None
-    return last_fcf * (1 + terminal_growth) / (discount_rate - terminal_growth)
-
-
-@dataclass(frozen=True)
-class DcfYear:
-    year: int
-    free_cash_flow: float
-    discount_factor: float
-    present_value: float
-
-
-@dataclass(frozen=True)
-class DcfResult:
-    years: Tuple[DcfYear, ...]
-    pv_of_forecast: float
-    terminal_value: float
-    pv_of_terminal_value: float
-    enterprise_value: float
-    equity_value: float
-    value_per_share: Optional[float]
-    upside_percent: Optional[float]
-    method: str
-    terminal_share: Optional[float]
-
-
-def dcf_value(
-    base_fcf: float,
-    growth: float,
-    discount_rate: float,
-    *,
-    terminal_growth: float = DEFAULT_TERMINAL_GROWTH,
-    years: int = FORECAST_YEARS,
-    shares: Optional[float] = None,
-    net_debt: float = 0.0,
-    exit_multiple: Optional[float] = None,
-    current_price: Optional[float] = None,
-) -> DcfResult:
-    """Discount ``years`` of growing free cash flow plus a terminal value.
-
-    Year ``t`` cash flow is ``base_fcf * (1 + growth) ** t``. The terminal
-    value is a growing perpetuity on the final year, or ``exit_multiple``
-    times final-year free cash flow when a multiple is given. Rates are
-    fractions. ``method`` is ``"perpetuity"`` or ``"exit multiple"``.
-    """
-    if isinstance(years, bool) or not isinstance(years, int):
-        raise ValueError("the forecast must be a whole number of years")
-    if not 1 <= years <= MAX_DCF_YEARS:
-        raise ValueError(f"the forecast must be 1 to {MAX_DCF_YEARS} years")
-    if discount_rate <= -1 or growth <= -1:
-        raise ValueError("rates must be above -100%")
-    if shares is not None and shares <= 0:
-        raise ValueError("shares outstanding must be above zero")
-    if exit_multiple is not None and exit_multiple <= 0:
-        raise ValueError("the exit multiple must be above zero")
-    if current_price is not None and current_price <= 0:
-        raise ValueError("the share price must be above zero")
-    rows: List[DcfYear] = []
-    pv_of_forecast = 0.0
-    for year in range(1, years + 1):
-        fcf = base_fcf * (1 + growth) ** year
-        present = fcf / (1 + discount_rate) ** year
-        rows.append(DcfYear(year, fcf, 1 / (1 + discount_rate) ** year, present))
-        pv_of_forecast += present
-    final_fcf = rows[-1].free_cash_flow
-    if exit_multiple is None:
-        terminal = terminal_value_perpetuity(final_fcf, discount_rate, terminal_growth)
-        if terminal is None:
-            raise ValueError(
-                "the discount rate must be above the terminal growth rate, "
-                "otherwise the perpetuity has no finite value"
-            )
-        method = "perpetuity"
-    else:
-        terminal = exit_multiple * final_fcf
-        method = "exit multiple"
-    pv_terminal = terminal / (1 + discount_rate) ** years
-    enterprise = pv_of_forecast + pv_terminal
-    equity = enterprise - net_debt
-    per_share = equity / shares if shares is not None else None
-    upside = None
-    if per_share is not None and current_price is not None:
-        upside = (per_share - current_price) / current_price * 100
-    return DcfResult(
-        years=tuple(rows),
-        pv_of_forecast=pv_of_forecast,
-        terminal_value=terminal,
-        pv_of_terminal_value=pv_terminal,
-        enterprise_value=enterprise,
-        equity_value=equity,
-        value_per_share=per_share,
-        upside_percent=upside,
-        method=method,
-        terminal_share=pv_terminal / enterprise if enterprise > 0 else None,
+def _is_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
     )
 
 
-def capm_cost_of_equity(
-    beta: float,
-    risk_free: float = RISK_FREE_RATE,
-    equity_risk_premium: float = EQUITY_RISK_PREMIUM,
-) -> float:
-    """CAPM: risk-free rate plus beta times the equity risk premium."""
-    return risk_free + beta * equity_risk_premium
+def _number(data: Any, key: str) -> float:
+    value = data.get(key) if isinstance(data, dict) else None
+    if not _is_number(value):
+        raise _unusable(key)
+    return float(value)
 
 
-@dataclass(frozen=True)
-class DripYear:
-    year: int
-    starting_value: float
-    contributions: float
-    dividend_income: float
-    reinvested: float
-    ending_value: float
-    yield_on_cost: float
+def _optional(data: Any, key: str) -> Optional[float]:
+    """A number the project may leave out (``null``)."""
+    if not isinstance(data, dict):
+        raise _unusable(key)
+    if data.get(key) is None:
+        return None
+    return _number(data, key)
 
 
-def simulate_drip(
-    initial_investment: float,
-    starting_yield: float,
-    dividend_growth: float = 0.0,
-    price_growth: float = 0.0,
-    years: int = DEFAULT_DRIP_YEARS,
-    *,
-    annual_contribution: float = 0.0,
-    reinvest: bool = True,
-) -> List[DripYear]:
-    """Year-by-year dividend reinvestment plan, as PW's ``simulateDrip``.
+def _whole(data: Any, key: str) -> int:
+    value = _number(data, key)
+    if not value.is_integer():
+        raise _unusable(key)
+    return int(value)
 
-    The yield on the current value starts at ``starting_yield`` and grows by
-    ``dividend_growth`` a year; the value grows by ``price_growth``, the
-    reinvested dividends and ``annual_contribution`` (added at year end).
-    Yield on cost is income over the initial investment plus contributions
-    made in earlier years.
-    """
-    if isinstance(years, bool) or not isinstance(years, int):
-        raise ValueError("years must be a whole number")
-    if not 0 <= years <= MAX_DRIP_YEARS:
-        raise ValueError(f"years must be 0 to {MAX_DRIP_YEARS}")
-    rows: List[DripYear] = []
-    value = initial_investment
-    for year in range(1, years + 1):
-        start = value
-        yield_fraction = starting_yield * (1 + dividend_growth) ** (year - 1)
-        income = start * yield_fraction
-        reinvested = income if reinvest else 0.0
-        appreciation = start * price_growth
-        ending = start + appreciation + reinvested + annual_contribution
-        cost_basis = initial_investment + annual_contribution * (year - 1)
-        yield_on_cost = income / cost_basis if cost_basis > 0 else 0.0
-        rows.append(
-            DripYear(
-                year=year,
-                starting_value=start,
-                contributions=annual_contribution,
-                dividend_income=income,
-                reinvested=reinvested,
-                ending_value=ending,
-                yield_on_cost=yield_on_cost,
-            )
-        )
-        value = ending
-    return rows
+
+def _series(data: Any, key: str, length: int) -> Series:
+    """One value, or ``None`` where there is none yet, for each value typed."""
+    value = data.get(key) if isinstance(data, dict) else None
+    if (
+        not isinstance(value, list)
+        or len(value) != length
+        or not all(item is None or _is_number(item) for item in value)
+    ):
+        raise _unusable(key)
+    return [None if item is None else float(item) for item in value]
+
+
+def _rows(data: Any, key: str) -> List[Dict[str, Any]]:
+    value = data.get(key) if isinstance(data, dict) else None
+    if not isinstance(value, list) or not value or not all(isinstance(row, dict) for row in value):
+        raise _unusable(key)
+    return value
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
 
 
 # ---------------------------------------------------------------- parsing
@@ -698,12 +256,6 @@ def _amount(match: "re.Match[str]") -> float:
     return -value if match.group("neg") else value
 
 
-def _rate_after(text: str, keyword: str) -> Optional[float]:
-    """A rate after ``keyword``; bare numbers count as percents (``rf 4``)."""
-    match = re.search(keyword + _FILL + _RATE, text)
-    return float(match.group("value").replace(",", "")) / 100 if match else None
-
-
 def _number_after(text: str, keyword: str) -> Optional[float]:
     match = re.search(keyword + _FILL + _NUMBER_VALUE + r"(?!" + _PCT + r")", text)
     return float(match.group("value").replace(",", "")) if match else None
@@ -717,7 +269,8 @@ class _Field:
     name: str
     after: Tuple[str, ...] = ()
     before: Tuple[str, ...] = ()
-    kind: str = "rate"  # "rate" (percent -> fraction), "amount" or "number"
+    # "rate" (percent -> fraction), "percent" (kept as typed), "amount" or "number"
+    kind: str = "rate"
 
 
 @dataclass(frozen=True)
@@ -831,7 +384,7 @@ def _percent(fraction: float, decimals: int = 2) -> str:
 
 
 def _rate_text(fraction: float) -> str:
-    """A rate as typed, without trailing zeros: 0.025 -> '2.5%'."""
+    """A rate as typed, without trailing zeros: 0.035 -> '3.5%'."""
     text = f"{fraction * 100:.4f}".rstrip("0").rstrip(".")
     return f"{'0' if text in ('', '-0') else text}%"
 
@@ -1091,42 +644,22 @@ _FIB_INTENT = re.compile(
 )
 
 
-def _capm_inputs(found: Dict[str, float]) -> Tuple[float, float, float, List[str]]:
-    """Beta, risk-free rate and equity risk premium, with notes on defaults."""
-    beta = found["beta"]
-    risk_free = found.get("risk_free", RISK_FREE_RATE)
-    notes: List[str] = []
-    if "premium" in found:
-        premium = found["premium"]
-    elif "market_return" in found:
-        premium = found["market_return"] - risk_free
-        notes.append(
-            f"Equity risk premium {_rate_text(premium)} = market return "
-            f"{_rate_text(found['market_return'])} minus the risk-free rate."
+def _unused_rates(found: Dict[str, float]) -> Optional[str]:
+    """A note on typed CAPM rates, which the project's estimate can't take."""
+    typed = [
+        f"{label} of {_rate_text(found[name])}"
+        for name, label in (
+            ("risk_free", "risk-free rate"),
+            ("premium", "equity risk premium"),
+            ("market_return", "market return"),
         )
-    else:
-        premium = EQUITY_RISK_PREMIUM
-    defaults = []
-    if "risk_free" not in found:
-        defaults.append((f"risk-free rate ({_rate_text(RISK_FREE_RATE)})", '"risk-free 4%"'))
-    if "premium" not in found and "market_return" not in found:
-        defaults.append(
-            (
-                f"equity risk premium ({_rate_text(EQUITY_RISK_PREMIUM)})",
-                '"equity risk premium 6%"',
-            )
-        )
-    if len(defaults) == 2:
-        notes.append(
-            f"The {defaults[0][0]} and {defaults[1][0]} are Portfolio-Watcher's "
-            f"defaults; say {defaults[0][1]} or {defaults[1][1]} to change them."
-        )
-    elif defaults:
-        notes.append(
-            f"The {defaults[0][0]} is Portfolio-Watcher's default; say "
-            f"{defaults[0][1]} to change it."
-        )
-    return beta, risk_free, premium, notes
+        if name in found
+    ]
+    if not typed:
+        return None
+    listed = typed[0] if len(typed) == 1 else ", ".join(typed[:-1]) + " and " + typed[-1]
+    verb = "was" if len(typed) == 1 else "were"
+    return f"The {listed} you gave {verb} not used: {PROJECT}'s CAPM has its own rates."
 
 
 def _net_debt(found: Dict[str, float], cash) -> Tuple[float, str]:
@@ -1140,9 +673,50 @@ def _net_debt(found: Dict[str, float], cash) -> Tuple[float, str]:
         debt = found.get("debt", 0.0)
         held = found.get("cash", 0.0)
         return debt - held, (
-            f"Net debt = debt {cash(debt)} - cash {cash(held)} = {cash(debt - held)}."
+            f"Debt of {cash(debt)} less cash of {cash(held)} is taken off to reach "
+            "equity value."
         )
     return 0.0, "No net debt was given, so equity value equals enterprise value."
+
+
+@dataclass(frozen=True)
+class _Valuation:
+    """What a reply uses from one run of the project's DCF model."""
+
+    years: int
+    pv_of_forecast: float
+    terminal_value: Optional[float]
+    pv_of_terminal_value: Optional[float]
+    enterprise_value: Optional[float]
+    equity_value: Optional[float]
+    value_per_share: Optional[float]
+    upside_percent: Optional[float]
+
+
+def _valuation(data: Any, key: str) -> _Valuation:
+    result = data.get(key) if isinstance(data, dict) else None
+    if not isinstance(result, dict):
+        raise _unusable(key)
+    valuation = _Valuation(
+        len(_rows(result, "years")),
+        _number(result, "pvOfForecast"),
+        _optional(result, "terminalValue"),
+        _optional(result, "pvOfTerminalValue"),
+        _optional(result, "enterpriseValue"),
+        _optional(result, "equityValue"),
+        _optional(result, "valuePerShare"),
+        _optional(result, "upsidePercent"),
+    )
+    if valuation.terminal_value is not None and None in (
+        valuation.pv_of_terminal_value,
+        valuation.enterprise_value,
+        valuation.equity_value,
+    ):
+        raise _unusable(key)
+    return valuation
+
+
+_ABOVE_ZERO = (("shares", "share count"), ("price", "share price"), ("multiple", "exit multiple"))
 
 
 def _solve_dcf(text: str) -> Optional[str]:
@@ -1155,113 +729,130 @@ def _solve_dcf(text: str) -> Optional[str]:
     base = found.get("fcf")
     if base is None or ("discount" not in found and "beta" not in found):
         return None
+    typed_years = _years(text)
+    if typed_years is not None and not 1 <= typed_years <= _MAX_DCF_YEARS:
+        raise ValueError(f"the forecast must run for 1 to {_MAX_DCF_YEARS} years")
+    if found.get("growth", 0.0) <= -1 or found.get("discount", 0.0) <= -1:
+        raise ValueError("growth and discount rates must be above -100%")
+    for name, label in _ABOVE_ZERO:
+        if found.get(name, 1.0) <= 0:
+            raise ValueError(f"the {label} must be above zero")
     currency = _currency(text)
 
     def cash(value: float) -> str:
         return _money(value, currency)
 
-    typed_years = _years(text)
-    years = FORECAST_YEARS if typed_years is None else typed_years
     growth = found.get("growth", 0.0)
+    typed_discount = found.get("discount")
+    terminal = found.get("terminal")
+    multiple = found.get("multiple")
+    shares = found.get("shares")
+    price = found.get("price")
+    net_debt, debt_note = _net_debt(found, cash)
+    data = _ask(
+        "dcf",
+        {
+            "fcf": base,
+            "growth": growth,
+            "years": typed_years,
+            "discount": typed_discount,
+            "beta": found.get("beta") if typed_discount is None else None,
+            "terminalGrowth": terminal,
+            "exitMultiple": multiple,
+            "netDebt": net_debt,
+            "shares": shares,
+            "price": price,
+        },
+    )
+    value = _valuation(data, "value")
+    discount = _number(data, "discountRate")
+    terminal_rate = _number(data, "terminalGrowth")
+    years = value.years
     assumptions = [
         f"Free cash flow of {cash(base)} grows {_rate_text(growth)} a year for "
-        f"{years} years"
-        + (" (Portfolio-Watcher's default)" if typed_years is None else "")
+        f"{_plural(years, 'year')}"
+        + (f" ({PROJECT}'s default)" if typed_years is None else "")
         + "; each year is discounted from its end."
     ]
     if "growth" not in found:
         assumptions.append("No growth rate was given, so cash flow stays flat (0%).")
-    if "discount" in found:
-        discount = found["discount"]
-        assumptions.append(f"Discount rate {_rate_text(discount)}, as given.")
+    assumptions.append(
+        f"{PROJECT}'s model starts from revenue, so the free cash flow stands in for "
+        "it at a 100% margin with nothing else taken off."
+    )
+    if typed_discount is not None:
+        assumptions.append(f"Discount rate {_rate_text(typed_discount)}, as given.")
         if "beta" in found:
             assumptions.append("The beta was ignored because a discount rate was given.")
     else:
-        beta, risk_free, premium, notes = _capm_inputs(found)
-        discount = capm_cost_of_equity(beta, risk_free, premium)
         assumptions.append(
-            f"Discount rate {_percent(discount)} from CAPM: {_rate_text(risk_free)} + "
-            f"{_trim(beta)} x {_rate_text(premium)}. Like Portfolio-Watcher, it uses "
-            "the cost of equity alone and ignores debt."
+            f"Discount rate {_percent(discount)} from {PROJECT}'s CAPM estimate: "
+            f"{_rate_text(_number(data, 'riskFreeRate'))} + {_trim(found['beta'])} x "
+            f"{_rate_text(_number(data, 'equityRiskPremium'))}. It uses the cost of "
+            "equity alone and ignores debt."
         )
-        assumptions.extend(notes)
-    terminal = found.get("terminal")
-    multiple = found.get("multiple")
-    terminal_rate = DEFAULT_TERMINAL_GROWTH if terminal is None else terminal
+        unused = _unused_rates(found)
+        if unused:
+            assumptions.append(
+                f'{unused} Give a discount rate, e.g. "discount 9%", to use your own.'
+            )
+    if value.terminal_value is None:
+        if multiple is not None:
+            raise _unusable("value")
+        return _problem(
+            f"{PROJECT} has no terminal value for a {_rate_text(discount)} discount rate "
+            f"with {_rate_text(terminal_rate)} terminal growth: a growing perpetuity needs "
+            "the discount rate above the growth rate. Raise the discount rate, lower "
+            'terminal growth or give an exit multiple such as "exit multiple 12x".'
+        )
     if multiple is not None:
         assumptions.append(
-            f"Terminal value: {_trim(multiple)}x final-year free cash flow (exit multiple)."
-        )
-    elif discount <= terminal_rate:
-        return _problem(
-            f"I can't value that: the discount rate ({_rate_text(discount)}) must be "
-            f"above terminal growth ({_rate_text(terminal_rate)}), or the terminal "
-            "value never converges. Raise the discount rate, lower terminal growth "
-            'or give an exit multiple such as "exit multiple 12x".'
+            f"Terminal value: {_trim(multiple)}x final-year free cash flow as an exit "
+            f"multiple ({PROJECT} applies it to EBITDA, which is that cash flow here)."
         )
     else:
         assumptions.append(
             f"Terminal value: cash flow grows {_rate_text(terminal_rate)} a year forever "
-            f"after year {years} (Gordon growth)"
-            + (", Portfolio-Watcher's default rate." if terminal is None else ".")
+            f"after year {years}"
+            + (f", {PROJECT}'s default rate." if terminal is None else ".")
         )
-    net_debt, debt_note = _net_debt(found, cash)
     assumptions.append(debt_note)
-    shares = found.get("shares")
-    price = found.get("price")
-    result = dcf_value(
-        base,
-        growth,
-        discount,
-        terminal_growth=terminal_rate,
-        years=years,
-        shares=shares,
-        net_debt=net_debt,
-        exit_multiple=multiple,
-        current_price=price,
-    )
     results = [
-        f"Present value of {years} years of free cash flow: {cash(result.pv_of_forecast)}",
-        f"Terminal value: {cash(result.terminal_value)}, worth "
-        f"{cash(result.pv_of_terminal_value)} today",
-        f"Enterprise value: {cash(result.enterprise_value)}",
-        f"Equity value: {cash(result.equity_value)}",
+        f"Present value of {_plural(years, 'year')} of free cash flow: "
+        f"{cash(value.pv_of_forecast)}",
+        f"Terminal value: {cash(value.terminal_value)}, worth "
+        f"{cash(value.pv_of_terminal_value)} today",
+        f"Enterprise value: {cash(value.enterprise_value)}",
+        f"Equity value: {cash(value.equity_value)}",
     ]
-    if result.value_per_share is not None and shares is not None:
+    if value.value_per_share is not None and shares is not None:
         results.append(
-            f"Value per share: {cash(result.value_per_share)} on {shares:,.0f} shares"
+            f"Value per share: {cash(value.value_per_share)} on {shares:,.0f} shares"
         )
-        headline = f"DCF value: {cash(result.value_per_share)} a share"
+        headline = f"DCF value: {cash(value.value_per_share)} a share"
     else:
-        headline = f"DCF equity value: {cash(result.equity_value)}"
+        headline = f"DCF equity value: {cash(value.equity_value)}"
         assumptions.append('Add shares outstanding (e.g. "50m shares") for a value per share.')
-    if result.upside_percent is not None and price is not None:
-        side = "upside" if result.upside_percent >= 0 else "downside"
+    if value.upside_percent is not None and price is not None:
+        side = "upside" if value.upside_percent >= 0 else "downside"
         results.append(
-            f"Implied {side} against the {cash(price)} price: {result.upside_percent:+.1f}%"
+            f"Implied {side} against the {cash(price)} price: {value.upside_percent:+.2f}%"
         )
-    if result.terminal_share is not None:
-        share_line = (
-            f"The terminal value is {_percent(result.terminal_share, 1)} of enterprise value"
+    if 0 < value.pv_of_forecast < value.pv_of_terminal_value:
+        results.append(
+            "Most of the value comes from beyond the forecast, so small changes to "
+            "terminal growth or the discount rate move the result a lot"
         )
-        if result.terminal_share > 0.7:
-            share_line += (
-                "; most of the value comes from beyond the forecast, so small changes "
-                "to terminal growth or the discount rate move the result a lot"
+    if multiple is not None and terminal is not None:
+        other = _valuation(data, "perpetuity")
+        if other.terminal_value is not None:
+            if other.value_per_share is not None:
+                compare = f"{cash(other.value_per_share)} a share"
+            else:
+                compare = f"an equity value of {cash(other.equity_value)}"
+            results.append(
+                f"For comparison, a {_rate_text(terminal)} growing perpetuity gives {compare}"
             )
-        results.append(share_line)
-    if multiple is not None and terminal is not None and discount > terminal:
-        other = dcf_value(
-            base, growth, discount, terminal_growth=terminal, years=years,
-            shares=shares, net_debt=net_debt,
-        )
-        if other.value_per_share is not None:
-            compare = f"{cash(other.value_per_share)} a share"
-        else:
-            compare = f"an equity value of {cash(other.equity_value)}"
-        results.append(
-            f"For comparison, a {_rate_text(terminal)} growing perpetuity gives {compare}"
-        )
     if base < 0:
         results.append(
             "Free cash flow is negative, so the model value is negative too; a DCF "
@@ -1276,22 +867,27 @@ def _solve_capm(text: str) -> Optional[str]:
     found = _read_fields(text, _CAPM_FIELDS)
     if "beta" not in found:
         return None
-    beta, risk_free, premium, notes = _capm_inputs(found)
-    cost = capm_cost_of_equity(beta, risk_free, premium)
+    beta = found["beta"]
+    data = _ask("capm", {"beta": beta})
+    cost = _number(data, "costOfEquity")
     results = [
-        f"{_rate_text(risk_free)} risk-free + {_trim(beta)} beta x "
-        f"{_rate_text(premium)} equity risk premium = {_percent(cost)}"
+        f"Risk-free {_rate_text(_number(data, 'riskFreeRate'))} + beta {_trim(beta)} x "
+        f"equity risk premium {_rate_text(_number(data, 'equityRiskPremium'))} = "
+        f"{_percent(cost)}"
     ]
     if beta < 0:
         results.append(
             "A negative beta means the stock tends to move against the market, so "
             "CAPM asks for less than the risk-free rate"
         )
-    assumptions = notes + [
-        "CAPM prices only market (beta) risk. Portfolio-Watcher uses it as the DCF "
-        "discount rate, which ignores debt; a full WACC also weighs the after-tax "
-        "cost of debt."
-    ]
+    assumptions = [f"The risk-free rate and equity risk premium are {PROJECT}'s own."]
+    unused = _unused_rates(found)
+    if unused:
+        assumptions.append(unused)
+    assumptions.append(
+        f"CAPM prices only market (beta) risk. {PROJECT} uses it as the DCF discount "
+        "rate, which ignores debt; a full WACC also weighs the after-tax cost of debt."
+    )
     return _reply(f"Cost of equity (CAPM): {_percent(cost)}", results, assumptions)
 
 
@@ -1309,13 +905,24 @@ def _solve_fibonacci(text: str) -> Optional[str]:
     low, high = min(low, high), max(low, high)
     if low == high:
         return _problem("Fibonacci levels need a high and a low that differ.")
+    levels = _ask("fibonacci", {"low": low, "high": high})
+    if (
+        not isinstance(levels, list)
+        or not levels
+        or not all(
+            isinstance(level, dict)
+            and isinstance(level.get("label"), str)
+            and _is_number(level.get("value"))
+            for level in levels
+        )
+    ):
+        raise _unusable("levels")
     return _reply(
-        f"Fibonacci retracement levels between {_trim(low)} and {_trim(high)}:",
-        [f"{label}: {_fixed(value)}" for label, value in fibonacci_levels(low, high)],
+        f"Fibonacci retracements from {_trim(high)} down to {_trim(low)}:",
+        [f"{level['label']}: {_fixed(level['value'])}" for level in levels],
         (
-            "Levels run from the high (0%) down to the low (100%), as "
-            "Portfolio-Watcher draws them, so 38.2% marks a pullback of 38.2% of "
-            "the move.",
+            f"{PROJECT} lists the levels from the high down to the low; each marks a "
+            "pullback from the high of that share of the move.",
             "Traders watch them as possible support or resistance; they are a "
             "convention, not a forecast.",
         ),
@@ -1366,7 +973,7 @@ def _indicator_kind(name: str) -> str:
 
 
 def _indicator_period(text: str, kind: str, only: bool) -> Optional[int]:
-    """A period written next to the indicator: "rsi(14)", "14-day rsi"."""
+    """A period written next to the indicator: "rsi(10)", "10-day rsi"."""
     names = _INDICATOR_NAMES[kind]
     patterns = [
         names + r"\s*\(\s*(?P<n>\d+)",
@@ -1406,142 +1013,171 @@ def _left_out_note(left_out: Sequence[str]) -> str:
     return f"Left out {', '.join(left_out)}, typed apart from the series."
 
 
-def _moving_average_report(text: str, values: List[float], only: bool, kind: str) -> _Report:
-    label = kind.upper()
-    period = _indicator_period(text, kind, only)
-    notes: List[str] = []
-    if period is None:
-        period = MOVING_AVERAGE_PERIOD if len(values) >= MOVING_AVERAGE_PERIOD else len(values)
-        notes.append(
-            f"No {label} period was given, so it uses "
-            + (f"{period}." if period == MOVING_AVERAGE_PERIOD else f"all {period} values.")
+def _at_least_one(value: int, name: str) -> int:
+    if value < 1:
+        raise ValueError(f"the {name} must be at least 1")
+    return value
+
+
+def _indicator_settings(
+    text: str, kind: str, count: int, only: bool
+) -> Tuple[Dict[str, Any], str, List[str]]:
+    """What to ask the project for ``kind``: settings, a label and notes.
+
+    A setting sent as ``None`` takes the project's default, and the label
+    then shows no numbers for it.
+    """
+    if kind in ("sma", "ema"):
+        label = kind.upper()
+        period = _indicator_period(text, kind, only)
+        notes: List[str] = []
+        if period is None:
+            period = count
+            notes.append(f"No {label} period was given, so it uses all {count} values.")
+        _at_least_one(period, f"{label} period")
+        return {"period": period}, f"{label}({period})", notes
+    if kind == "rsi":
+        period = _indicator_period(text, kind, only)
+        if period is None:
+            return {"period": None}, "RSI", [
+                f"No RSI period was given, so it uses {PROJECT}'s default."
+            ]
+        _at_least_one(period, "RSI period")
+        return {"period": period}, f"RSI({period})", []
+    if kind == "macd":
+        typed = _MACD_SETTINGS.search(text)
+        if not typed:
+            return {"fast": None, "slow": None, "signal": None}, "MACD", [
+                f"MACD uses {PROJECT}'s default periods."
+            ]
+        fast, slow, signal = (
+            _at_least_one(int(typed.group(name)), "MACD period")
+            for name in ("fast", "slow", "signal")
         )
-    if len(values) < period:
-        return [], [], f"{label}({period}) needs at least {period} values; you gave {len(values)}."
-    series = (sma if kind == "sma" else ema)(values, period)
-    latest = series[-1]
-    last = values[-1]
-    position = "above" if last > latest else "below" if last < latest else "level with"
-    lines = [
-        f"{label}({period}): {_plain(latest)}; the latest value {_plain(last)} is {position} it"
-    ]
-    defined = [value for value in series if value is not None]
-    if 1 < len(defined) <= 10:
-        lines.append(f"{label}({period}) series: " + ", ".join(_plain(v) for v in defined))
-    if kind == "sma":
-        notes.append(f"SMA({period}) is the plain average of the last {period} values.")
-    else:
-        notes.append(
-            f"EMA({period}) starts from the first {period}-value average, then gives "
-            f"each new value a weight of 2/({period}+1)."
-        )
-    return lines, notes, None
-
-
-def _rsi_report(text: str, values: List[float], only: bool) -> _Report:
-    period = _indicator_period(text, "rsi", only)
-    notes: List[str] = []
-    if period is None:
-        period = RSI_PERIOD
-        notes.append(f"No RSI period was given, so it uses the standard {RSI_PERIOD}.")
-    if len(values) <= period:
-        return [], [], f"RSI({period}) needs at least {period + 1} values; you gave {len(values)}."
-    latest = rsi(values, period)[-1]
-    if latest >= RSI_OVERBOUGHT:
-        reading = f"{RSI_OVERBOUGHT} or above, which is often read as overbought"
-    elif latest <= RSI_OVERSOLD:
-        reading = f"{RSI_OVERSOLD} or below, which is often read as oversold"
-    else:
-        reading = f"between {RSI_OVERSOLD} and {RSI_OVERBOUGHT}, often read as neutral momentum"
-    notes.append(
-        f"RSI uses Wilder's smoothing over {period} periods, as in Portfolio-Watcher; "
-        "overbought and oversold describe a tendency, not a forecast."
-    )
-    return [f"RSI({period}): {_fixed(latest)}, {reading}"], notes, None
-
-
-def _macd_report(text: str, values: List[float], only: bool) -> _Report:
-    settings = _MACD_SETTINGS.search(text)
-    notes: List[str] = []
-    if settings:
-        fast, slow, signal = (int(settings.group(k)) for k in ("fast", "slow", "signal"))
         if fast >= slow:
             raise ValueError("the MACD fast period must be shorter than the slow period")
-    else:
-        fast, slow, signal = MACD_FAST, MACD_SLOW, MACD_SIGNAL
-        notes.append("MACD uses the standard 12, 26 and 9 periods.")
-    label = f"MACD({fast},{slow},{signal})"
-    needed = slow + signal - 1
-    if len(values) < slow:
-        return [], [], (
-            f"{label} needs at least {slow} values for the MACD line and {needed} for "
-            f"the signal line; you gave {len(values)}."
+        return (
+            {"fast": fast, "slow": slow, "signal": signal},
+            f"MACD({fast},{slow},{signal})",
+            [],
         )
-    result = macd(values, fast, slow, signal)
-    line, signal_value, histogram = result.macd[-1], result.signal[-1], result.histogram[-1]
-    if signal_value is None or histogram is None:
-        text_line = (
-            f"{label} line: {_plain(line)}; the signal line needs {needed} values and "
-            f"you gave {len(values)}"
-        )
-    else:
-        if line > signal_value:
-            reading = "the line is above the signal, often read as positive momentum"
-        elif line < signal_value:
-            reading = "the line is below the signal, often read as negative momentum"
-        else:
-            reading = "the line equals the signal"
-        text_line = (
-            f"{label}: line {_plain(line)}, signal {_plain(signal_value)}, "
-            f"histogram {_plain(histogram)}; {reading}"
-        )
-    notes.append(
-        f"MACD is the {fast}-period EMA minus the {slow}-period EMA; the signal "
-        f"line is a {signal}-period EMA of it."
-    )
-    return [text_line], notes, None
-
-
-def _bollinger_report(text: str, values: List[float], only: bool) -> _Report:
-    settings = _BOLLINGER_SETTINGS.search(text)
-    period = int(settings.group("n")) if settings else _indicator_period(text, "bollinger", only)
-    multiple = float(settings.group("k")) if settings and settings.group("k") else None
+    typed = _BOLLINGER_SETTINGS.search(text)
+    period = int(typed.group("n")) if typed else _indicator_period(text, kind, only)
+    multiple = float(typed.group("k")) if typed and typed.group("k") else None
     if multiple is None:
         for pattern in _BOLLINGER_MULTIPLES:
             match = re.search(pattern, text)
             if match:
                 multiple = float(match.group("k"))
                 break
-    defaults = []
-    if period is None:
-        period = BOLLINGER_PERIOD
-        defaults.append(f"{BOLLINGER_PERIOD} periods")
-    if multiple is None:
-        multiple = BOLLINGER_MULTIPLE
-        defaults.append(f"{_trim(BOLLINGER_MULTIPLE)} standard deviations")
-    notes: List[str] = []
-    if defaults:
-        notes.append("Bollinger bands use the standard " + " and ".join(defaults) + ".")
-    label = f"Bollinger({period}, {_trim(multiple)})"
-    if len(values) < period:
-        return [], [], f"{label} needs at least {period} values; you gave {len(values)}."
-    bands = bollinger(values, period, multiple)
-    upper, middle, lower = bands.upper[-1], bands.middle[-1], bands.lower[-1]
+    if period is not None:
+        _at_least_one(period, "Bollinger period")
+    if multiple is not None and multiple <= 0:
+        raise ValueError("the Bollinger band width must be above zero")
+    defaults = [
+        name for name, setting in (("period", period), ("width", multiple)) if setting is None
+    ]
+    notes = (
+        [f"Bollinger bands use {PROJECT}'s default {' and '.join(defaults)}."] if defaults else []
+    )
+    if period is not None:
+        label = f"Bollinger({period}" + (f", {_trim(multiple)})" if multiple is not None else ")")
+    elif multiple is not None:
+        label = f"Bollinger bands at {_trim(multiple)} standard deviations"
+    else:
+        label = "Bollinger bands"
+    return {"period": period, "multiple": multiple}, label, notes
+
+
+def _position(value: float, level: float) -> str:
+    return "above" if value > level else "below" if value < level else "level with"
+
+
+def _indicator_report(
+    kind: str, label: str, settings: Dict[str, Any], data: Any, values: List[float]
+) -> _Report:
+    """Lines and notes for one indicator, or why there are too few values."""
+    count = len(values)
     last = values[-1]
+    defaulted = any(setting is None for setting in settings.values())
+    short = (
+        f"Not enough values for {label}"
+        + (f" at {PROJECT}'s default settings" if defaulted else "")
+        + f": you gave {count}."
+    )
+    if kind in ("sma", "ema"):
+        series = _series(data, kind, count)
+        latest = series[-1]
+        if latest is None:
+            return [], [], short
+        lines = [
+            f"{label}: {_plain(latest)}; the latest value {_plain(last)} is "
+            f"{_position(last, latest)} it"
+        ]
+        defined = [value for value in series if value is not None]
+        if 1 < len(defined) <= 10:
+            lines.append(f"{label} series: " + ", ".join(_plain(v) for v in defined))
+        if kind == "sma":
+            note = f"{label} is the plain average of the last {settings['period']} values."
+        elif len(defined) > 1:
+            note = (
+                f"{label} is a moving average that gives recent values more weight than "
+                "older ones."
+            )
+        else:
+            note = (
+                f"{label} has a single reading, the plain average of all {count} values; "
+                "a shorter period gives recent values more weight."
+            )
+        return lines, [note], None
+    if kind == "rsi":
+        latest = _series(data, kind, count)[-1]
+        if latest is None:
+            return [], [], short
+        return [f"{label}: {_fixed(latest)}"], [
+            "RSI runs from 0 to 100; high readings are often called overbought and low "
+            "ones oversold, which describes a tendency, not a forecast."
+        ], None
+    if kind == "macd":
+        result = data.get("macd") if isinstance(data, dict) else None
+        line, signal, histogram = (
+            _series(result, name, count)[-1] for name in ("macd", "signal", "histogram")
+        )
+        if line is None:
+            return [], [], short
+        if signal is None or histogram is None:
+            text_line = (
+                f"{label} line: {_plain(line)}; there are too few values for its "
+                "signal line yet"
+            )
+        else:
+            text_line = (
+                f"{label}: line {_plain(line)}, signal {_plain(signal)}, histogram "
+                f"{_plain(histogram)}; the line is {_position(line, signal)} the signal"
+            )
+        return [text_line], [
+            "MACD is a fast EMA minus a slow EMA; the signal line is an EMA of the "
+            "MACD line, and the histogram is the gap between the two."
+        ], None
+    bands = data.get("bollinger") if isinstance(data, dict) else None
+    upper, middle, lower = (
+        _series(bands, name, count)[-1] for name in ("upper", "middle", "lower")
+    )
+    if upper is None or middle is None or lower is None:
+        return [], [], short
     if last > upper:
         reading = "above the upper band, often read as stretched to the upside"
     elif last < lower:
         reading = "below the lower band, often read as stretched to the downside"
     else:
         reading = "inside the bands"
-    notes.append(
-        f"The bands are the {period}-period SMA plus or minus {_trim(multiple)} "
-        "population standard deviations."
-    )
     return [
         f"{label}: upper {_plain(upper)}, middle {_plain(middle)}, lower "
         f"{_plain(lower)}; the latest value {_plain(last)} is {reading}"
-    ], notes, None
+    ], [
+        "The middle band is a moving average; the outer bands sit a set number of "
+        "standard deviations above and below it."
+    ], None
 
 
 def _solve_technicals(text: str) -> Optional[str]:
@@ -1558,21 +1194,20 @@ def _solve_technicals(text: str) -> Optional[str]:
     if len(values) < 2:
         return None
     only = len(kinds) == 1
+    asked = {kind: _indicator_settings(text, kind, len(values), only) for kind in kinds}
+    payload: Dict[str, Any] = {"values": values}
+    payload.update((kind, settings) for kind, (settings, _, _) in asked.items())
+    data = _ask("technicals", payload)
     lines: List[str] = []
     notes: List[str] = []
     missing: List[str] = []
-    for kind in kinds:
-        if kind in ("sma", "ema"):
-            found, explained, short = _moving_average_report(text, values, only, kind)
-        elif kind == "rsi":
-            found, explained, short = _rsi_report(text, values, only)
-        elif kind == "macd":
-            found, explained, short = _macd_report(text, values, only)
-        else:
-            found, explained, short = _bollinger_report(text, values, only)
+    for kind, (settings, label, defaults) in asked.items():
+        found, explained, short = _indicator_report(kind, label, settings, data, values)
         if short:
             missing.append(short)
+            continue
         lines.extend(found)
+        notes.extend(defaults)
         notes.extend(explained)
     if not lines:
         return _problem(" ".join(missing) + " Add more values or choose a shorter period.")
@@ -1600,7 +1235,6 @@ _RISK_INTENT = re.compile(
 )
 _PRICE_WORDS = re.compile(r"\b(?:prices?|closes?|closing|navs?|quotes?)\b")
 _RETURN_WORDS = re.compile(r"\breturns?\b")
-_RISK_FREE_WORDS = r"\b(?:risk[- ]?free(?:\s+rate)?|rf)\b"
 _CONFIDENCE_PATTERNS = (
     r"(?P<value>\d+(?:\.\d+)?)\s*%\s*(?:confidence|level|var\b|value\s+at\s+risk|cvar"
     r"|es\b|expected\s+shortfall)",
@@ -1609,16 +1243,17 @@ _CONFIDENCE_PATTERNS = (
     r"(?P<value>\d+(?:\.\d+)?)\s*%(?=\s*(?:\b(?:of|for|on)\b|:|$))",
 )
 _FREQUENCIES = (
-    (r"\bdaily\b", 252, "daily"),
-    (r"\bweekly\b", 52, "weekly"),
-    (r"\bmonthly\b", 12, "monthly"),
-    (r"\bquarterly\b", 4, "quarterly"),
+    (r"\bdaily\b", "daily"),
+    (r"\bweekly\b", "weekly"),
+    (r"\bmonthly\b", "monthly"),
+    (r"\bquarterly\b", "quarterly"),
     (
         r"\b(?:annual|yearly)\s+(?:returns?|prices?|closes?|data|values?|observations?)\b",
-        1,
         "yearly",
     ),
 )
+_SHARPE = re.compile(r"\bsharpe\b")
+_ANNUALISED_RETURN = re.compile(r"\bannuali[sz]ed\s+returns?\b")
 
 
 def _risk_metric(name: str) -> str:
@@ -1644,127 +1279,64 @@ def _risk_metric(name: str) -> str:
     return "stats"
 
 
-def _periods_per_year(text: str) -> Tuple[int, str]:
+def _frequency(text: str) -> Optional[str]:
+    """How often the typed figures were taken, when the request says."""
     match = re.search(
         r"\b(?P<n>\d+)\s+(?:periods?|observations?|returns?)\s+(?:a|per)\s+year\b", text
     )
     if match and int(match.group("n")) > 0:
-        return int(match.group("n")), "as given"
-    for pattern, count, label in _FREQUENCIES:
+        return f"figures taken {int(match.group('n'))} times a year"
+    for pattern, label in _FREQUENCIES:
         if re.search(pattern, text):
-            return count, label
-    return TRADING_DAYS_PER_YEAR, 'daily, the default; say "monthly" or "weekly" to change it'
+            return f"{label} figures"
+    return None
 
 
-def _confidence(text: str) -> float:
+def _confidence(text: str) -> Optional[float]:
+    """A typed confidence level for VaR and expected shortfall, if any."""
     for pattern in _CONFIDENCE_PATTERNS:
         match = re.search(pattern, text)
         if match:
             value = float(match.group("value"))
-            return value / 100 if value > 1 else value
-    return DEFAULT_CONFIDENCE
-
-
-def _drawdown_points(prices: Sequence[float]) -> Tuple[float, float]:
-    peak = prices[0]
-    worst = (0.0, prices[0], prices[0])
-    for price in prices:
-        peak = max(peak, price)
-        if (peak - price) / peak > worst[0]:
-            worst = ((peak - price) / peak, peak, price)
-    return worst[1], worst[2]
-
-
-_VOLATILITY_WORDS = r"(?:volatility|vol|standard\s+deviation|std\.?\s*dev\.?|stdev|sd|sigma)"
-_RETURN_LABEL = r"(?:(?:annual(?:i[sz]ed)?|expected|average|mean|excess)\s+)*returns?"
-_SUMMARY_FIELDS = (
-    _Field(
-        "return",
-        (r"(?<!free )(?<!market )\b" + _RETURN_LABEL + r"\b" + _FILL + _RATE,),
-        (_RATE + r"\s*" + _RETURN_LABEL + r"\b",),
-    ),
-    _Field(
-        "volatility",
-        (r"\b" + _VOLATILITY_WORDS + r"\b" + _FILL + _RATE,),
-        (_RATE + r"\s*(?:annual(?:i[sz]ed)?\s+)?" + _VOLATILITY_WORDS + r"\b",),
-    ),
-)
-
-
-def _summary_sharpe(text: str) -> Optional[str]:
-    """A Sharpe ratio from a typed annual return and volatility, not a series."""
-    typed_risk_free = re.search(_RISK_FREE_WORDS + _FILL + _RATE, text)
-    taken = [typed_risk_free.span("value")] if typed_risk_free else []
-    found = _read_fields(text, _SUMMARY_FIELDS, taken)
-    if (
-        "return" not in found
-        or "volatility" not in found
-        or len(re.findall(_NUM, text)) > 2 + len(taken)
-    ):
-        return None
-    annual_return, volatility = found["return"], found["volatility"]
-    if volatility <= 0:
-        return _problem("Volatility must be above zero for a Sharpe ratio.")
-    excess = bool(re.search(r"\bexcess\s+returns?\b", text))
-    if excess:
-        risk_free = 0.0
-    elif typed_risk_free:
-        risk_free = float(typed_risk_free.group("value").replace(",", "")) / 100
-    else:
-        risk_free = RISK_FREE_RATE
-    ratio = (annual_return - risk_free) / volatility
-    if excess:
-        working = f"{_rate_text(annual_return)} / {_rate_text(volatility)} = {_fixed(ratio)}"
-        rule = "The return is already in excess of the risk-free rate, so nothing is subtracted."
-    else:
-        working = (
-            f"({_rate_text(annual_return)} - {_rate_text(risk_free)}) / "
-            f"{_rate_text(volatility)} = {_fixed(ratio)}"
-        )
-        rule = "Sharpe ratio = (return - risk-free rate) / volatility"
-        rule += "." if typed_risk_free else (
-            f"; {_rate_text(RISK_FREE_RATE)} is Portfolio-Watcher's default rate."
-        )
-    headline = f"Sharpe ratio: {_fixed(ratio)}" + (
-        "" if excess else f" (risk-free {_rate_text(risk_free)})"
-    )
-    assumptions = [
-        "The return and volatility are annual figures, as typed; numbers without % "
-        "are read as percents.",
-        rule,
-    ]
-    return _reply(headline, [working], assumptions)
+            level = value / 100 if value > 1 else value
+            if not 0 < level < 1:
+                raise ValueError("the confidence level must be between 0% and 100%")
+            return level
+    return None
 
 
 def _solve_risk(text: str) -> Optional[str]:
     intent = _RISK_INTENT.search(text)
     if not intent:
         return None
-    if re.search(r"\bsharpe\b", text):
-        summary = _summary_sharpe(text)
-        if summary is not None:
-            return summary
+    metric = _risk_metric(intent.group(0))
+    if metric == "sharpe":
+        if len(re.findall(_NUM, text)) < 2:
+            return None
+        return _problem(
+            f"{PROJECT} has no Sharpe ratio calculation for numbers you type. For risk "
+            'and return figures, try e.g. "return stats of 1%, -2%, 0.5%, 3%".'
+        )
     raw, percent, left_out = _typed_series(text, (intent.end(), 0))
     if len(raw) < 2:
         return None
-    metric = _risk_metric(intent.group(0))
     # Skewness, kurtosis and t describe the typed numbers themselves unless
     # they are called prices.
     sample = metric in ("skewness", "kurtosis", "t", "stats")
     says_prices = bool(_PRICE_WORDS.search(text))
-    prices: Optional[List[float]] = None
+    prices = False
     if percent:
-        returns = [value / 100 for value in raw]
+        values = [value / 100 for value in raw]
         reading = "Read the numbers as percent returns (1% = 0.01)."
     elif not says_prices and (sample or _RETURN_WORDS.search(text) or any(v < 0 for v in raw)):
         if any(abs(value) > 1 for value in raw):
-            returns = [value / 100 for value in raw]
+            values = [value / 100 for value in raw]
             reading = (
                 "Read the numbers as percent returns because some are bigger than 1; "
                 "write 0.01 for 1% to use decimals."
             )
         else:
-            returns = list(raw)
+            values = list(raw)
             reading = (
                 "Read the numbers as decimal returns (0.01 = 1%); add % signs if you "
                 "meant percents."
@@ -1775,101 +1347,109 @@ def _solve_risk(text: str) -> Optional[str]:
                 'Prices must all be above zero; if these are returns, say "returns" '
                 "or add % signs."
             )
-        prices = raw
-        returns = simple_returns(raw)
+        if len(raw) < 3:
+            return _problem(
+                f"I need at least 3 prices to measure risk; you gave {len(raw)}. If these "
+                'are returns, say "returns" or add % signs.'
+            )
+        prices = True
+        values = list(raw)
         reading = (
             f"Read the {len(raw)} numbers as prices, oldest first, giving "
-            f'{len(returns)} simple returns; say "returns" if they already are.'
+            f'{len(raw) - 1} returns; say "returns" if they already are.'
         )
-    if len(returns) < 2:
+    frequency = _frequency(text)
+    daily = frequency in (None, "daily figures")
+    if metric in ("volatility", "return") and not daily:
         return _problem(
-            f"I need at least 3 prices to measure risk; you gave {len(raw)}. If these are "
-            'returns, say "returns" or add % signs.'
+            f"{PROJECT} annualises figures as if they were daily, so it can't annualise "
+            f'{frequency}. Ask for e.g. "value at risk" or "return stats" instead.'
         )
-    periods, frequency = _periods_per_year(text)
+    if metric == "return" and not prices:
+        return _problem(
+            f"{PROJECT} works out an annualised return only from prices. Type them "
+            'oldest first, e.g. "annualised return of prices 100, 104, 101, 108".'
+        )
     confidence = _confidence(text)
-    typed_risk_free = _rate_after(text, _RISK_FREE_WORDS)
-    risk_free = RISK_FREE_RATE if typed_risk_free is None else typed_risk_free
-    count = len(returns)
-    average = mean(returns)
-    volatility = annualised_volatility(returns, periods)
-    var = historical_var(returns, confidence)
-    shortfall = expected_shortfall(returns, confidence)
-    drawdown = max_drawdown(returns)
-    sharpe = sharpe_ratio(returns, risk_free, periods)
-    t_stat = t_statistic(returns)
-    level = _rate_text(confidence)
-
-    drawdown_line = f"Max drawdown: {_percent(drawdown)}"
-    if prices is not None and drawdown > 0:
-        peak, trough = _drawdown_points(prices)
-        drawdown_line += f" (from {_trim(peak)} down to {_trim(trough)})"
-    elif prices is None:
-        drawdown_line += " of the compounded returns"
-    if sharpe is None:
-        sharpe_line = "Sharpe ratio: not defined, because the returns do not vary"
-    else:
-        sharpe_line = f"Sharpe ratio: {_fixed(sharpe)} (risk-free {_rate_text(risk_free)})"
+    data = _ask("risk", {"values": values, "prices": prices, "confidence": confidence})
+    count = _whole(data, "count")
+    volatility = _number(data, "volatility")
+    var = _number(data, "valueAtRisk")
+    shortfall = _number(data, "expectedShortfall")
+    drawdown = _number(data, "maxDrawdown")
+    average = _number(data, "mean")
+    middle = _number(data, "median")
+    spread = _number(data, "stdDev")
+    skew = _number(data, "skewness")
+    kurt = _number(data, "kurtosis")
+    t_stat = _optional(data, "tStatistic")
+    annual = _number(data, "annualisedReturnPercent") if prices and daily else None
+    level = "" if confidence is None else _rate_text(confidence)
     t_text = "n/a" if t_stat is None else _fixed(t_stat)
-    metrics = {
-        "return": f"Annualised return: {_percent(average * periods)} (average x {periods})",
-        "volatility": f"Annualised volatility: {_percent(volatility)}",
-        "var": f"Historical {level} VaR: {_percent(var)} in one period",
-        "es": f"Expected shortfall ({level}): {_percent(shortfall)} average loss in the tail",
-        "drawdown": drawdown_line,
-        "sharpe": sharpe_line,
-    }
+
+    metrics: Dict[str, str] = {}
+    if annual is not None:
+        metrics["return"] = f"Annualised return: {_fixed(annual)}%"
+    if daily:
+        metrics["volatility"] = f"Annualised volatility: {_percent(volatility)}"
+    metrics["var"] = f"Historical {level + ' ' if level else ''}VaR: {_percent(var)} in one period"
+    metrics["es"] = (
+        f"Expected shortfall{f' ({level})' if level else ''}: {_percent(shortfall)}, "
+        "the average loss in the worst cases"
+    )
+    metrics["drawdown"] = f"Max drawdown: {_percent(drawdown)}" + (
+        "" if prices else " of the compounded returns"
+    )
     headlines = {
-        "skewness": f"Skewness: {_fixed(skewness(returns))}",
-        "kurtosis": f"Excess kurtosis: {_fixed(kurtosis(returns))}",
+        "skewness": f"Skewness: {_fixed(skew)}",
+        "kurtosis": f"Excess kurtosis: {_fixed(kurt)}",
         "t": f"t-statistic: {t_text}",
         "stats": f"Return statistics for {count} returns:",
     }
     headline = metrics.pop(metric) if metric in metrics else headlines[metric]
     results = list(metrics.values()) + [
-        f"Per period: mean {_percent(average)}, median {_percent(median(returns))}, "
-        f"standard deviation {_percent(std_dev(returns))}",
-        f"Skewness {_fixed(skewness(returns))}, excess kurtosis {_fixed(kurtosis(returns))}, "
-        f"t-statistic {t_text}",
+        f"Per period: mean {_percent(average)}, median {_percent(middle)}, "
+        f"standard deviation {_percent(spread)}",
+        f"Skewness {_fixed(skew)}, excess kurtosis {_fixed(kurt)}, t-statistic {t_text}",
     ]
-    if count < MIN_SIGNIFICANT_OBSERVATIONS:
-        results.append(
-            f"With only {count} returns these figures are rough; Portfolio-Watcher "
-            f"treats an average as significant only with {MIN_SIGNIFICANT_OBSERVATIONS}+ "
-            f"observations and |t| above {SIGNIFICANCE_T}"
-        )
-    elif t_stat is not None and abs(t_stat) > SIGNIFICANCE_T:
-        results.append(
-            "The average return is statistically different from zero "
-            f"(|t| above {SIGNIFICANCE_T})"
-        )
-    else:
-        results.append(
-            "The average return is not statistically different from zero "
-            f"(|t| at most {SIGNIFICANCE_T})"
-        )
-    assumptions = [
-        reading,
-        f"{periods} periods a year ({frequency}): volatility scales with its square "
-        "root and the average return with the count.",
-        "VaR and expected shortfall are historical: they come from the sorted returns, "
-        "with no distribution assumed.",
-    ]
+    assumptions = [reading]
     if left_out:
-        assumptions.insert(1, _left_out_note(left_out))
-    if max(1, math.floor((1 - confidence) * count)) == 1 and var > 0:
+        assumptions.append(_left_out_note(left_out))
+    if frequency is None:
         assumptions.append(
-            f"With {count} returns the {level} tail is just the worst period, so VaR and "
-            "expected shortfall both equal that loss."
+            f"The figures are treated as daily, as {PROJECT}'s annualising assumes; say "
+            '"monthly" or "weekly" if they are not.'
         )
-    sharpe_note = "Sharpe ratio = (annualised return - risk-free rate) / annualised volatility"
-    if typed_risk_free is None:
-        sharpe_note += f"; {_rate_text(RISK_FREE_RATE)} is Portfolio-Watcher's default rate"
-    assumptions.append(sharpe_note + ".")
+    elif not daily:
+        assumptions.append(
+            f"{PROJECT} annualises only daily figures, so there is no annualised "
+            f"volatility or return for {frequency}."
+        )
+    if annual is not None:
+        assumptions.append(
+            f"The annualised return is {PROJECT}'s: the average daily return scaled up "
+            "to a year, without compounding."
+        )
     assumptions.append(
-        "Standard deviation is the sample estimate (n - 1); skewness and kurtosis use "
-        "population moments, as in Portfolio-Watcher."
+        "VaR and expected shortfall are historical: they come from the returns "
+        "themselves, with no distribution assumed."
     )
+    if confidence is None:
+        assumptions.append(
+            f"VaR and expected shortfall use {PROJECT}'s default confidence level; "
+            'say e.g. "99% VaR" to choose one.'
+        )
+    if metric in ("t", "stats"):
+        assumptions.append(
+            "The further the t-statistic is from zero, the less likely the average "
+            "return is just noise."
+        )
+    if _SHARPE.search(text):
+        assumptions.append(f"There is no Sharpe ratio: {PROJECT} has none for numbers you type.")
+    if _ANNUALISED_RETURN.search(text) and annual is None:
+        assumptions.append(
+            f"There is no annualised return: {PROJECT} works one out only from daily prices."
+        )
     return _reply(headline, results, assumptions)
 
 
@@ -1909,6 +1489,7 @@ _DRIP_FIELDS = (
         "yield",
         (r"\b(?:(?:dividend|starting|initial|current)\s+)?yield(?:ing|s)?\b" + _FILL + _RATE,),
         (_PCT_VALUE + r"\s*(?:(?:starting|initial|dividend|div|current)\s+)*yield\b",),
+        "percent",
     ),
     _Field(
         "dividend_growth",
@@ -1937,6 +1518,38 @@ _DRIP_FIELDS = (
         ),
     ),
 )
+
+
+@dataclass(frozen=True)
+class _DripYear:
+    """One year of the project's DRIP simulation, as a reply uses it."""
+
+    year: int
+    dividend_income: float
+    ending_value: float
+    yield_on_cost: float
+
+
+def _drip_years(data: Any, key: str, years: int) -> List[_DripYear]:
+    rows = [
+        _DripYear(
+            _whole(row, "year"),
+            _number(row, "dividendIncome"),
+            _number(row, "endingValue"),
+            _number(row, "yieldOnCost"),
+        )
+        for row in _rows(data, key)
+    ]
+    if len(rows) != years:
+        raise _unusable(key)
+    return rows
+
+
+def _drip_horizons(data: Any, key: str) -> List[Tuple[int, float, float]]:
+    return [
+        (_whole(row, "horizon"), _number(row, "finalValue"), _number(row, "annualIncome"))
+        for row in _rows(data, key)
+    ]
 
 
 def _solve_drip(text: str) -> Optional[str]:
@@ -1968,10 +1581,11 @@ def _solve_drip(text: str) -> Optional[str]:
         initial = 0.0
     if initial is None or "yield" not in found:
         return None
-    typed_years = _years(text)
-    years = DEFAULT_DRIP_YEARS if typed_years is None else typed_years
-    if years < 1:
+    years = _years(text)
+    if years is not None and years < 1:
         return _problem("A DRIP projection needs at least 1 year.")
+    if years is not None and years > _MAX_DRIP_YEARS:
+        raise ValueError(f"a DRIP projection can run for at most {_MAX_DRIP_YEARS} years")
     starting_yield = found["yield"]
     dividend_growth = found.get("dividend_growth", 0.0)
     price_growth = found.get("price_growth", 0.0)
@@ -1981,67 +1595,18 @@ def _solve_drip(text: str) -> Optional[str]:
     def cash(value: float) -> str:
         return _money(value, currency)
 
-    def run(reinvesting: bool) -> List[DripYear]:
-        return simulate_drip(
-            initial, starting_yield, dividend_growth, price_growth, years,
-            annual_contribution=contribution, reinvest=reinvesting,
-        )
-
-    rows = run(reinvest)
-    other = run(not reinvest)
-    final = rows[-1].ending_value
-    dividends = _total([row.dividend_income for row in rows])
-    shown = rows if years <= 10 else [
-        row for row in rows if row.year == 1 or row.year % 5 == 0 or row.year == years
-    ]
-    results = [
-        f"Year {row.year}: dividends {cash(row.dividend_income)}, value "
-        f"{cash(row.ending_value)}, yield on cost {_percent(row.yield_on_cost)}"
-        for row in shown
-    ]
-    total_line = f"Total dividends: {cash(dividends)}"
-    if contribution:
-        total_line += f"; contributions {cash(contribution * years)}"
-    results.append(total_line)
-    if reinvest:
-        paid = _total([row.dividend_income for row in other])
-        results.append(
-            f"Taking dividends as cash instead: value {cash(other[-1].ending_value)} "
-            f"plus {cash(paid)} paid out"
-        )
-    else:
-        results.append(f"Reinvesting them instead would give {cash(other[-1].ending_value)}")
-    if dividend_growth:
-        final_yield = starting_yield * (1 + dividend_growth) ** (years - 1)
-        yield_note = (
-            f"The dividend yield on the current value starts at {_rate_text(starting_yield)} "
-            f"and grows {_rate_text(dividend_growth)} a year, reaching "
-            f"{_percent(final_yield)} in year {years}, as in Portfolio-Watcher's model."
-        )
-    else:
-        yield_note = (
-            f"The dividend yield on the current value stays at {_rate_text(starting_yield)}; "
-            'add e.g. "5% dividend growth" to grow it.'
-        )
-    assumptions = [yield_note]
-    if "price_growth" in found:
-        assumptions.append(f"The share price grows {_rate_text(price_growth)} a year.")
-    else:
-        assumptions.append(
-            'The share price stays flat; add e.g. "4% price growth" to change that.'
-        )
-    if monthly is not None:
-        assumptions.append(
-            f"{cash(monthly)} a month is added as {cash(contribution)} at each year end."
-        )
-    elif contribution:
-        assumptions.append(f"{cash(contribution)} is added at each year end.")
-    if typed_years is None:
-        assumptions.append(f"{years} years, the default horizon.")
-    assumptions.append(
-        "Yield on cost is the year's dividends divided by the money put in before "
-        "that year. Taxes, fees and share rounding are ignored."
+    data = _ask(
+        "drip",
+        {
+            "initialInvestment": initial,
+            "annualContribution": contribution,
+            "startingYieldPercent": starting_yield,
+            "dividendGrowth": dividend_growth,
+            "priceGrowth": price_growth,
+            "years": years,
+        },
     )
+    chosen, other = ("reinvest", "payout") if reinvest else ("payout", "reinvest")
     start = cash(initial)
     if contribution:
         if monthly is not None:
@@ -2049,25 +1614,88 @@ def _solve_drip(text: str) -> Optional[str]:
         else:
             extra = f"{cash(contribution)} a year"
         start = f"{start} plus {extra}" if initial else extra
-    headline = (
-        f"DRIP projection: {start} grows to {cash(final)} in {years} years "
-        + ("with dividends reinvested" if reinvest else "with dividends paid out")
-    )
+    way = "with dividends reinvested" if reinvest else "with dividends paid out"
+    if years is not None:
+        rows = _drip_years(data, chosen, years)
+        final = rows[-1].ending_value
+        alternative = _drip_years(data, other, years)[-1].ending_value
+        shown = rows if years <= 10 else [
+            row for row in rows if row.year == 1 or row.year % 5 == 0 or row.year == years
+        ]
+        results = [
+            f"Year {row.year}: dividends {cash(row.dividend_income)}, value "
+            f"{cash(row.ending_value)}, yield on cost {_fixed(row.yield_on_cost)}%"
+            for row in shown
+        ]
+        headline = (
+            f"DRIP projection: {start} grows to {cash(final)} in "
+            f"{_plural(years, 'year')} {way}"
+        )
+    else:
+        horizons = _drip_horizons(data, chosen)
+        alternative = _drip_horizons(data, other)[-1][1]
+        results = [
+            f"After {_plural(horizon, 'year')}: value {cash(value)}, dividends "
+            f"{cash(income)} that year"
+            for horizon, value, income in horizons
+        ]
+        headline = f"DRIP projection: {start} {way}:"
+    if reinvest:
+        results.append(
+            f"Taking dividends as cash instead: value {cash(alternative)}, not counting "
+            "the dividends paid out"
+        )
+    else:
+        results.append(f"Reinvesting them instead would give {cash(alternative)}")
+    if dividend_growth:
+        yield_note = (
+            f"The dividend yield on the current value starts at {_trim(starting_yield)}% "
+            f"and grows {_rate_text(dividend_growth)} a year."
+        )
+    else:
+        yield_note = (
+            f"The dividend yield on the current value stays at {_trim(starting_yield)}%; "
+            'add e.g. "4% dividend growth" to grow it.'
+        )
+    assumptions = [yield_note]
+    if "price_growth" in found:
+        assumptions.append(f"The share price grows {_rate_text(price_growth)} a year.")
+    else:
+        assumptions.append(
+            'The share price stays flat; add e.g. "3% price growth" to change that.'
+        )
+    if monthly is not None:
+        assumptions.append(
+            f"{cash(monthly)} a month goes in as {cash(contribution)} at each year end."
+        )
+    elif contribution:
+        assumptions.append(f"{cash(contribution)} goes in at each year end.")
+    if years is None:
+        assumptions.append(
+            f"With no number of years given, these are the horizons {PROJECT} shows; "
+            'add e.g. "for 15 years" for a year-by-year view.'
+        )
+    else:
+        assumptions.append(
+            "Yield on cost is the year's dividends divided by the money put in before "
+            "that year."
+        )
+    assumptions.append("Taxes, fees and share rounding are ignored.")
     return _reply(headline, results, assumptions)
 
 
 # ------------------------------------------------------------- entry points
 
 _EXAMPLES = (
-    "dcf with fcf 100m growth 8% discount 9% terminal 2.5% 50m shares net debt 200m",
+    "dcf with fcf 100m growth 8% discount 9% terminal 3% 50m shares net debt 200m",
     "cost of equity for beta 1.3",
     "rsi 5 of 44, 44.3, 44.1, 43.6, 44.5, 44.9, 45.2",
     "sma 5 of 10, 11, 12, 13, 14, 15",
-    "bollinger(5, 2) of 10 11 12 11 13 14",
+    "bollinger(4, 1.5) of 10 11 12 11 13 14",
     "fibonacci levels between 100 and 150",
     "max drawdown of 100, 120, 90, 130",
-    "sharpe ratio of monthly returns 1%, 2%, -1%, 3%",
-    "drip 10000 at 3% yield 5% dividend growth for 10 years",
+    "value at risk of returns 1%, -2%, 0.5%, -3%, 2%",
+    "drip 8000 at 3.5% yield 4% dividend growth for 12 years",
 )
 
 
@@ -2077,6 +1705,9 @@ def solve(text: str) -> Optional[str]:
     Handles DCF, CAPM, Fibonacci levels, technicals (SMA, EMA, RSI, MACD,
     Bollinger), risk and return statistics, and DRIP projections, using only
     the numbers in ``text``. ``None`` also means the needed numbers are missing.
+    The figures come from Portfolio-Watcher, so a request it can answer raises
+    :class:`jarvis.projects.ProjectUnavailable` when the project or Node.js
+    is missing, and :class:`jarvis.projects.ProjectError` when it fails.
     """
     cleaned = _clean(text)
     try:
@@ -2097,8 +1728,11 @@ def solve(text: str) -> Optional[str]:
 
 
 def usage() -> str:
-    """How to ask, with examples that work offline."""
-    lines = ["I can do investment maths on numbers you type (no market data). Try:"]
+    """How to ask, with examples; needs neither the project nor Node.js."""
+    lines = [
+        f"I can do investment maths with {PROJECT}'s calculations on numbers you type "
+        "(no market data). Try:"
+    ]
     lines.extend(f"- {example}" for example in _EXAMPLES)
     lines.extend((DISCLAIMER, CREDIT))
     return "\n".join(lines)

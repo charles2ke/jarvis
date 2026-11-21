@@ -8,7 +8,11 @@ Usage::
 The page is generated from the live skill registry, so it never drifts from
 what the assistant can do: every skill gets a card, the demo terminal shows
 real replies and the searchable topics come from the data shipped with the
-package. Only the standard library is used.
+package and from the connected projects in ``projects/``. Only the standard
+library is used, but the connected projects need their git submodules and
+Node.js (see the README); without them the build still works, with a warning,
+and those skills' demo replies explain how to set them up.
+JARVIS_REQUIRE_PROJECTS=1 makes a missing project an error instead.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import shutil
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +43,7 @@ from jarvis import (  # noqa: E402
     maritime,
     papertrade,
     poetry,
+    projects,
     signlanguage,
     sketch,
     tax,
@@ -300,6 +305,33 @@ def _singular_units(names: Iterable[str]) -> List[str]:
     return sorted(keep)
 
 
+def _projects_required() -> bool:
+    return os.environ.get("JARVIS_REQUIRE_PROJECTS") == "1"
+
+
+def unavailable_projects() -> List[str]:
+    """Why each connected project can't be used here; empty when all can."""
+
+    problems = []
+    for name in projects.PROJECTS:
+        try:
+            projects.check(name)
+        except projects.ProjectUnavailable as exc:
+            problems.append(str(exc))
+    return problems
+
+
+def _from_project(load: Callable[[], Iterable[str]]) -> List[str]:
+    """Topics read from a connected project, or none when it isn't set up here."""
+
+    try:
+        return list(load())
+    except projects.ProjectUnavailable:
+        if _projects_required():
+            raise
+        return []
+
+
 def topic_index() -> Dict[str, List[str]]:
     """Topics each data-backed skill knows about, for search and SEO."""
 
@@ -321,10 +353,10 @@ def topic_index() -> Dict[str, List[str]]:
         "poetry": list(poetry.FORMS),
         "unit-conversion": _singular_units(units.UNIT_NAMES),
         "emergency-numbers": [n.country for n in emergency.NUMBERS],
-        "cancer-info": list(cancer.NAMES),
-        "workout-plan": list(workout.DAYS),
+        "cancer-info": _from_project(cancer.names),
+        "workout-plan": _from_project(workout.days),
         "investment-math": list(investing.TOPICS),
-        "paper-trading": list(papertrade.SYMBOLS),
+        "paper-trading": _from_project(papertrade.symbols),
         "tax-estimate": list(tax.COUNTRIES),
     }
 
@@ -672,6 +704,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=f"public URL of the site, ending in / (default: {DEFAULT_BASE_URL})",
     )
     args = parser.parse_args(argv)
+    problems = unavailable_projects()
+    for problem in problems:
+        print(f"warning: {problem}", file=sys.stderr)
+    if problems and _projects_required():
+        print("JARVIS_REQUIRE_PROJECTS=1 is set, so the site was not built.", file=sys.stderr)
+        return 1
     try:
         out = build(Path(args.out), args.base_url)
     except ValueError as exc:

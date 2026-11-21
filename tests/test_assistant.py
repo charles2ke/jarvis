@@ -4,6 +4,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+from project_support import ProjectTestCase, missing_projects
+
+from jarvis import projects
 from jarvis.assistant import FALLBACK_RESPONSE, Assistant
 from jarvis.memory import Memory
 from jarvis.skills import THANKS_REPLIES
@@ -475,7 +478,7 @@ class EverydaySkillTests(unittest.TestCase):
 
 
 class ConnectedProjectTests(unittest.TestCase):
-    """Skills ported from charles2ke's other repositories."""
+    """Skills that use charles2ke's other repositories, checked out under projects/."""
 
     SKILLS = (
         "cancer-topics", "cancer-info", "space-weather", "hazard-alerts", "weather",
@@ -511,9 +514,25 @@ class ConnectedProjectTests(unittest.TestCase):
         self.assertEqual(self.skill_for("add a note: pay income tax of £5,000"), "add-note")
         self.assertEqual(self.assistant.respond("what's 30% of 70000"), "30% of 70,000 is 21,000.")
 
-    def test_tax_estimates(self):
-        self.assertIn("£39,519.60", self.assistant.respond("UK take-home on £50,000"))
-        self.assertIn("using tax-break's tables", self.assistant.respond("tax calculator"))
+    def test_a_project_that_cannot_answer_gets_a_reply(self):
+        manual = Assistant(memory=Memory(None), now=lambda: FIXED_NOW, web_search="manual")
+        with missing_projects():
+            for text, name in (
+                ("UK take-home on £50,000", "tax-break"),
+                ("paper buy 10 AAPL", "OpenTrading"),
+                ("cost of equity for beta 1.3", "Portfolio-Watcher"),
+                ("Friday workout", "workout"),
+                ("what is breast cancer", "beat-it"),
+                ("weather in Paris", "5-Mins"),
+            ):
+                with self.subTest(text=text):
+                    self.assertIn(f"git submodule update --init projects/{name}", manual.respond(text))
+        with mock.patch("jarvis.workout.plan", side_effect=projects.ProjectError("no plan came back")):
+            self.assertEqual(
+                self.assistant.respond("Friday workout"),
+                "Sorry, I couldn't use workout for that (no plan came back). "
+                f"The app is at {projects.PROJECTS['workout'].site}",
+            )
 
     def test_live_feeds_obey_the_web_search_mode(self):
         with mock.patch("jarvis.alerts.weather", side_effect=AssertionError("went online")):
@@ -550,6 +569,19 @@ class ConnectedProjectTests(unittest.TestCase):
                 with self.subTest(message=message):
                     self.assertEqual(manual.respond(message), "Sunny.")
         self.assertEqual(weather.call_count, 3)
+
+
+class TaxBreakTests(ProjectTestCase):
+    project = "tax-break"
+
+    def test_tax_estimates(self):
+        assistant = Assistant(memory=Memory(None), now=lambda: FIXED_NOW, web_search="off")
+        self.assertIn("£39,519.60", assistant.respond("UK take-home on £50,000"))
+        self.assertIn("with tax-break's tax engine", assistant.respond("tax calculator"))
+
+
+class OpenTradingTests(ProjectTestCase):
+    project = "OpenTrading"
 
     def test_paper_portfolio_is_kept_between_sessions(self):
         with TemporaryDirectory() as folder:
