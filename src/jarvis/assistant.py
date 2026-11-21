@@ -9,14 +9,11 @@ from jarvis import websearch
 from jarvis.memory import Memory
 from jarvis.nl import normalize
 from jarvis.skills import (
+    FALLBACK_RESPONSE,
     SkillContext,
     SkillRegistry,
     answer_unknown,
     build_default_registry,
-)
-
-FALLBACK_RESPONSE = (
-    "I am not sure how to help with that yet. Ask me for 'help' to see my skills."
 )
 
 

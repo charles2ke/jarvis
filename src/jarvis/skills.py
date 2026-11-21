@@ -10,18 +10,24 @@ from functools import partial
 from typing import Callable, Iterable, List, Match, Optional, Pattern, Sequence, Tuple
 
 from jarvis import (
+    alerts,
     bible,
+    cancer,
     clock,
     dates,
     emergency,
     encyclopedia,
     finance,
+    investing,
     knowledge,
+    papertrade,
     percentages,
     signlanguage,
     sketch,
+    tax,
     traffic,
     websearch,
+    workout,
 )
 from jarvis.atlas import (
     City,
@@ -141,6 +147,11 @@ class SkillRegistry:
 
     def __iter__(self):
         return iter(self._skills)
+
+
+FALLBACK_RESPONSE = (
+    "I am not sure how to help with that yet. Ask me for 'help' to see my skills."
+)
 
 
 def _greeting(match: Match[str], context: SkillContext) -> str:
@@ -740,6 +751,41 @@ def answer_unknown(text: str, context: SkillContext) -> Optional[str]:
         return f"I do not know that offline. {_LOOK_IT_UP}"
     reply, answered = _web_answer(context, text)
     return reply if answered else f"I do not know that offline. {reply}"
+
+
+def _continue_after(
+    name: str, match: Match[str], context: SkillContext, default: Optional[str] = None
+) -> str:
+    """Answer ``match.string`` as if the skill called ``name`` had not matched.
+
+    Some skills only know from their data whether a message is really for
+    them: "Tropic of Cancer" names a cancer word but is geography. Those hand
+    the message on to the skills registered after them, in the same way the
+    assistant routes it, and then to ``default`` or :func:`answer_unknown`.
+    """
+
+    text = match.string
+    skills = list(context.registry)
+    names = [skill.name for skill in skills]
+    later = skills[names.index(name) + 1:] if name in names else []
+
+    def first(candidate: str) -> Optional[Tuple[int, Skill, Match[str]]]:
+        for index, skill in enumerate(later):
+            found = skill.match(candidate)
+            if found is not None:
+                return index, skill, found
+        return None
+
+    direct = first(text)
+    normalized = normalize(text)
+    rewritten = first(normalized) if normalized and normalized != text else None
+    if rewritten is not None and (direct is None or rewritten[0] < direct[0]):
+        direct = rewritten
+    if direct is not None:
+        return direct[1].handler(direct[2], context)
+    if default is not None:
+        return default
+    return answer_unknown(text, context) or FALLBACK_RESPONSE
 
 
 def _web_search(match: Match[str], context: SkillContext) -> str:
@@ -2676,6 +2722,113 @@ def _emergency_share(
     return f"I prepared {what} with the emergency numbers for {entry.country}. {handed_off}"
 
 
+# --- Connected projects -------------------------------------------------------
+# beat-it, workout and 5-Mins are the author's own apps. Their data and logic
+# live in jarvis.cancer, jarvis.workout and jarvis.alerts, and every reply ends
+# with a link back to the app it came from.
+
+
+def _cancer_info(match: Match[str], context: SkillContext) -> str:
+    text = match.string
+    if any(
+        skill.name in _CANCER_DEFERS_TO and skill.match(text) is not None
+        for skill in context.registry
+    ):
+        return _continue_after("cancer-info", match, context)
+    return cancer.answer(text) or _continue_after("cancer-info", match, context)
+
+
+def _cancer_topics(match: Match[str], context: SkillContext) -> str:
+    return cancer.topics()
+
+
+def _workout_plan(match: Match[str], context: SkillContext) -> str:
+    return workout.plan(match.string, context.now()) or _continue_after(
+        "workout-plan", match, context
+    )
+
+
+# Portfolio-Watcher's investment maths and OpenTrading's paper trading live in
+# jarvis.investing and jarvis.papertrade. Paper trades use demo prices and
+# pretend cash; Jarvis never places a real order.
+
+
+def _investment_math(match: Match[str], context: SkillContext) -> str:
+    return investing.solve(match.string) or _continue_after(
+        "investment-math", match, context, default=investing.usage()
+    )
+
+
+def _paper_trading(match: Match[str], context: SkillContext) -> str:
+    return papertrade.handle(match.string, context.memory) or _continue_after(
+        "paper-trading", match, context
+    )
+
+
+def _tax_estimate(match: Match[str], context: SkillContext) -> str:
+    reply = tax.estimate(match.string)
+    if reply:
+        return reply
+    if match.groupdict().get("usage"):
+        return tax.usage()
+    return _continue_after("tax-estimate", match, context)
+
+
+_FEED_PLACE_TAIL = re.compile(r"[\s,]+(?:please|thanks|thank\s+you)\s*$", re.IGNORECASE)
+
+
+def _feed_place(match: Match[str]) -> str:
+    return _FEED_PLACE_TAIL.sub("", match.groupdict().get("place") or "").strip()
+
+
+def _live_feed(context: SkillContext, text: str, note: str, fetch: Callable[[], str]) -> str:
+    """Read a live weather or alerts feed, unless the web is off.
+
+    Like a web search, the request is never sent when the message is about
+    suicide or self-harm; the crisis help lines are shown instead.
+    """
+
+    if _never_search(context, text):
+        return CRISIS_RESPONSE
+    if _web_mode(context) == "off":
+        return (
+            "Web access is turned off, so I cannot read live weather or alert feeds. "
+            "Start Jarvis with '--web-search manual' or '--web-search auto', or set "
+            "JARVIS_WEB_SEARCH, to let me check."
+        )
+    if context.notify is not None:
+        context.notify(f"({note}...)")
+    try:
+        return fetch()
+    except alerts.AlertsError as exc:
+        return f"{exc}\n{alerts.CREDIT}"
+
+
+def _weather(match: Match[str], context: SkillContext) -> str:
+    place = _feed_place(match)
+    if not place:
+        return alerts.usage()
+    return _live_feed(
+        context, match.string, f"checking Open-Meteo for '{place}'", partial(alerts.weather, place)
+    )
+
+
+def _hazard_alerts(match: Match[str], context: SkillContext) -> str:
+    place = _feed_place(match)
+    if not place:
+        return alerts.usage()
+    return _live_feed(
+        context,
+        match.string,
+        f"checking hazard feeds near '{place}'",
+        partial(alerts.hazards, place),
+    )
+
+
+def _space_weather(match: Match[str], context: SkillContext) -> str:
+    return _live_feed(context, match.string, "checking NOAA SWPC", alerts.space_weather)
+
+
 _END = r"\s*[?!.]*\s*$"
 
 _NAME_WORD = r"[^\W\d_][\w.'-]*"
@@ -2736,6 +2889,92 @@ _DAY_TAIL = r"(?:\s+(?:be|fall\s+on|fall|land\s+on|land|be\s+on|on))?"
 _PLACE = (
     r"(?P<place>(?![^?!]*\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?"
     r"|fortnights?|months?|years?)\b)[^?!]+)"
+)
+
+# Live weather and alerts (see jarvis.alerts). The place must not be a span of
+# time ("weather in 10 minutes") or a year ("earthquakes in 2004"), which are
+# history questions; weather only covers today, so later days are left alone.
+_FEED_WHEN = (
+    r"(?:\s+(?:today|tonight|now|right\s+now|at\s+the\s+moment|currently"
+    r"|this\s+(?:morning|afternoon|evening)))?"
+)
+_FEED_NOT_YEAR = (
+    r"(?![12]\d{3}\b)(?![^?!]*\b(?:in|of|during|since|from|before|after)\s+[12]\d{3}\b)"
+    r"(?![^?!]*\s[12]\d{3}\s*[?!.]*\s*$)"
+)
+_ALERT_PLACE = (
+    r"(?P<place>(?![^?!]*\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b)"
+    + _FEED_NOT_YEAR
+    + r"(?!(?:the\s+)?(?:bible|sea|ocean|ships?|shipping|vessels?|mariners?|navtex|gmdss)\b)"
+    r"[^?!]+?)"
+)
+_ALERT_WINDOW = (
+    r"(?:\s+(?:today|now|right\s+now|this\s+week|(?:in\s+|over\s+)?the\s+(?:last|past)\s+"
+    r"(?:week|7\s+days|seven\s+days)))?"
+)
+_ALERT_ASK = (
+    r"(?:(?:are|is)\s+there\s+(?:an?\s+|any\s+)?|show(?:\s+me)?\s+|list\s+"
+    r"|check(?:\s+for)?\s+|get\s+|any\s+)?"
+)
+_ALERT_RECENT = r"(?:(?:recent|current|active|latest|live)\s+)?"
+_WEATHER_PLACE = (
+    r"(?P<place>(?![^?!]*\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?"
+    r"|fortnights?|months?|years?|tomorrow|weekend|monday|tuesday|wednesday|thursday"
+    r"|friday|saturday|sunday|january|february|april|june|july|august|september"
+    r"|october|november|december|summer|winter|spring|autumn|which|that|where|when"
+    r"|whose)\b)(?![^?!]*\bin\s+(?:march|may)\b)"
+    + _FEED_NOT_YEAR
+    + r"(?!(?:outer\s+)?space\b|(?:the\s+)?(?:economy|economic|markets?|stocks?|shares?"
+    r"|sales|inflation|gdp|growth|revenue|earnings|prices?|rates?|budget|population"
+    r"|future|year|quarter|next)\b)[^?!]+?)"
+)
+_NOT_UNDER_THE_WEATHER = r"(?![^\n]*\bunder\s+the\s+weather\b)"
+
+# Cancer information (see jarvis.cancer). Story, poem, joke, note and other
+# requests that only mention a cancer word, and the star sign, go elsewhere.
+_CANCER_WORDS = (
+    r"cancers?|cancerous|tumou?rs?|carcinomas?|oncolog\w*|chemo(?:s|therap\w*)?|radiotherapy"
+    r"|metasta\w*|leuka?emias?|lymphomas?|myelomas?|melanomas?|sarcomas?|glioblastomas?|gliomas?"
+    r"|neuroblastomas?|retinoblastomas?|mesotheliomas?"
+    r"|aml|cml|cll|nsclc|sclc|dcis|tnbc|gbm|hcc|rcc|dlbcl|pdac|mcrpc|(?-i:GISTs?)"
+)
+_CANCER_NOT = (
+    r"^(?!\s*(?:help(?:\s+\S+){0,2}\s*[?.!]*$|remember\b|note\b|jot\b"
+    r"|(?:please\s+)?(?:draw|sketch)\b))"
+    r"(?!.*\b(?:how many (?:more )?(?:days|weeks|sleeps)|how long|count ?down)\b"
+    r".*\b(?:until|till|til|before|since|ago|between|left)\b)"
+    r"(?!.*\b(?:tropic of cancer|zodiac|horoscopes?|astrolog\w*|star signs?"
+    r"|i'?m an? cancer|i am an? cancer"
+    r"|poems?|poetry|haikus?|limericks?|acrostics?|couplets?"
+    r"|(?:tell|read)(?: me)? (?:a|another) (?:story|tale)"
+    r"|story ?time|(?:tell|say)(?: me)? (?:a|another) joke|make me laugh|say something funny"
+    r"|role[- ]?models?|cheer me up|uplift me|motivate me|inspire me|encourage me"
+    r"|lift my spirits|self[- ]?care|(?:take|taking) care of (?:myself|me)|look after myself"
+    r"|mental health|panic attacks?|career|brail(?:le)?|sign language|fingerspell\w*"
+    r"|(?:can|could|would|will) you (?:please )?(?:draw|sketch)"
+    r"|(?:take|make|add|write) (?:a )?note|my notes|the note|any notes"
+    r"|notes? (?:about|on|for|mentioning|containing))\b)"
+)
+# Commands registered after cancer-info that a cancer word can appear in, such
+# as "add the file cancer.md" or "change note 2 to chemo at nine".
+_CANCER_DEFERS_TO = frozenset(
+    {
+        "add-knowledge-website",
+        "add-knowledge-file",
+        "delete-note",
+        "edit-note",
+        "add-note",
+        "search-notes",
+        "list-notes",
+    }
+)
+
+# An order that is not marked as paper ("buy 10 shares of Apple") still reaches
+# the paper-trading skill, which explains that Jarvis never places real trades.
+_REAL_TRADE_LEAD = (
+    r"^(?:(?:hey\s+)?jarvis[,:]?\s+)?(?:(?:please|can\s+you|could\s+you|would\s+you"
+    r"|will\s+you|i\s+want\s+to|i'd\s+like\s+to|i\s+would\s+like\s+to|let's"
+    r"|go\s+ahead\s+and)\s+)*"
 )
 
 _CALC_TOKEN = (
@@ -3022,6 +3261,27 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_computer_use,
                 examples=["use the computer to open Safari then click on Sign in"],
+            ),
+            Skill(
+                name="cancer-topics",
+                description="List the cancer types I have information about.",
+                patterns=[
+                    r"^\s*(?:list|show)?\s*(?:me\s+)?(?:the\s+)?cancer\s+(?:topics|types|list)"
+                    r"\s*[?.!]*\s*$",
+                    r"\b(?:what|which)\s+(?:types|kinds|sorts)\s+of\s+cancers?\s+(?:do|can)\s+you\b",
+                ],
+                handler=_cancer_topics,
+                examples=["cancer topics", "what types of cancer do you know?"],
+            ),
+            Skill(
+                name="cancer-info",
+                description=(
+                    "Share reviewed cancer information from beat-it: symptoms, "
+                    "screening, risk, treatments and support, with care."
+                ),
+                patterns=[_CANCER_NOT + rf".*\b(?:{_CANCER_WORDS})\b"],
+                handler=_cancer_info,
+                examples=["lung cancer symptoms", "my mum has leukaemia"],
             ),
             Skill(
                 name="love-support",
@@ -3351,6 +3611,75 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["forget my name"],
             ),
             Skill(
+                name="space-weather",
+                description=(
+                    "Read the latest NOAA space weather alerts, watches and warnings "
+                    "(online)."
+                ),
+                patterns=[
+                    r"^\s*(?:(?:what(?:'s|\s+is)|how(?:'s|\s+is)|show(?:\s+me)?|check|get|any"
+                    r"|(?:is|are)\s+there(?:\s+an?|\s+any)?)\s+)?(?:the\s+)?"
+                    r"(?:(?:latest|current|recent|today'?s)\s+)?"
+                    r"(?:space[\s-]weather|solar[\s-]storms?|geomagnetic[\s-]storms?|solar\s+flares?"
+                    r"|solar\s+radiation\s+storms?|radio\s+blackouts?|(?:noaa\s+)?swpc)"
+                    r"(?:\s+(?:alerts?|warnings?|watch(?:es)?|news|report|forecast|like|activity"
+                    r"|now|today|right\s+now))*" + _END,
+                ],
+                handler=_space_weather,
+                examples=["space weather", "solar storm alerts"],
+            ),
+            Skill(
+                name="hazard-alerts",
+                description=(
+                    "Check recent earthquakes, storms, floods, wildfires and other "
+                    "alerts near a place (online)."
+                ),
+                patterns=[
+                    r"^\s*" + _ALERT_ASK + _ALERT_RECENT
+                    + r"(?:weather|severe\s+weather|disaster|hazard|storm|flood|tsunami|hurricane"
+                    r"|cyclone|typhoon|tornado|wildfire|bushfire|fire|volcan(?:o|ic)|earthquake"
+                    r"|quake)\s+(?:alerts?|warnings?|watch(?:es)?|advisories)\s+"
+                    r"(?:for|in|near|around|at)\s+" + _ALERT_PLACE + _ALERT_WINDOW + _END,
+                    r"^\s*" + _ALERT_ASK + _ALERT_RECENT
+                    + r"(?:alerts?|warnings?)\s+(?:for|in|near|around)\s+"
+                    + _ALERT_PLACE + _ALERT_WINDOW + _END,
+                    r"^\s*" + _ALERT_ASK + _ALERT_RECENT
+                    + r"(?:hazards?|earthquakes?|quakes?|(?:natural\s+)?disasters?"
+                    r"|natural\s+events?|wildfires?|bushfires?|floods?|flooding|cyclones?"
+                    r"|hurricanes?|typhoons?|tropical\s+(?:storms?|cyclones?|depressions?)"
+                    r"|volcanoes|volcanic\s+(?:activity|eruptions?)|eruptions?)\s+"
+                    r"(?:near|in|around|close\s+to|for|at)\s+"
+                    + _ALERT_PLACE + _ALERT_WINDOW + _END,
+                ],
+                handler=_hazard_alerts,
+                examples=["weather alerts for Miami", "any earthquakes near Lima"],
+            ),
+            Skill(
+                name="weather",
+                description="Give the current weather and today's forecast for a place (online).",
+                patterns=[
+                    r"^\s*" + _NOT_UNDER_THE_WEATHER
+                    + r"(?:(?:what(?:'s|\s+is)|how(?:'s|\s+is)|tell\s+me|show(?:\s+me)?"
+                    r"|give\s+me|get|check)\s+)?(?:the\s+)?"
+                    r"(?:(?:current|today'?s|latest|live|local)\s+)?"
+                    r"(?:weather(?:\s+(?:forecast|report|conditions))?|forecast)"
+                    r"(?:\s+(?:like|be\s+like))?" + _FEED_WHEN
+                    + r"\s+(?:in|for|at|near|around)\s+" + _WEATHER_PLACE + _FEED_WHEN + _END,
+                    r"^\s*(?:what(?:'s|\s+is)\s+)?(?:the\s+)?(?:current\s+)?temperature"
+                    + _FEED_WHEN + r"\s+(?:in|at)\s+"
+                    r"(?![^?!]*(?:\d|°|\b(?:kelvin|celsius|fahrenheit|centigrade|degrees?|here"
+                    r"|my|our|the\s+(?:room|house|oven|fridge|sun|core|centre|center))\b))"
+                    + _WEATHER_PLACE + _FEED_WHEN + _END,
+                    r"^\s*is\s+it\s+(?:raining|snowing|sunny|hot|cold|warm|windy|cloudy|foggy"
+                    r"|stormy|freezing)" + _FEED_WHEN + r"\s+(?:in|at)\s+"
+                    r"(?!(?:here|my|our)\b)" + _WEATHER_PLACE + _FEED_WHEN + _END,
+                    r"^\s*(?:(?:what(?:'s|\s+is)|how(?:'s|\s+is))\s+the\s+)?weather"
+                    r"(?:\s+(?:like|today|now|forecast))*" + _END,
+                ],
+                handler=_weather,
+                examples=["weather in Paris", "what's the weather like in Tokyo"],
+            ),
+            Skill(
                 name="traffic-signs",
                 description=(
                     "Explain road signs, signals and the sign conventions used "
@@ -3595,6 +3924,56 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_braille,
                 examples=["read braille ⠓⠑⠇⠇⠕"],
+            ),
+            Skill(
+                name="investment-math",
+                description=(
+                    "Work out DCF values, CAPM, moving averages, RSI, MACD, Bollinger "
+                    "bands, Fibonacci levels, risk measures and dividend reinvestment."
+                ),
+                patterns=[
+                    r"^(?=.*\d).*\b(?:dcf|discounted[- ]cash[- ]flows?|intrinsic\s+value)\b",
+                    r"^(?=.*\d)(?=.*\b(?:free\s+cash\s+flows?|fcf)\b).*\b(?:discount(?:ed)?|wacc)\b",
+                    r"^(?=.*\bbeta\b\D{0,12}\d).*\b(?:cost\s+of\s+equity|capm"
+                    r"|capital\s+asset\s+pricing|expected\s+return"
+                    r"|required\s+(?:rate\s+of\s+)?return)\b",
+                    r"^(?=.*\d).*\bfib(?:onacci)?\s+(?:retracements?|levels?)\b",
+                    r"^(?=(?:\D*\d+(?!\d)){2}).*\b(?:sma|ema|rsi|macd|bollinger(?:\s+bands?)?"
+                    r"|(?:simple|exponential)\s+moving\s+averages?|relative\s+strength\s+index)\b",
+                    r"^(?=(?:\D*\d+(?!\d)){2}).*\b(?:max(?:imum)?\s+draw[- ]?downs?|volatility"
+                    r"|value\s+at\s+risk|expected\s+shortfall|sharpe(?:\s+ratio)?|skewness"
+                    r"|kurtosis)\b",
+                    r"^(?=.*\d).*\b(?:drip|dividend\s+reinvest\w*"
+                    r"|reinvest(?:ing|ed)?\s+(?:the\s+|my\s+)?dividends?)\b",
+                ],
+                handler=_investment_math,
+                examples=["cost of equity for beta 1.3", "max drawdown of 100, 120, 90, 130"],
+            ),
+            Skill(
+                name="paper-trading",
+                description=(
+                    "Practise trading OpenTrading's demo stocks with pretend cash; "
+                    "never real money."
+                ),
+                patterns=[
+                    r"\b(?:paper|demo|virtual|mock)[- ]?(?:trad(?:e|es|ed|ing|er)|buy(?:s|ing)?"
+                    r"|sell(?:s|ing)?|purchas(?:e|es|ed|ing)|portfolios?|positions?|holdings?)\b",
+                    r"\bpracti[cs]e[- ]?(?:trad(?:e|es|ing)|portfolios?)\b",
+                    r"\b(?:paper|demo)[- ](?:quotes?|ind(?:ices|exes)|watchlist)\b"
+                    r"|\bdemo[- ](?:prices?|stocks|shares|markets?)\b",
+                    r"\b(?:simulat\w*|pretend(?:ing)?)\s+(?:(?:to|a|an)\s+)?"
+                    r"(?:trad\w*|buy\w*|sell\w*|purchas\w*)",
+                    r"\bopentrading\b",
+                    r"\b(?:isin|cusip|sedol)(?:\s+(?:code|number))?\s*(?:[:#=]\s*|\bis\s+)?"
+                    r"(?=[a-z0-9-]*\d)[a-z0-9][a-z0-9-]{4,}\b",
+                    r"\b(?:isin|cusip|sedol)s?(?:\s+(?:code|number))?\s+(?:of|for)\s+\w",
+                    _REAL_TRADE_LEAD + r"(?:buy|sell|purchase)\s+(?:me\s+)?\d[\d,]*\s+"
+                    r"(?:(?:more|extra)\s+)?(?:shares?|stocks?)\b",
+                    _REAL_TRADE_LEAD + r"(?:buy|sell|purchase)\s+(?:me\s+)?\d[\d,]*\s+"
+                    r"(?:shares?\s+of\s+)?(?:aapl|msft|tsla|hsba)\b",
+                ],
+                handler=_paper_trading,
+                examples=["paper buy 10 AAPL", "show my paper portfolio"],
             ),
             Skill(
                 name="money-math",
@@ -4102,6 +4481,24 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 examples=["economics topics"],
             ),
             Skill(
+                name="tax-estimate",
+                description=(
+                    "Estimate income tax and take-home pay on a salary in India, the UK, "
+                    "the US, Ireland, the Netherlands or Singapore with tax-break's tables."
+                ),
+                patterns=[
+                    r"^(?=[\s\S]*\d)(?=[\s\S]*\b(?:income[- ]?tax(?:es)?|tax(?:es|ed|ation)?"
+                    r"|take[- ]?home|net\s+(?:pay|salary|income|wages?|earnings)|in[- ]hand"
+                    r"|after[- ]tax|post[- ]tax|national\s+insurance|fica|usc|prsi|paye)\b)",
+                    r"(?P<usage>\btaxbreak\b|\btax[- ]break\s+(?:app|calculator|tool|project"
+                    r"|repo|site|engine|estimator)s?\b|^\s*tax-break\s*[?.!]*\s*$"
+                    r"|\btax\s+(?:estimate|estimator|calculator)s?\b"
+                    r"|\btake[- ]?home\s+(?:pay\s+)?calculator\b)",
+                ],
+                handler=_tax_estimate,
+                examples=["income tax on 15 lakh in India", "UK take-home on £50,000"],
+            ),
+            Skill(
                 name="economics",
                 description=(
                     "Explain economics and personal finance: inflation, GDP, "
@@ -4113,6 +4510,23 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                 ],
                 handler=_economics,
                 examples=["what is inflation?"],
+            ),
+            Skill(
+                name="workout-plan",
+                description=(
+                    "Show the day's session from the workout weekly plan: strength, "
+                    "Zone 2 cardio, mobility and recovery."
+                ),
+                patterns=[
+                    r"\bwork-?outs?\b",
+                    r"\b(?:leg|arm|rest|recovery) days?\b",
+                    r"\b(?:upper|lower)[- ]body (?:days?|sessions?)\b",
+                    r"\b(?:training|exercise|fitness|gym) (?:plan|routine|schedule"
+                    r"|program(?:me)?|split)s?\b",
+                    r"^\s*show (?:me )?the week\s*[?.!]*\s*$",
+                ],
+                handler=_workout_plan,
+                examples=["what's my workout today?", "when is leg day?"],
             ),
             Skill(
                 name="encyclopedia-topics",

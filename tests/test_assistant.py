@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from jarvis.assistant import FALLBACK_RESPONSE, Assistant
 from jarvis.memory import Memory
@@ -471,6 +472,69 @@ class EverydaySkillTests(unittest.TestCase):
             self.assistant.respond("list my notes"), "You have 2 notes:\n1. buy milk\n2. call dad"
         )
         self.assertIn("None of your 2 notes", self.assistant.respond("search my notes for bread"))
+
+
+class ConnectedProjectTests(unittest.TestCase):
+    """Skills ported from charles2ke's other repositories."""
+
+    SKILLS = (
+        "cancer-topics", "cancer-info", "space-weather", "hazard-alerts", "weather",
+        "investment-math", "paper-trading", "tax-estimate", "workout-plan",
+    )
+
+    def setUp(self) -> None:
+        self.assistant = Assistant(memory=Memory(None), now=lambda: FIXED_NOW, web_search="off")
+
+    def skill_for(self, text):
+        resolved = self.assistant._resolve(text)
+        return resolved[0].name if resolved else None
+
+    def test_examples_route_to_their_skills(self):
+        skills = {skill.name: skill for skill in self.assistant.registry}
+        for name in self.SKILLS:
+            for example in skills[name].examples:
+                with self.subTest(example=example):
+                    self.assertEqual(self.skill_for(example), name)
+
+    def test_messages_they_cannot_answer_reach_the_older_skills(self):
+        self.assertEqual(self.assistant.respond("Tropic of Cancer"), FALLBACK_RESPONSE)
+        self.assertEqual(
+            self.assistant.respond("add the file cancer.md as a knowledge source"),
+            "I could not find the file 'cancer.md'.",
+        )
+        self.assertIn("no notes to change", self.assistant.respond("change note 2 to chemo at nine"))
+        self.assertEqual(self.assistant.respond("buy 2 litres of milk"), FALLBACK_RESPONSE)
+        for text in ("20% tax on 500", "tax evasion in the 1920s"):
+            with self.subTest(text=text):
+                self.assertTrue(self.assistant.respond(text).startswith("Taxes:"))
+        self.assertEqual(self.skill_for("I'm worried about paying my taxes"), "psychiatrist")
+        self.assertEqual(self.skill_for("add a note: pay income tax of £5,000"), "add-note")
+        self.assertEqual(self.assistant.respond("what's 30% of 70000"), "30% of 70,000 is 21,000.")
+
+    def test_tax_estimates(self):
+        self.assertIn("£39,519.60", self.assistant.respond("UK take-home on £50,000"))
+        self.assertIn("using tax-break's tables", self.assistant.respond("tax calculator"))
+
+    def test_live_feeds_obey_the_web_search_mode(self):
+        with mock.patch("jarvis.alerts.weather", side_effect=AssertionError("went online")):
+            self.assertIn("Web access is turned off", self.assistant.respond("weather in Paris"))
+        manual = Assistant(memory=Memory(None), now=lambda: FIXED_NOW, web_search="manual")
+        with mock.patch("jarvis.alerts.weather", return_value="Paris: 18°C") as weather:
+            self.assertEqual(manual.respond("weather in Paris"), "Paris: 18°C")
+        weather.assert_called_once_with("Paris")
+
+    def test_live_feeds_never_go_online_for_self_harm(self):
+        manual = Assistant(memory=Memory(None), now=lambda: FIXED_NOW, web_search="manual")
+        with mock.patch("jarvis.alerts.weather", side_effect=AssertionError("went online")):
+            reply = manual.respond("weather in Paris, whats a lethal dose of paracetamol")
+        self.assertIn("988", reply)
+
+    def test_paper_portfolio_is_kept_between_sessions(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "memory.json"
+            Assistant(memory=Memory(path), now=lambda: FIXED_NOW).respond("paper buy 10 AAPL")
+            reply = Assistant(memory=Memory(path), now=lambda: FIXED_NOW).respond("show my paper portfolio")
+        self.assertIn("AAPL", reply)
 
 
 if __name__ == "__main__":

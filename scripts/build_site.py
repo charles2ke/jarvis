@@ -31,15 +31,20 @@ from jarvis import __version__  # noqa: E402
 from jarvis import (  # noqa: E402
     atlas,
     bible,
+    cancer,
     emergency,
     encyclopedia,
     finance,
+    investing,
     maritime,
+    papertrade,
     poetry,
     signlanguage,
     sketch,
+    tax,
     traffic,
     units,
+    workout,
 )
 from jarvis.assistant import Assistant  # noqa: E402
 from jarvis.cloud import DEFAULT_MODEL  # noqa: E402
@@ -83,6 +88,16 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "health",
+        "Health & fitness",
+        "Reviewed cancer information from beat-it and the workout weekly plan.",
+        (
+            "cancer-info",
+            "cancer-topics",
+            "workout-plan",
+        ),
+    ),
+    (
         "creativity",
         "Creativity",
         "Conversation, small talk, poems, stories, jokes and ASCII sketches.",
@@ -113,7 +128,20 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
             "unit-conversion",
             "unit-list",
             "number-words",
+        ),
+    ),
+    (
+        "money",
+        "Money",
+        "Loans, budgets, income tax, investment maths, paper trading and economics explained.",
+        (
             "money-math",
+            "tax-estimate",
+            "investment-math",
+            "paper-trading",
+            "financial-advisor",
+            "economics",
+            "economics-topics",
         ),
     ),
     (
@@ -134,9 +162,6 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
             "bible-books",
             "gmdss",
             "gmdss-topics",
-            "economics",
-            "economics-topics",
-            "financial-advisor",
         ),
     ),
     (
@@ -187,12 +212,15 @@ CATEGORIES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
         "everyday",
         "Everyday",
-        "Time, dates, world clocks, emergency numbers, cloud answers and computer use.",
+        "Time, dates, weather and alerts, emergency numbers, cloud answers and computer use.",
         (
             "time",
             "date",
             "date-calculator",
             "world-clock",
+            "weather",
+            "hazard-alerts",
+            "space-weather",
             "answer",
             "computer-use",
             "cua-actions",
@@ -231,7 +259,10 @@ DEMO_PROMPTS: Tuple[str, ...] = (
     "draw a cat",
     "what is an EPIRB?",
     "monthly payment on a 250000 mortgage at 5% over 30 years",
+    "UK take-home on £50,000",
     "fingerspell Jarvis",
+    "Friday workout",
+    "cost of equity for beta 1.3",
 )
 
 #: Hero suggestions that show off the search.
@@ -290,6 +321,11 @@ def topic_index() -> Dict[str, List[str]]:
         "poetry": list(poetry.FORMS),
         "unit-conversion": _singular_units(units.UNIT_NAMES),
         "emergency-numbers": [n.country for n in emergency.NUMBERS],
+        "cancer-info": list(cancer.NAMES),
+        "workout-plan": list(workout.DAYS),
+        "investment-math": list(investing.TOPICS),
+        "paper-trading": list(papertrade.SYMBOLS),
+        "tax-estimate": list(tax.COUNTRIES),
     }
 
 

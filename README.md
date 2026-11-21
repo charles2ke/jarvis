@@ -11,8 +11,8 @@ opening phone and email links)
 take as long as that service or subprocess does.
 
 - **Offline first** — every skill works without a network connection, except
-  the ones that say otherwise (`web-search`, `add-knowledge-website` and
-  `answer`).
+  the ones that say otherwise (`web-search`, `add-knowledge-website`, `answer`,
+  and the live `weather`, `hazard-alerts` and `space-weather` feeds).
 - **Looks up what it does not know** — a factual question that no skill can
   answer is searched on the web (Wikipedia by default) and summarised with
   numbered sources; `--web-search off` keeps Jarvis fully offline
@@ -34,8 +34,10 @@ take as long as that service or subprocess does.
 - [Traffic signs around the world](#traffic-signs-around-the-world)
 - [Solving science problems](#solving-science-problems)
 - [Economics and financial advice](#economics-and-financial-advice)
+- [Health and fitness](#health-and-fitness)
 - [Knowledge sources](#knowledge-sources)
 - [Searching the web](#searching-the-web)
+- [Weather and hazard alerts](#weather-and-hazard-alerts)
 - [Text to speech](#text-to-speech)
 - [Natural language to text](#natural-language-to-text)
 - [Sign language](#sign-language)
@@ -46,6 +48,7 @@ take as long as that service or subprocess does.
 - [Reading and writing braille](#reading-and-writing-braille)
 - [Answering any query with a cloud session](#answering-any-query-with-a-cloud-session)
 - [Computer use (CUA)](#computer-use-cua)
+- [Connected projects](#connected-projects)
 - [Project layout](#project-layout)
 - [Adding a skill](#adding-a-skill)
 - [Development](#development)
@@ -105,7 +108,8 @@ Useful flags:
 ### Memory and privacy
 
 Memory is a single JSON file (`~/.jarvis/memory.json` by default) holding what
-you asked Jarvis to keep — your name, your notes and your knowledge sources —
+you asked Jarvis to keep — your name, your notes, your knowledge sources and
+your paper-trading portfolio (`paper_portfolio`) —
 plus one internal counter, `support_tip_index`, which `emotional-support` uses
 to rotate through its coping suggestions. Deleting the file clears what is
 stored, but a later normal run writes it again; run with `--no-memory` to keep
@@ -116,9 +120,11 @@ then swapped into place, so an interrupted save never leaves a half-written
 
 The network is used only to search the web for a factual question no skill can
 answer, or when you ask it to ([Searching the web](#searching-the-web)); by
-`add-knowledge-website`, when it fetches a page you asked for; and by `answer`,
-when you send a question to a cloud session. Everything else is answered from
-data shipped with the package. The results of the last web search are kept in
+`add-knowledge-website`, when it fetches a page you asked for; by `answer`,
+when you send a question to a cloud session; and by `weather`, `hazard-alerts`
+and `space-weather`, when you ask for live weather or alerts
+([Weather and hazard alerts](#weather-and-hazard-alerts)). Everything else is
+answered from data shipped with the package. The results of the last web search are kept in
 RAM for the session only; the pages, and the answer with the question it
 answered, are written to memory only when you say `learn that`.
 
@@ -150,6 +156,14 @@ matched in is defined in `src/jarvis/skills.py`.
 | self-care | `how do I take care of myself` |
 | uplift | `cheer me up` |
 
+### Health and fitness
+
+| Skill | Example |
+| --- | --- |
+| cancer-info | `lung cancer symptoms` |
+| cancer-topics | `cancer topics` |
+| workout-plan | `what's my workout today?` |
+
 ### Conversation and creativity
 
 | Skill | Example |
@@ -178,7 +192,18 @@ matched in is defined in `src/jarvis/skills.py`.
 | unit-conversion | `convert 10 km to miles` |
 | unit-list | `what units can you convert?` |
 | number-words | `spell out 42` |
+
+### Money
+
+| Skill | Example |
+| --- | --- |
 | money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
+| tax-estimate | `UK take-home on £50,000` |
+| investment-math | `cost of equity for beta 1.3` |
+| paper-trading | `paper buy 10 AAPL` |
+| financial-advisor | `financial advice on investing` |
+| economics | `what is inflation?` |
+| economics-topics | `economics topics` |
 
 ### Reference knowledge
 
@@ -197,9 +222,6 @@ matched in is defined in `src/jarvis/skills.py`.
 | bible-books | `books of the bible` |
 | gmdss | `what is an EPIRB?` |
 | gmdss-topics | `gmdss topics` |
-| economics | `what is inflation?` |
-| economics-topics | `economics topics` |
-| financial-advisor | `financial advice on investing` |
 
 ### Web research
 
@@ -251,6 +273,9 @@ searched automatically too; see [Searching the web](#searching-the-web).
 | date | `what day is it` |
 | date-calculator | `how many days until Christmas?` |
 | world-clock | `what time is it in Tokyo?` |
+| weather | `weather in Paris` |
+| hazard-alerts | `any earthquakes near Lima` |
+| space-weather | `space weather` |
 | answer | `answer how does the skill registry work?` |
 | computer-use | `use the computer to open Safari then click on Sign in` |
 | emergency-numbers | `what are the emergency numbers in Japan?` |
@@ -291,6 +316,15 @@ encyclopedia skills, so `remember that answer` saves the last web answer while
 `remember that the bins go out on Monday` is still a note. A message that no
 skill matches is offered to the web search last of all, and only when it reads
 like a factual question.
+
+`cancer-info` comes after the crisis, counselling and web research skills but
+before `love-support`, so `my wife has breast cancer` gets cancer information
+with a kind acknowledgement rather than relationship advice, while `am I going
+to die of cancer` still reaches `crisis-support`. A few skills — `cancer-info`,
+`workout-plan`, `investment-math`, `paper-trading` and `tax-estimate` — check a
+message against their data, and when it is not really for them (`Tropic of
+Cancer`, `I just finished my workout`, `20% tax on 500`) they hand it on to the
+skills registered after them.
 
 ## Time, dates and world clocks
 
@@ -484,9 +518,9 @@ list every entry.
 
 ## Economics and financial advice
 
-Three skills cover money, all of them offline and all of them general
-education rather than personalised advice — every coaching and calculator
-answer says so:
+Three skills explain money and do its everyday arithmetic, all of them offline
+and all of them general education rather than personalised advice — every
+coaching and calculator answer says so:
 
 - `economics` explains economics and personal finance terms — inflation, GDP,
   recessions, interest rates, central banks, fiscal policy, shares, bonds,
@@ -513,6 +547,125 @@ money double at 7%` is answered as money rather than physics, and `economics`
 is registered before `encyclopedia` so that `what is inflation?` reaches the
 finance entries. The wellbeing skills still come first, so `I am broke and
 want to kill myself` reaches `crisis-support`.
+
+### Investment maths
+
+`investment-math` brings the research calculators of
+[Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) to numbers
+you type — it has no market data, so it never looks up a company:
+
+```bash
+jarvis "dcf with fcf 100m growth 8% discount 9% terminal 2.5% 50m shares net debt 200m"
+jarvis "cost of equity for beta 1.3"
+jarvis "rsi 5 of 44, 44.3, 44.1, 43.6, 44.5, 44.9, 45.2"
+jarvis "fibonacci levels between 100 and 150"
+jarvis "max drawdown of 100, 120, 90, 130"
+jarvis "drip 10000 at 3% yield 5% dividend growth for 10 years"
+```
+
+It covers discounted cash flow, CAPM, simple and exponential moving averages,
+RSI, MACD, Bollinger bands, Fibonacci retracements, volatility, value at risk,
+expected shortfall, maximum drawdown, the Sharpe ratio, return statistics and
+dividend reinvestment. Every reply lists its assumptions, such as
+Portfolio-Watcher's 4.2% risk-free rate, and says that model outputs do not
+predict returns. Questions without numbers (`what is dcf`) still reach
+`economics` or `encyclopedia`.
+
+### Paper trading
+
+`paper-trading` is [OpenTrading](https://charles2ke.github.io/OpenTrading/)'s
+practice account: $100,000 of pretend cash and its six demo stocks (AAPL, MSFT,
+TSLA, 7203, SAP and HSBA) at fixed demo prices from OpenTrading's built-in
+snapshot, never live quotes.
+
+```bash
+jarvis "paper buy 10 AAPL"
+jarvis "paper sell 5 shares of Apple"
+jarvis "show my paper portfolio"
+jarvis "paper quote TSLA"
+jarvis "look up ISIN US0378331005"
+jarvis "reset my paper portfolio"
+```
+
+The portfolio is kept in memory under `paper_portfolio`, so it survives a
+restart unless you run with `--no-memory`. Jarvis has no brokerage connection:
+an order that does not say paper (`buy 10 shares of Apple`) is never carried
+out, and the reply shows the paper command to practise with instead.
+
+### Income tax estimates
+
+`tax-estimate` works out income tax and take-home pay on a salary with the
+tables of [tax-break](https://charles2ke.github.io/tax-break/), offline, for
+India, the UK (England, Wales and Northern Ireland), the US, Ireland, the
+Netherlands and Singapore:
+
+```bash
+jarvis "income tax on 15 lakh in India"
+jarvis "income tax on 20 lakh, old regime, max 80c and nps"
+jarvis "UK tax on £4,000 a month with student loan plan 2"
+jarvis 'US tax on $85,000 in California, married with 2 kids'
+jarvis "Dutch tax on €70,000 with the 30% ruling"
+jarvis 'Singapore tax on S$120,000'
+jarvis "tax calculator"
+```
+
+Put an amount with a `$` sign in single quotes, as above, or the shell reads
+`$8` or `$1` as a variable. Jarvis reads the country from the currency or the
+words (`lakh`, `UK`, a US state, `Irish`, `Dutch`, `S$`) and asks when it
+cannot tell — `€60,000` could be Irish or Dutch. It also reads the period
+(`a month`), a bonus, the year, and each country's options: India's regimes,
+age band and deductions such as `80C 1.5 lakh`, a UK student loan plan, a US
+filing status, children and state (all 50 and DC), Ireland's filing status,
+the Dutch 30% ruling and Singapore's age band and CPF contributions. India
+gets both regimes side by side with the cheaper one named, or the regime you
+name with the other's total for comparison.
+
+Every estimate shows the year and assumptions it used, a line-by-line
+breakdown and the effective and marginal rates, and says that it is for general
+education, not tax advice. The tables are tax-break's: FY 2021-22 to FY 2025-26
+for India, 2025/26 for the UK, 2025 for the US, Ireland and the Netherlands,
+and YA 2025 for Singapore. For a year outside them, Jarvis says which years
+tax-break has rather than guessing, and suggests asking without a year to use
+the latest. Messages that only mention tax
+(`what is a tax bracket?`, `20% tax on 500`) go to the skills that handle them.
+
+## Health and fitness
+
+`cancer-info` answers from [beat-it](https://charles2ke.github.io/beat-it/)'s
+reviewed information on 22 cancer types, offline:
+
+```bash
+jarvis "lung cancer symptoms"
+jarvis "breast cancer screening"
+jarvis "leukemia medicines"
+jarvis "is cancer hereditary?"
+jarvis "cancer topics"
+```
+
+It covers each type's overview, symptoms, risk factors, screening, treatments,
+medicines and recent FDA approvals, beat-it's frequently asked questions and
+its worldwide figures. It is general information, never a diagnosis: questions
+about your own symptoms get a gentle reply that urges you to see a doctor, a
+message that you or someone close to you has cancer is acknowledged kindly
+first, and answers about a particular type say when beat-it last reviewed it.
+Messages that only mention the word — the star sign, the Tropic of Cancer, a
+poem or a note — go to the skills that handle them, and thoughts of ending your
+life still reach `crisis-support` first.
+
+`workout-plan` shows the 7-Day Longevity & Strength Program from
+[workout](https://charles2ke.github.io/workout/), using your computer's date:
+
+```bash
+jarvis "what's my workout today?"
+jarvis "Friday workout"
+jarvis "when is leg day?"
+jarvis "is today a rest day?"
+jarvis "weekly workout plan"
+```
+
+Each day's session lists its exercises with sets, reps and rest, and ends with
+a short safety note. The Zone 2 heart-rate range comes from the plan's author
+and is not a target for everyone.
 
 ## Knowledge sources
 
@@ -584,7 +737,10 @@ jarvis "look up the Voyager probes online"
 | `off` | Jarvis never searches the web. |
 
 Used as a library, `Assistant()` defaults to `manual`; pass
-`Assistant(web_search="auto")` to behave like the CLI.
+`Assistant(web_search="auto")` to behave like the CLI. The live `weather`,
+`hazard-alerts` and `space-weather` skills read their feeds when you ask in
+`auto` or `manual` mode, and stay offline in `off` mode
+([Weather and hazard alerts](#weather-and-hazard-alerts)).
 
 Only messages that read like a factual question are searched automatically.
 Personal messages are never sent unless you ask: anything that mentions *me*,
@@ -623,13 +779,51 @@ read, Jarvis falls back to the search snippet.
   it can quote something related that does not quite answer the question.
   Check the sources.
 - Wikipedia is an encyclopedia, not a live feed. Questions about news, weather,
-  prices or scores get a note suggesting Brave Search or SearXNG instead.
+  prices or scores get a note suggesting Brave Search or SearXNG instead;
+  today's weather and recent alerts for a place have their own skills
+  ([Weather and hazard alerts](#weather-and-hazard-alerts)).
 - The search request gives up after 10 seconds without data. Result pages give
   up after 8 seconds without data, and Jarvis stops waiting for them 15 seconds
   after the search returns, using their search snippets instead. Press Ctrl-C
   to cancel a slow search in a session.
 - Web search widens what Jarvis can answer, but Jarvis is still a rule-based
   assistant, not artificial general intelligence.
+
+## Weather and hazard alerts
+
+Three skills from [5-Mins](https://charles2ke.github.io/5-Mins/) read free
+public feeds that need no API key:
+
+```bash
+jarvis "weather in Paris"
+jarvis "what's the weather like in Tokyo"
+jarvis "is it raining in Seattle"
+jarvis "weather alerts for Miami"
+jarvis "any earthquakes near Lima"
+jarvis "hazards near Manila"
+jarvis "space weather"
+```
+
+| Skill | Feeds |
+| --- | --- |
+| `weather` | Current conditions and today's range from the [Open-Meteo](https://open-meteo.com/) forecast. |
+| `hazard-alerts` | Alerts from the last seven days: the US National Weather Service (US places only), USGS earthquakes of magnitude 4.5 or more within 300 km, and GDACS disaster alerts and NASA EONET natural events within 1000 km. |
+| `space-weather` | The latest alerts, watches and warnings from the NOAA Space Weather Prediction Center. |
+
+Places are found with the Open-Meteo geocoding API: name a city, add its
+region or country (`Paris, Texas`), or give coordinates (`48.85, 2.35`). Only
+the place name, never the rest of your message, is sent to the geocoder, and
+the feeds receive its coordinates. Jarvis does not know where you are, so
+`weather near me` asks you to name a place. Weather covers now and today only;
+Jarvis does not forecast later days. Each alert feed is asked on its own, so one
+failure never hides the others. Every reply lists its sources and when they were
+read, and says that Jarvis is not an official warning system — follow your
+local authorities.
+
+These skills go online only when you ask, in `auto` or `manual` mode. With
+`--web-search off` they say that web access is off rather than going online,
+and, like a web search, they are never sent for a message about suicide or
+self-harm.
 
 ## Text to speech
 
@@ -848,6 +1042,40 @@ The planner understands `open`, `click`, `double_click`, `right_click`,
 with how much of the instruction it did understand, rather than guessed at.
 The helpers live in `jarvis.cua` (`plan`, `execute`, `actions_chart`).
 
+## Connected projects
+
+Six of the author's other projects are built into Jarvis. Each is a Python
+port of the project's logic or data, not a link to its running app, so Jarvis
+never needs those sites to be up. Answers credit the project they come from and
+link to it.
+
+| Project | Skills | Ported into | Commit | Licence |
+| --- | --- | --- | --- | --- |
+| [tax-break](https://charles2ke.github.io/tax-break/) | `tax-estimate` | `tax.py` — the tax engine's salary calculators | [`a3d630c`](https://github.com/charles2ke/tax-break/commit/a3d630c7eb45d188ffb28da7507df948ca8be59b) | AGPL-3.0 (its `package.json` says MIT) |
+| [Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) | `investment-math` | `investing.py` — the research calculators | [`4dddc15`](https://github.com/charles2ke/Portfolio-Watcher/commit/4dddc15734246445eedb7b040b0722bcbe49bc02) | MIT |
+| [OpenTrading](https://charles2ke.github.io/OpenTrading/) | `paper-trading` | `papertrade.py` — the paper account and demo stocks | [`a252eb4`](https://github.com/charles2ke/OpenTrading/commit/a252eb47adae72cab77b04368f682b74710e9968) | Apache-2.0 |
+| [beat-it](https://charles2ke.github.io/beat-it/) | `cancer-info`, `cancer-topics` | `cancer.py`, `cancer_data.py` — the reviewed cancer information | [`647f8d1`](https://github.com/charles2ke/beat-it/commit/647f8d15468105089d71a39de137408f427c5534) | AGPL-3.0-only |
+| [5-Mins](https://charles2ke.github.io/5-Mins/) | `weather`, `hazard-alerts`, `space-weather` | `alerts.py` — the weather and alert feed lookups | [`560f23e`](https://github.com/charles2ke/5-Mins/commit/560f23e4fada678e605517d100e5f0a968e490ae) | AGPL-3.0 |
+| [workout](https://charles2ke.github.io/workout/) | `workout-plan` | `workout.py` — the 7-day plan | [`0c0d425`](https://github.com/charles2ke/workout/commit/0c0d425759094649654a1cd483f6360bf8c15b71) | MIT |
+
+Only the 5-Mins skills go online, straight to the public feeds and only as
+[Weather and hazard alerts](#weather-and-hazard-alerts) describes; the rest
+answer offline. The ported data is a snapshot from those commits and does not
+update itself: the tax tables are listed under
+[Income tax estimates](#income-tax-estimates), beat-it last reviewed its
+entries on 12 November 2026, and paper-trading prices are OpenTrading's
+built-in demo snapshot. To refresh beat-it's data, regenerate `cancer_data.py`
+from a beat-it checkout with `python3 scripts/import_beat_it.py
+/path/to/beat-it`; the other ports are updated by hand.
+
+Some parts were left out on purpose: tax-break's document parsers, filing
+exports and non-salary income; Portfolio-Watcher's market data; OpenTrading's
+live quotes and server; beat-it's daily news feed; and 5-Mins' features for
+alerting other people and its safety check-ins. Each module's docstring lists
+what it follows and how it differs, and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) keeps each project's licence
+notice.
+
 ## Project layout
 
 ```
@@ -858,10 +1086,16 @@ src/jarvis/
   memory.py       JSON backed memory, or RAM only when no path is given
   nl.py           natural language normalisation and number words
   <topic>.py      the data and logic behind a family of skills
-                  (atlas, bible, braille, calculator, clock, cloud, cua,
-                  dates, emergency, encyclopedia, finance, knowledge, maritime,
-                  percentages, poetry, science, signlanguage, sketch, speech,
-                  traffic, units, websearch)
+                  (alerts, atlas, bible, braille, calculator, cancer, clock,
+                  cloud, cua, dates, emergency, encyclopedia, finance,
+                  investing, knowledge, maritime, papertrade, percentages,
+                  poetry, science, signlanguage, sketch, speech, tax, traffic,
+                  units, websearch, workout)
+  cancer_data.py  beat-it's cancer information, generated by
+                  scripts/import_beat_it.py
+scripts/
+  build_site.py   builds the GitHub Pages site from the skill registry
+  import_beat_it.py  regenerates cancer_data.py from a beat-it checkout
 tests/            one unittest module per topic
 ```
 
@@ -912,4 +1146,6 @@ module, and any new routing order should be covered there as well.
 
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](LICENSE).
+AGPL-3.0-or-later. See [LICENSE](LICENSE). Files ported from the author's
+other projects keep those projects' notices and terms in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
