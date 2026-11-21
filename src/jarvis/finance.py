@@ -631,62 +631,57 @@ _CHILD_COUNT_WORDS = {
 }
 
 
-def _counted_children(text: str) -> Tuple[Optional[int], Optional[List[int]]]:
-    """Return a child count and ages; an empty list means unparseable ages."""
+def _counted_children(text: str) -> Tuple[int, Optional[List[Tuple[int, int]]]]:
+    """Return a count and (age, count) pairs; an empty list means unparseable ages."""
     text_lower = text.lower()
-
-    age_first = re.search(
-        r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
-        r"\s+(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b",
-        text_lower,
+    count_pattern = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+    age_value = (
+        r"\d+\b(?!\s+(?:\d+\s*(?:-| )?year[- ]old\s+)?"
+        r"(?:children|kids)\b)"
     )
-    count_before_age = re.search(
-        r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
-        r"\s+(?:children|kids)\b"
-        r"[^.?!]{0,60}?"
-        r"(?:aged?|age)\s+(?P<ages>\d+(?:\s*(?:and|,)\s*\d+)*)",
-        text_lower,
+    groups = re.compile(
+        r"\b(?:(?:my|our|their|his|her)\s+)?"
+        r"(?P<first_count>" + count_pattern + r")\s+"
+        r"(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b"
+        r"|\b(?:my|our|their|his|her)\s+"
+        r"(?P<possessive_age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b"
+        r"|\b(?P<list_count>" + count_pattern + r")\s+(?:children|kids)\b"
+        r"(?:(?!\b(?:children|kids)\b)[^.?!]){0,60}?"
+        r"\b(?:aged?|age)\s+(?P<ages>" + age_value
+        + r"(?:\s*(?:,\s*(?:and\s+)?|and\s+)" + age_value + r")*)"
+        r"|\b(?P<plain_count>" + count_pattern + r")\s+(?:children|kids)\b"
     )
-    possessive = re.search(
-        r"\b(?:my|our|their|his|her)\s+"
-        r"(?:(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
-        r"(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b",
-        text_lower,
-    )
-
-    match = age_first or count_before_age or possessive
-    if match is None:
-        if re.search(
-            r"\b(?:children|kids)\b[^.?!]{0,60}?\b(?:aged?|age)\b"
-            r"|\b(?:\d+|[a-z]+)\s*[- ]\s*year[- ]old\s+(?:children|kids)\b",
-            text_lower,
-        ):
-            return None, []
-        general_count = re.search(
-            r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
-            r"\s+(?:children|kids)\b",
-            text_lower,
+    count = 0
+    ages: List[Tuple[int, int]] = []
+    plain_count = 0
+    remainder = list(text_lower)
+    for match in groups.finditer(text_lower):
+        raw_count = (
+            match.group("first_count") or match.group("list_count")
+            or match.group("plain_count")
         )
-        if general_count is None:
-            return None, None
-        raw_count = general_count.group("count")
-        count = int(raw_count) if raw_count.isdigit() else _CHILD_COUNT_WORDS[raw_count]
-        return count, None
+        group_count = (
+            int(raw_count) if raw_count and raw_count.isdigit()
+            else _CHILD_COUNT_WORDS[raw_count] if raw_count else 1
+        )
+        count += group_count
+        if match.group("plain_count"):
+            plain_count += group_count
+            continue
+        remainder[match.start():match.end()] = " " * (match.end() - match.start())
+        age = match.group("age") or match.group("possessive_age")
+        if age:
+            ages.append((int(age), group_count))
+        else:
+            values = [int(value) for value in re.findall(r"\d+", match.group("ages"))]
+            ages.extend((value, group_count if len(values) == 1 else 1) for value in values)
 
-    raw_count = match.groupdict().get("count")
-    if raw_count:
-        count = int(raw_count) if raw_count.isdigit() else _CHILD_COUNT_WORDS[raw_count]
-    else:
-        count = 1
-
-    age = match.groupdict().get("age")
-    if age:
-        ages = [int(age)] * count
-    else:
-        ages_text = match.groupdict().get("ages") or ""
-        ages = [int(value) for value in re.findall(r"\d+", ages_text)]
-        if len(ages) == 1:
-            ages *= count
+    if re.search(
+        r"\b(?:children|kids)\b[^.?!]{0,60}?\b(?:aged?|age)\b"
+        r"|\b(?:\d+|[a-z]+)\s*[- ]\s*year[- ]old\s+(?:children|kids)\b",
+        "".join(remainder),
+    ) or (ages and plain_count):
+        return count, []
     return count, ages or None
 
 
@@ -701,7 +696,7 @@ def _solve_us_tax(match: re.Match[str]) -> str:
         qualifying = count or 0
         age_description = f"{qualifying} children under 17" if qualifying else "no children"
     else:
-        qualifying = sum(age < 17 for age in ages)
+        qualifying = sum(age_count for age, age_count in ages if age < 17)
         age_description = (
             f"{qualifying} children under 17"
             if qualifying

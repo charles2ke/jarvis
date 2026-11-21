@@ -74,6 +74,45 @@ class MoneyMathTests(unittest.TestCase):
         self.assertIn("no children under 17", counted)
         self.assertIn("no children under 17", possessive)
 
+    def test_us_tax_counts_repeated_ages_without_expanding(self):
+        for children in (
+            "1000000000 20-year-old children",
+            "1000000000 children aged 20",
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 with {children}")
+                self.assertIn("no children under 17", answer)
+                self.assertIn("after a $0.00 child tax credit", answer)
+        answer = finance.solve_money("US tax on $100,000 with 1000000000 children aged 5")
+        self.assertIn("1000000000 children under 17", answer)
+        self.assertIn("$2,200,000,000,000.00 child tax credit", answer)
+
+    def test_us_tax_counts_oxford_comma_age_lists(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 3 children aged 20, 18, and 10"
+        )
+        self.assertIn("1 children under 17", answer)
+        self.assertIn("$2,200.00 child tax credit", answer)
+
+    def test_us_tax_combines_child_age_groups(self):
+        for children, credit, description in (
+            ("2 20-year-old children and 2 5-year-old children", "$4,400.00", "2 children under 17"),
+            ("2 children aged 20 and 2 kids aged 5", "$4,400.00", "2 children under 17"),
+            ("their 20-year-old children and our 5-year-old kids", "$2,200.00", "1 children under 17"),
+            ("3 children aged 20, 18, and 10 and 3 5-year-old kids", "$8,800.00", "4 children under 17"),
+            ("2 children and 3 kids", "$11,000.00", "5 children under 17"),
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 married with {children}")
+                self.assertIn(f"{credit} child tax credit", answer)
+                self.assertIn(description, answer)
+
+    def test_us_tax_requests_missing_age_in_mixed_groups(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 with 2 children and 2 kids aged 5"
+        )
+        self.assertIn("provide the children's ages as numbers", answer)
+
     def test_us_tax_assumes_under_17_only_when_age_is_missing(self):
         answer = finance.solve_money(
             "US tax on $100,000 married with 2 children"
