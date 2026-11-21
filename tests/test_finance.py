@@ -32,6 +32,106 @@ class FinanceGlossaryTests(unittest.TestCase):
 
 
 class MoneyMathTests(unittest.TestCase):
+    def test_us_tax_requires_an_income_cue(self):
+        answer = finance.solve_money(
+            "US tax in 2024 on $100,000 married with 2 children aged 20"
+        )
+        self.assertIn("at $100,000.00", answer)
+        for question in ("US tax in 2024", "US federal tax rates for 2024"):
+            with self.subTest(question=question):
+                self.assertIsNone(finance.solve_money(question))
+        for question in ("US tax on 100000", "US tax in 2024 for $100,000"):
+            with self.subTest(question=question):
+                self.assertIn("at $100,000.00", finance.solve_money(question))
+
+    def test_us_tax_uses_all_2024_brackets(self):
+        for filing, income, expected in (
+            ("single", "250,000", "$53,014.50"),
+            ("married", "250,000", "$39,077"),
+            ("single", "1,000,000", "$322,785.75"),
+            ("married", "1,000,000", "$285,321.50"),
+        ):
+            with self.subTest(filing=filing, income=income):
+                answer = finance.solve_money(f"US tax on ${income} {filing}")
+                self.assertIn(f"is {expected}", answer)
+
+    def test_us_tax_excludes_explicitly_older_children(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 2 20-year-old children"
+        )
+        self.assertIsNotNone(answer)
+        self.assertIn("$0", answer)
+        self.assertIn("no children under 17", answer)
+        self.assertNotIn("$4,400", answer)
+
+    def test_us_tax_handles_counted_and_possessive_child_ages(self):
+        counted = finance.solve_money(
+            "US tax on $100,000 married with 2 children aged 20"
+        )
+        possessive = finance.solve_money(
+            "US tax on $100,000 married; their 2 20-year-old children"
+        )
+        self.assertIn("no children under 17", counted)
+        self.assertIn("no children under 17", possessive)
+
+    def test_us_tax_counts_repeated_ages_without_expanding(self):
+        for children in (
+            "1000000000 20-year-old children",
+            "1000000000 children aged 20",
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 with {children}")
+                self.assertIn("no children under 17", answer)
+                self.assertIn("after a $0.00 child tax credit", answer)
+        answer = finance.solve_money("US tax on $100,000 with 1000000000 children aged 5")
+        self.assertIn("1000000000 children under 17", answer)
+        self.assertIn("$2,200,000,000,000.00 child tax credit", answer)
+
+    def test_us_tax_counts_oxford_comma_age_lists(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 3 children aged 20, 18, and 10"
+        )
+        self.assertIn("1 children under 17", answer)
+        self.assertIn("$2,200.00 child tax credit", answer)
+
+    def test_us_tax_combines_child_age_groups(self):
+        for children, credit, description in (
+            ("2 20-year-old children and 2 5-year-old children", "$4,400.00", "2 children under 17"),
+            ("2 children aged 20 and 2 kids aged 5", "$4,400.00", "2 children under 17"),
+            ("their 20-year-old children and our 5-year-old kids", "$2,200.00", "1 children under 17"),
+            ("3 children aged 20, 18, and 10 and 3 5-year-old kids", "$8,800.00", "4 children under 17"),
+            ("2 children and 3 kids", "$11,000.00", "5 children under 17"),
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 married with {children}")
+                self.assertIn(f"{credit} child tax credit", answer)
+                self.assertIn(description, answer)
+
+    def test_us_tax_requests_missing_age_in_mixed_groups(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 with 2 children and 2 kids aged 5"
+        )
+        self.assertIn("provide the children's ages as numbers", answer)
+
+    def test_us_tax_assumes_under_17_only_when_age_is_missing(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 2 children"
+        )
+        self.assertIn("$4,400", answer)
+        self.assertIn("2 children under 17", answer)
+
+    def test_us_tax_rejects_unparseable_child_ages(self):
+        for children in (
+            "2 children aged twenty",
+            "2 kids age unknown",
+            "2 twenty-year-old children",
+            "children aged twenty",
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 married with {children}")
+                self.assertIn("provide the children's ages as numbers", answer)
+                self.assertNotIn("child tax credit (", answer)
+
     def test_compound_interest_with_contributions(self):
         self.assertAlmostEqual(
             finance.compound_interest(1000, 0.0, 2), 1000.0, places=6
@@ -114,6 +214,19 @@ class FinanceSkillRoutingTests(unittest.TestCase):
 
     def respond(self, text):
         return self.assistant.respond(text)
+
+    def test_us_tax_routing_requires_an_income_cue(self):
+        for question in ("US tax in 2024", "US federal tax rates for 2024"):
+            with self.subTest(question=question):
+                resolved = self.assistant._resolve(question)
+                self.assertTrue(resolved is None or resolved[0].name != "money-math")
+        answer = self.respond("US tax in 2024 on $100,000 married with 2 children aged 20")
+        self.assertIn("at $100,000.00", answer)
+
+    def test_us_tax_requests_parseable_child_ages(self):
+        answer = self.respond("US tax on $100,000 married with 2 children aged twenty")
+        self.assertIn("provide the children's ages as numbers", answer)
+        self.assertNotIn("$4,400", answer)
 
     def test_economics_terms_route_to_the_economics_skill(self):
         self.assertTrue(self.respond("what is inflation?").startswith("Inflation:"))

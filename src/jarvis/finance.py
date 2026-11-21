@@ -617,7 +617,139 @@ def _solve_emergency_fund(match: re.Match[str]) -> str:
     )
 
 
+_CHILD_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _counted_children(text: str) -> Tuple[int, Optional[List[Tuple[int, int]]]]:
+    """Return a count and (age, count) pairs; an empty list means unparseable ages."""
+    text_lower = text.lower()
+    count_pattern = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+    age_value = (
+        r"\d+\b(?!\s+(?:\d+\s*(?:-| )?year[- ]old\s+)?"
+        r"(?:children|kids)\b)"
+    )
+    groups = re.compile(
+        r"\b(?:(?:my|our|their|his|her)\s+)?"
+        r"(?P<first_count>" + count_pattern + r")\s+"
+        r"(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b"
+        r"|\b(?:my|our|their|his|her)\s+"
+        r"(?P<possessive_age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b"
+        r"|\b(?P<list_count>" + count_pattern + r")\s+(?:children|kids)\b"
+        r"(?:(?!\b(?:children|kids)\b)[^.?!]){0,60}?"
+        r"\b(?:aged?|age)\s+(?P<ages>" + age_value
+        + r"(?:\s*(?:,\s*(?:and\s+)?|and\s+)" + age_value + r")*)"
+        r"|\b(?P<plain_count>" + count_pattern + r")\s+(?:children|kids)\b"
+    )
+    count = 0
+    ages: List[Tuple[int, int]] = []
+    plain_count = 0
+    remainder = list(text_lower)
+    for match in groups.finditer(text_lower):
+        raw_count = (
+            match.group("first_count") or match.group("list_count")
+            or match.group("plain_count")
+        )
+        group_count = (
+            int(raw_count) if raw_count and raw_count.isdigit()
+            else _CHILD_COUNT_WORDS[raw_count] if raw_count else 1
+        )
+        count += group_count
+        if match.group("plain_count"):
+            plain_count += group_count
+            continue
+        remainder[match.start():match.end()] = " " * (match.end() - match.start())
+        age = match.group("age") or match.group("possessive_age")
+        if age:
+            ages.append((int(age), group_count))
+        else:
+            values = [int(value) for value in re.findall(r"\d+", match.group("ages"))]
+            ages.extend((value, group_count if len(values) == 1 else 1) for value in values)
+
+    if re.search(
+        r"\b(?:children|kids)\b[^.?!]{0,60}?\b(?:aged?|age)\b"
+        r"|\b(?:\d+|[a-z]+)\s*[- ]\s*year[- ]old\s+(?:children|kids)\b",
+        "".join(remainder),
+    ) or (ages and plain_count):
+        return count, []
+    return count, ages or None
+
+
+def _solve_us_tax(match: re.Match[str]) -> str:
+    income = _number(match.group("income"))
+    married = re.search(r"\b(?:married|joint|mfj)\b", match.string, re.IGNORECASE) is not None
+    count, ages = _counted_children(match.string)
+
+    if ages == []:
+        return "Please provide the children's ages as numbers to estimate the child tax credit."
+    if ages is None:
+        qualifying = count or 0
+        age_description = f"{qualifying} children under 17" if qualifying else "no children"
+    else:
+        qualifying = sum(age_count for age, age_count in ages if age < 17)
+        age_description = (
+            f"{qualifying} children under 17"
+            if qualifying
+            else "no children under 17"
+        )
+
+    child_credit = qualifying * 2200
+
+    standard_deduction = 29200 if married else 14600
+    taxable = max(0.0, income - standard_deduction)
+    brackets = (
+        (
+            (23200, 0.10), (94300, 0.12), (201050, 0.22),
+            (383900, 0.24), (487450, 0.32), (731200, 0.35),
+            (float("inf"), 0.37),
+        )
+        if married
+        else (
+            (11600, 0.10), (47150, 0.12), (100525, 0.22),
+            (191950, 0.24), (243725, 0.32), (609350, 0.35),
+            (float("inf"), 0.37),
+        )
+    )
+    tax = 0.0
+    lower = 0.0
+    for upper, rate in brackets:
+        if taxable <= lower:
+            break
+        tax += (min(taxable, upper) - lower) * rate
+        lower = upper
+    tax_after_credit = max(0.0, tax - child_credit)
+
+    filing_status = "married filing jointly" if married else "single"
+    return (
+        f"Estimated US federal income tax for {filing_status} at ${_money(income)} "
+        f"is ${_money(tax_after_credit)} after a ${_money(child_credit)} child tax "
+        f"credit ({age_description}). "
+        "This is a rough estimate using the 2024 standard deduction and brackets."
+    )
+
+
+US_TAX_PATTERN = (
+    r"\bus\s+(?:federal\s+)?tax\b[^?!]*?"
+    r"(?:\bon\s+[$£€]?\s*|[$£€]\s*)"
+    r"(?P<income>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)"
+)
+
+
 _SOLVERS: Tuple[Tuple[str, Callable[[re.Match[str]], str]], ...] = (
+    (
+        US_TAX_PATTERN,
+        _solve_us_tax,
+    ),
     (
         r"(?:invest|save|grow|put)\D{0,20}(?P<principal>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)"
         r"\D{0,25}?(?P<rate>" + _NUMBER + r")\s*(?:%|percent)"
