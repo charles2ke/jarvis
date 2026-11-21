@@ -169,7 +169,13 @@ class EstimateTests(FakeEngineTestCase):
         self.assertEqual(self.inputs("international")[0]["bonus"], 5000)
 
     def test_salary_signs_around_currency_are_preserved(self):
-        for text in ("UK tax on -£50,000", "UK tax on £-50,000", "UK tax on £0"):
+        for text in (
+            "UK tax on -£50,000",
+            "UK tax on £-50,000",
+            "UK tax on -+£50,000",
+            "UK tax on £-+50,000",
+            "UK tax on £0",
+        ):
             with self.subTest(text=text):
                 self.assertIsNone(estimate(text))
                 self.assertEqual(self.calls, [])

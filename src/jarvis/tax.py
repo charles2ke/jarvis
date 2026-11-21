@@ -1517,6 +1517,8 @@ def _read_amount(masked: str, number: "re.Match[str]", euro: bool) -> Optional[_
         sign_pos == 0
         or not (masked[sign_pos - 1].isalnum() or masked[sign_pos - 1] in "._,")
     ):
+        if sign_pos > 0 and masked[sign_pos - 1] in "+-":
+            return None
         if sign is not None:
             return None
         sign = masked[sign_pos]
