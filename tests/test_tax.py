@@ -168,6 +168,23 @@ class EstimateTests(FakeEngineTestCase):
                 self.assertIn(title, self.reply(text).splitlines()[0])
         self.assertEqual(self.inputs("international")[0]["bonus"], 5000)
 
+    def test_salary_signs_around_currency_are_preserved(self):
+        for text in (
+            "UK tax on -£50,000",
+            "UK tax on £-50,000",
+            "UK tax on -+£50,000",
+            "UK tax on £-+50,000",
+            "UK tax on £0",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(estimate(text))
+                self.assertEqual(self.calls, [])
+
+        for text in ("UK tax on +£50,000", "UK tax on £+50,000"):
+            with self.subTest(text=text):
+                self.reply(text)
+                self.assertEqual(self.inputs("international")[0]["annualIncome"], 50_000)
+
     def test_details_become_engine_options(self):
         cases = {
             "UK tax on £40,000 with student loan plan 2": {"studentLoanPlan": "plan2"},

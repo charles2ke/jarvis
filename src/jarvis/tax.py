@@ -1383,7 +1383,8 @@ _EURO_CONTEXT = re.compile(r"€|\beur(?:os?)?\b|ireland|irish|netherlands|dutch
 _CURRENCY_BEFORE = re.compile(
     r"(?<![a-z])(?:(?P<usd>us\$|usd)|(?P<sgd>s\$|sg\$|sgd)"
     r"|(?P<unsupported>c\$|cad|a\$|aud|nz\$|nzd|hk\$|hkd|¥|jpy|chf|aed|rm|myr|kr|r\$|brl|zar)"
-    r"|(?P<dollar>\$)|(?P<gbp>£|gbp)|(?P<eur>€|euros?|eur)|(?P<inr>₹|inr|rs\.?|rupees))\s*$"
+    r"|(?P<dollar>\$)|(?P<gbp>£|gbp)|(?P<eur>€|euros?|eur)|(?P<inr>₹|inr|rs\.?|rupees))"
+    r"\s*(?P<sign>[+-])?\s*$"
 )
 _CURRENCY_AFTER = re.compile(
     r"\s*(?:(?P<unsupported>c\$|cad|a\$|aud|nz\$|nzd|hkd|yen|jpy|chf|aed|dirhams?|ringgit|myr|brl|"
@@ -1505,10 +1506,25 @@ def _read_amount(masked: str, number: "re.Match[str]", euro: bool) -> Optional[_
         return None
     start, cursor = number.span()
     currency: Optional[str] = None
+    sign: Optional[str] = None
     before = _CURRENCY_BEFORE.search(masked, max(0, start - 16), start)
     if before:
         currency = _currency_of(before)
         start = before.start()
+        sign = before.group("sign")
+    sign_pos = start - 1
+    if sign_pos >= 0 and masked[sign_pos] in "+-" and (
+        sign_pos == 0
+        or not (masked[sign_pos - 1].isalnum() or masked[sign_pos - 1] in "._,")
+    ):
+        if sign_pos > 0 and masked[sign_pos - 1] in "+-":
+            return None
+        if sign is not None:
+            return None
+        sign = masked[sign_pos]
+        start = sign_pos
+    if sign == "-":
+        value = -value
     multiplied = indian = False
     period: Optional[str] = None
     multiplier = _MULTIPLIER.match(masked, cursor)
@@ -2326,6 +2342,8 @@ def _estimate(text: str) -> Optional[str]:
         promoted = _promote(amounts)
         salaries = [promoted] if promoted else []
     salary = salaries[0] if salaries else None
+    if salary is not None and salary.value <= 0:
+        return None
     # Only a salary needs tax-break; its US state names help find the place.
     meta = _meta() if salary is not None else None
     places = _places(original, meta.states if meta else ())

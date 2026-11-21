@@ -2801,8 +2801,10 @@ def _uses_project(name: str) -> Callable[[_Handler], _Handler]:
 @_uses_project("beat-it")
 def _cancer_info(match: Match[str], context: SkillContext) -> str:
     text = match.string
+    commands = (text, normalize(text))
     if any(
-        skill.name in _CANCER_DEFERS_TO and skill.match(text) is not None
+        skill.name in _CANCER_DEFERS_TO
+        and any(skill.match(command) is not None for command in commands)
         for skill in context.registry
     ):
         return _continue_after("cancer-info", match, context)
@@ -3141,7 +3143,9 @@ _CANCER_NOT = (
     r"|notes? (?:about|on|for|mentioning|containing))\b)"
 )
 # Commands registered after cancer-info that a cancer word can appear in, such
-# as "add the file cancer.md" or "change note 2 to chemo at nine".
+# as "add the file cancer.md" or "change note 2 to chemo at nine". Like the
+# assistant, cancer-info also checks the normalized text, so polite requests
+# ("could you change note 2 to chemo at nine?") reach these commands too.
 _CANCER_DEFERS_TO = frozenset(
     {
         "add-knowledge-website",

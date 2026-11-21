@@ -520,10 +520,12 @@ class ConnectedProjectTests(unittest.TestCase):
 
     def test_messages_they_cannot_answer_reach_the_older_skills(self):
         self.assertEqual(self.assistant.respond("Tropic of Cancer"), FALLBACK_RESPONSE)
-        self.assertEqual(
-            self.assistant.respond("add the file cancer.md as a knowledge source"),
-            "I could not find the file 'cancer.md'.",
-        )
+        for text in (
+            "add the file cancer.md as a knowledge source",
+            "could you add the file cancer.md as a knowledge source?",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self.assistant.respond(text), "I could not find the file 'cancer.md'.")
         self.assertIn("no notes to change", self.assistant.respond("change note 2 to chemo at nine"))
         self.assertEqual(self.assistant.respond("buy 2 litres of milk"), FALLBACK_RESPONSE)
         for text in ("20% tax on 500", "tax evasion in the 1920s"):
