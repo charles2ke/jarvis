@@ -58,6 +58,18 @@ class MoneyMathTests(unittest.TestCase):
         self.assertIn("$4,400", answer)
         self.assertIn("2 children under 17", answer)
 
+    def test_us_tax_rejects_unparseable_child_ages(self):
+        for children in (
+            "2 children aged twenty",
+            "2 kids age unknown",
+            "2 twenty-year-old children",
+            "children aged twenty",
+        ):
+            with self.subTest(children=children):
+                answer = finance.solve_money(f"US tax on $100,000 married with {children}")
+                self.assertIn("provide the children's ages as numbers", answer)
+                self.assertNotIn("child tax credit (", answer)
+
     def test_compound_interest_with_contributions(self):
         self.assertAlmostEqual(
             finance.compound_interest(1000, 0.0, 2), 1000.0, places=6
@@ -140,6 +152,11 @@ class FinanceSkillRoutingTests(unittest.TestCase):
 
     def respond(self, text):
         return self.assistant.respond(text)
+
+    def test_us_tax_requests_parseable_child_ages(self):
+        answer = self.respond("US tax on $100,000 married with 2 children aged twenty")
+        self.assertIn("provide the children's ages as numbers", answer)
+        self.assertNotIn("$4,400", answer)
 
     def test_economics_terms_route_to_the_economics_skill(self):
         self.assertTrue(self.respond("what is inflation?").startswith("Inflation:"))

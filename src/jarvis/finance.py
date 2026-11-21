@@ -632,7 +632,7 @@ _CHILD_COUNT_WORDS = {
 
 
 def _counted_children(text: str) -> Tuple[Optional[int], Optional[List[int]]]:
-    """Return a child count and explicit ages, if supplied."""
+    """Return a child count and ages; an empty list means unparseable ages."""
     text_lower = text.lower()
 
     age_first = re.search(
@@ -656,6 +656,12 @@ def _counted_children(text: str) -> Tuple[Optional[int], Optional[List[int]]]:
 
     match = age_first or count_before_age or possessive
     if match is None:
+        if re.search(
+            r"\b(?:children|kids)\b[^.?!]{0,60}?\b(?:aged?|age)\b"
+            r"|\b(?:\d+|[a-z]+)\s*[- ]\s*year[- ]old\s+(?:children|kids)\b",
+            text_lower,
+        ):
+            return None, []
         general_count = re.search(
             r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
             r"\s+(?:children|kids)\b",
@@ -689,6 +695,8 @@ def _solve_us_tax(match: re.Match[str]) -> str:
     married = re.search(r"\b(?:married|joint|mfj)\b", match.string, re.IGNORECASE) is not None
     count, ages = _counted_children(match.string)
 
+    if ages == []:
+        return "Please provide the children's ages as numbers to estimate the child tax credit."
     if ages is None:
         qualifying = count or 0
         age_description = f"{qualifying} children under 17" if qualifying else "no children"
