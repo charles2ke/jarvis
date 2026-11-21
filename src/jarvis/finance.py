@@ -617,7 +617,122 @@ def _solve_emergency_fund(match: re.Match[str]) -> str:
     )
 
 
+_CHILD_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _counted_children(text: str) -> Tuple[Optional[int], Optional[List[int]]]:
+    """Return a child count and explicit ages, if supplied."""
+    text_lower = text.lower()
+
+    age_first = re.search(
+        r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+        r"\s+(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b",
+        text_lower,
+    )
+    count_before_age = re.search(
+        r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+        r"\s+(?:children|kids)\b"
+        r"[^.?!]{0,60}?"
+        r"(?:aged?|age)\s+(?P<ages>\d+(?:\s*(?:and|,)\s*\d+)*)",
+        text_lower,
+    )
+    possessive = re.search(
+        r"\b(?:my|our|their|his|her)\s+"
+        r"(?:(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
+        r"(?P<age>\d+)\s*(?:-| )?year[- ]old\s+(?:children|kids)\b",
+        text_lower,
+    )
+
+    match = age_first or count_before_age or possessive
+    if match is None:
+        general_count = re.search(
+            r"\b(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+            r"\s+(?:children|kids)\b",
+            text_lower,
+        )
+        if general_count is None:
+            return None, None
+        raw_count = general_count.group("count")
+        count = int(raw_count) if raw_count.isdigit() else _CHILD_COUNT_WORDS[raw_count]
+        return count, None
+
+    raw_count = match.groupdict().get("count")
+    if raw_count:
+        count = int(raw_count) if raw_count.isdigit() else _CHILD_COUNT_WORDS[raw_count]
+    else:
+        count = 1
+
+    age = match.groupdict().get("age")
+    if age:
+        ages = [int(age)] * count
+    else:
+        ages_text = match.groupdict().get("ages") or ""
+        ages = [int(value) for value in re.findall(r"\d+", ages_text)]
+        if len(ages) == 1:
+            ages *= count
+    return count, ages or None
+
+
+def _solve_us_tax(match: re.Match[str]) -> str:
+    income = _number(match.group("income"))
+    married = re.search(r"\b(?:married|joint|mfj)\b", match.string, re.IGNORECASE) is not None
+    count, ages = _counted_children(match.string)
+
+    if ages is None:
+        qualifying = count or 0
+        age_description = f"{qualifying} children under 17" if qualifying else "no children"
+    else:
+        qualifying = sum(age < 17 for age in ages)
+        age_description = (
+            f"{qualifying} children under 17"
+            if qualifying
+            else "no children under 17"
+        )
+
+    child_credit = qualifying * 2200
+
+    standard_deduction = 29200 if married else 14600
+    taxable = max(0.0, income - standard_deduction)
+    brackets = (
+        ((23200, 0.10), (94300, 0.12), (float("inf"), 0.22))
+        if married
+        else ((11600, 0.10), (47150, 0.12), (float("inf"), 0.22))
+    )
+    tax = 0.0
+    lower = 0.0
+    for upper, rate in brackets:
+        if taxable <= lower:
+            break
+        tax += (min(taxable, upper) - lower) * rate
+        lower = upper
+    tax_after_credit = max(0.0, tax - child_credit)
+
+    filing_status = "married filing jointly" if married else "single"
+    return (
+        f"Estimated US federal income tax for {filing_status} at ${_money(income)} "
+        f"is ${_money(tax_after_credit)} after a ${_money(child_credit)} child tax "
+        f"credit ({age_description}). "
+        "This is a rough estimate using the 2024 standard deduction and brackets."
+    )
+
+
 _SOLVERS: Tuple[Tuple[str, Callable[[re.Match[str]], str]], ...] = (
+    (
+        r"\bus\s+(?:federal\s+)?tax\b"
+        r".{0,20}?\b[$£€]?\s*(?P<income>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)",
+        _solve_us_tax,
+    ),
     (
         r"(?:invest|save|grow|put)\D{0,20}(?P<principal>" + _NUMBER + r"(?:\s?(?:k|m|bn)\b)?)"
         r"\D{0,25}?(?P<rate>" + _NUMBER + r")\s*(?:%|percent)"

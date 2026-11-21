@@ -3763,6 +3763,7 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     "budgets and emergency funds."
                 ),
                 patterns=[
+                    r"\bus\s+(?:federal\s+)?tax\b[^?!]*\d",
                     r"\b(?:monthly (?:payment|repayment)|mortgage|loan|repayments?)\b"
                     r"[^?!]*(?:%|percent)[^?!]*\b(?:years?|yrs?)\b",
                     r"\d[^?!]*\b(?:mortgage|loan)\b[^?!]*(?:%|percent)[^?!]*"

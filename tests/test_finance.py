@@ -32,6 +32,32 @@ class FinanceGlossaryTests(unittest.TestCase):
 
 
 class MoneyMathTests(unittest.TestCase):
+    def test_us_tax_excludes_explicitly_older_children(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 2 20-year-old children"
+        )
+        self.assertIsNotNone(answer)
+        self.assertIn("$0", answer)
+        self.assertIn("no children under 17", answer)
+        self.assertNotIn("$4,400", answer)
+
+    def test_us_tax_handles_counted_and_possessive_child_ages(self):
+        counted = finance.solve_money(
+            "US tax on $100,000 married with 2 children aged 20"
+        )
+        possessive = finance.solve_money(
+            "US tax on $100,000 married; their 2 20-year-old children"
+        )
+        self.assertIn("no children under 17", counted)
+        self.assertIn("no children under 17", possessive)
+
+    def test_us_tax_assumes_under_17_only_when_age_is_missing(self):
+        answer = finance.solve_money(
+            "US tax on $100,000 married with 2 children"
+        )
+        self.assertIn("$4,400", answer)
+        self.assertIn("2 children under 17", answer)
+
     def test_compound_interest_with_contributions(self):
         self.assertAlmostEqual(
             finance.compound_interest(1000, 0.0, 2), 1000.0, places=6
