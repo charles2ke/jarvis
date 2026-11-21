@@ -72,6 +72,9 @@ class SignalSkillTests(unittest.TestCase):
             "send 'happy birthday!' to +15551234567 on signal": (
                 "+15551234567", "happy birthday!"
             ),
+            "send '\"hello\"' to +15551234567 on signal": (
+                "+15551234567", '"hello"'
+            ),
             "send \u201cgo to bob\u201d to +15551234567 via signal.": ("+15551234567", "go to bob"),
             "ping @alice.42 via the Signal app: hi": ("alice.42", "hi"),
             "signal +1 555\u2013123\u20134567: hi": ("+15551234567", "hi"),

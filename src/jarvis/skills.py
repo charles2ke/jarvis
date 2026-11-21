@@ -794,7 +794,7 @@ def _web_more(match: Match[str], context: SkillContext) -> str:
         return "\n".join(
             [websearch.cite(sentences), "", "Sources:", *websearch.source_lines(results.documents, sources)]
         )
-    previous = context.history[-1][0] if context.history else ""
+    previous = _previous_topic(context) or ""
     if previous and _never_search(context, previous):
         return CRISIS_RESPONSE
     if previous and websearch.is_lookup(previous):
@@ -2730,7 +2730,12 @@ def _signal_message(
     groups = match.groupdict()
     who = (groups.get("recipient") or "").strip()
     who = re.sub(r"[,\s]+please$", "", who, flags=re.IGNORECASE)
-    message = signalmessenger.clean_message(groups.get("message") or "")
+    raw_message = groups.get("message") or ""
+    message = (
+        raw_message
+        if groups.get("message_already_unquoted") is not None
+        else signalmessenger.clean_message(raw_message)
+    )
     try:
         recipient = signalmessenger.parse_recipient(who)
     except signalmessenger.EmergencyServiceError as exc:
@@ -2944,7 +2949,8 @@ def build_default_registry(memory: Optional[Memory] = None) -> SkillRegistry:
                     r"(?P<recipient>note[\s-]+to[\s-]+(?:self|myself))\s+" + _SIGNAL_VIA
                     + _SIGNAL_TAIL,
                     _SIGNAL_POLITE
-                    + r"send\s+[\"\u201c\u201d'\u2018\u2019](?P<message>(?s:.+?))"
+                    + r"send\s+[\"\u201c\u201d'\u2018\u2019](?P<message_already_unquoted>)"
+                    + r"(?P<message>(?s:.+?))"
                     r"[\"\u201c\u201d'\u2018\u2019]\s+to\s+" + _SIGNAL_TO + r"\s+"
                     + _SIGNAL_VIA + r"(?:[,\s]+please)?\s*[.!?]*\s*$",
                     # No recipient yet: ask who the message is for.
