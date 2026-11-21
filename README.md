@@ -4,15 +4,17 @@ Personal AI Companion — a small, dependency-free assistant you can run from yo
 terminal.
 
 Jarvis matches what you type against a registry of skills and answers with the
-first one that fits. Everything is plain Python, so most offline requests are
+first one that fits. Jarvis itself is plain Python, so most offline requests are
 answered in milliseconds and you can read exactly how the answer was produced.
 Skills that reach the network or call out to an external tool (speech, CUA,
-Signal messages, opening phone and email links)
+Signal messages, opening phone and email links, and the connected projects,
+which run on Node.js)
 take as long as that service or subprocess does.
 
 - **Offline first** — every skill works without a network connection, except
-  the ones that say otherwise (`web-search`, `add-knowledge-website`, `answer`
-  and, once you enable sending, `signal-message`).
+  the ones that say otherwise (`web-search`, `add-knowledge-website`, `answer`,
+  the live `weather`, `hazard-alerts` and `space-weather` feeds and, once you
+  enable sending, `signal-message`).
 - **Looks up what it does not know** — a factual question that no skill can
   answer is searched on the web (Wikipedia by default) and summarised with
   numbered sources; `--web-search off` keeps Jarvis fully offline
@@ -34,8 +36,10 @@ take as long as that service or subprocess does.
 - [Traffic signs around the world](#traffic-signs-around-the-world)
 - [Solving science problems](#solving-science-problems)
 - [Economics and financial advice](#economics-and-financial-advice)
+- [Health and fitness](#health-and-fitness)
 - [Knowledge sources](#knowledge-sources)
 - [Searching the web](#searching-the-web)
+- [Weather and hazard alerts](#weather-and-hazard-alerts)
 - [Text to speech](#text-to-speech)
 - [Natural language to text](#natural-language-to-text)
 - [Sign language](#sign-language)
@@ -47,6 +51,7 @@ take as long as that service or subprocess does.
 - [Answering any query with a cloud session](#answering-any-query-with-a-cloud-session)
 - [Computer use (CUA)](#computer-use-cua)
 - [Signal messages](#signal-messages)
+- [Connected projects](#connected-projects)
 - [Project layout](#project-layout)
 - [Adding a skill](#adding-a-skill)
 - [Development](#development)
@@ -55,11 +60,16 @@ take as long as that service or subprocess does.
 ## Quick start
 
 ```bash
+git clone --recurse-submodules https://github.com/charles2ke/jarvis.git
+cd jarvis
 pip install -e .
 jarvis "calculate 21 * 2"
 ```
 
-Python 3.10+ is required. There are no runtime dependencies.
+Python 3.10+ is required, with no Python dependencies. The skills built on the
+author's [connected projects](#connected-projects) also need those projects'
+git submodules and, except for beat-it, Node.js 22.18 or newer; without them
+everything else works and those skills explain how to set them up.
 
 Interactive session:
 
@@ -106,7 +116,8 @@ Useful flags:
 ### Memory and privacy
 
 Memory is a single JSON file (`~/.jarvis/memory.json` by default) holding what
-you asked Jarvis to keep — your name, your notes and your knowledge sources —
+you asked Jarvis to keep — your name, your notes, your knowledge sources and
+your paper-trading portfolio (`paper_portfolio`) —
 plus one internal counter, `support_tip_index`, which `emotional-support` uses
 to rotate through its coping suggestions. Deleting the file clears what is
 stored, but a later normal run writes it again; run with `--no-memory` to keep
@@ -118,10 +129,12 @@ then swapped into place, so an interrupted save never leaves a half-written
 The network is used only to search the web for a factual question no skill can
 answer, or when you ask it to ([Searching the web](#searching-the-web)); by
 `add-knowledge-website`, when it fetches a page you asked for; by `answer`,
-when you send a question to a cloud session; and by `signal-message`, once you
-enable sending, when signal-cli delivers your message through Signal's servers.
-Everything else is answered from
-data shipped with the package. The results of the last web search are kept in
+when you send a question to a cloud session; by `weather`, `hazard-alerts`
+and `space-weather`, when you ask for live weather or alerts
+([Weather and hazard alerts](#weather-and-hazard-alerts)); and by
+`signal-message`, once you enable sending, when signal-cli delivers your
+message through Signal's servers. Everything else is answered from data
+shipped with the package. The results of the last web search are kept in
 RAM for the session only; the pages, and the answer with the question it
 answered, are written to memory only when you say `learn that`.
 
@@ -153,6 +166,14 @@ matched in is defined in `src/jarvis/skills.py`.
 | self-care | `how do I take care of myself` |
 | uplift | `cheer me up` |
 
+### Health and fitness
+
+| Skill | Example |
+| --- | --- |
+| cancer-info | `lung cancer symptoms` |
+| cancer-topics | `cancer topics` |
+| workout-plan | `what's my workout today?` |
+
 ### Conversation and creativity
 
 | Skill | Example |
@@ -181,7 +202,18 @@ matched in is defined in `src/jarvis/skills.py`.
 | unit-conversion | `convert 10 km to miles` |
 | unit-list | `what units can you convert?` |
 | number-words | `spell out 42` |
+
+### Money
+
+| Skill | Example |
+| --- | --- |
 | money-math | `monthly payment on a 250000 mortgage at 5% over 30 years` |
+| tax-estimate | `UK take-home on £50,000` |
+| investment-math | `cost of equity for beta 1.3` |
+| paper-trading | `paper buy 10 AAPL` |
+| financial-advisor | `financial advice on investing` |
+| economics | `what is inflation?` |
+| economics-topics | `economics topics` |
 
 ### Reference knowledge
 
@@ -200,9 +232,6 @@ matched in is defined in `src/jarvis/skills.py`.
 | bible-books | `books of the bible` |
 | gmdss | `what is an EPIRB?` |
 | gmdss-topics | `gmdss topics` |
-| economics | `what is inflation?` |
-| economics-topics | `economics topics` |
-| financial-advisor | `financial advice on investing` |
 
 ### Web research
 
@@ -254,6 +283,9 @@ searched automatically too; see [Searching the web](#searching-the-web).
 | date | `what day is it` |
 | date-calculator | `how many days until Christmas?` |
 | world-clock | `what time is it in Tokyo?` |
+| weather | `weather in Paris` |
+| hazard-alerts | `any earthquakes near Lima` |
+| space-weather | `space weather` |
 | answer | `answer how does the skill registry work?` |
 | computer-use | `use the computer to open Safari then click on Sign in` |
 | signal-message | `signal +15551234567: running late, see you at 7` |
@@ -301,6 +333,15 @@ encyclopedia skills, so `remember that answer` saves the last web answer while
 `remember that the bins go out on Monday` is still a note. A message that no
 skill matches is offered to the web search last of all, and only when it reads
 like a factual question.
+
+`cancer-info` comes after the crisis, counselling and web research skills but
+before `love-support`, so `my wife has breast cancer` gets cancer information
+with a kind acknowledgement rather than relationship advice, while `am I going
+to die of cancer` still reaches `crisis-support`. A few skills — `cancer-info`,
+`workout-plan`, `investment-math`, `paper-trading` and `tax-estimate` — check a
+message against their data, and when it is not really for them (`Tropic of
+Cancer`, `I just finished my workout`, `20% tax on 500`) they hand it on to the
+skills registered after them.
 
 ## Time, dates and world clocks
 
@@ -494,9 +535,9 @@ list every entry.
 
 ## Economics and financial advice
 
-Three skills cover money, all of them offline and all of them general
-education rather than personalised advice — every coaching and calculator
-answer says so:
+Three skills explain money and do its everyday arithmetic, all of them offline
+and all of them general education rather than personalised advice — every
+coaching and calculator answer says so:
 
 - `economics` explains economics and personal finance terms — inflation, GDP,
   recessions, interest rates, central banks, fiscal policy, shares, bonds,
@@ -523,6 +564,134 @@ money double at 7%` is answered as money rather than physics, and `economics`
 is registered before `encyclopedia` so that `what is inflation?` reaches the
 finance entries. The wellbeing skills still come first, so `I am broke and
 want to kill myself` reaches `crisis-support`.
+
+### Investment maths
+
+`investment-math` runs the research calculators of
+[Portfolio-Watcher](https://charles2ke.github.io/Portfolio-Watcher/) on numbers
+you type — it has no market data, so it never looks up a company:
+
+```bash
+jarvis "dcf with fcf 100m growth 8% discount 9% terminal 2.5% 50m shares net debt 200m"
+jarvis "cost of equity for beta 1.3"
+jarvis "rsi 5 of 44, 44.3, 44.1, 43.6, 44.5, 44.9, 45.2"
+jarvis "fibonacci levels between 100 and 150"
+jarvis "max drawdown of 100, 120, 90, 130"
+jarvis "drip 10000 at 3% yield 5% dividend growth for 10 years"
+```
+
+It covers discounted cash flow, CAPM, simple and exponential moving averages,
+RSI, MACD, Bollinger bands, Fibonacci retracements, volatility, value at risk,
+expected shortfall, maximum drawdown, return statistics and dividend
+reinvestment. Every figure comes from Portfolio-Watcher's own code; Jarvis
+reads the numbers from your message and lists the assumptions behind the
+answer, including any rates or defaults that are Portfolio-Watcher's own, and
+says that model outputs do not predict returns. Questions without numbers
+(`what is dcf`) still reach `economics` or `encyclopedia`.
+
+### Paper trading
+
+`paper-trading` is [OpenTrading](https://charles2ke.github.io/OpenTrading/)'s
+practice account, run by OpenTrading's own trading code: its pretend cash, its
+demo stocks and indices, and its built-in demo prices, never live quotes.
+OpenTrading checks and fills each order; Jarvis reads the order from your
+message and words the result.
+
+```bash
+jarvis "paper buy 10 AAPL"
+jarvis "paper sell 5 shares of Apple"
+jarvis "show my paper portfolio"
+jarvis "paper quote TSLA"
+jarvis "look up the ISIN of Apple"
+jarvis "demo stocks"
+jarvis "reset my paper portfolio"
+```
+
+The portfolio is kept in memory under `paper_portfolio`, in OpenTrading's own
+format, so it survives a restart unless you run with `--no-memory`. Jarvis has
+no brokerage connection: an order that does not say paper
+(`buy 10 shares of Apple`) is never carried out, and the reply shows the paper
+command to practise with instead.
+
+### Income tax estimates
+
+`tax-estimate` works out income tax and take-home pay on a salary with the tax
+engine of [tax-break](https://charles2ke.github.io/tax-break/) (see
+[Connected projects](#connected-projects)), for India, the UK (England, Wales
+and Northern Ireland), the US, Ireland, the Netherlands and Singapore:
+
+```bash
+jarvis "income tax on 15 lakh in India"
+jarvis "income tax on 20 lakh, old regime, max 80c and nps"
+jarvis "UK tax on £4,000 a month with student loan plan 2"
+jarvis 'US tax on $85,000 in California, married with 2 kids'
+jarvis "Dutch tax on €70,000 with the 30% ruling"
+jarvis 'Singapore tax on S$120,000'
+jarvis "tax calculator"
+```
+
+Put an amount with a `$` sign in single quotes, as above, or the shell reads
+`$8` or `$1` as a variable. Jarvis reads the country from the currency or the
+words (`lakh`, `UK`, a US state, `Irish`, `Dutch`, `S$`) and asks when it
+cannot tell — `€60,000` could be Irish or Dutch. It also reads the period
+(`a month`), a bonus, the year, and each country's options: India's regimes,
+age band and deductions such as `80C 1.5 lakh`, a UK student loan plan, a US
+filing status, children and state, Ireland's filing status, the Dutch 30%
+ruling and Singapore's age band and CPF contributions. India gets both regimes
+side by side with the cheaper one named, or the regime you name with the
+other's total for comparison.
+
+Jarvis turns the message into tax-break's inputs and words its answer: every
+rate, threshold, allowance and year, and the list of US states, comes from
+tax-break, so updating the submodule updates the estimates. Each estimate shows
+the year or calculator and the assumptions it used, a line-by-line breakdown
+and the effective and marginal rates, and says that it is for general
+education, not tax advice. For an Indian financial year tax-break doesn't have,
+Jarvis lists the years it has rather than guessing; the other countries'
+calculators don't take a year, so Jarvis says so when you name one. Scotland
+sets its own income tax bands, which tax-break doesn't have, so a Scottish
+salary gets National Insurance only. Messages that only mention tax
+(`what is a tax bracket?`, `20% tax on 500`) go to the skills that handle them.
+
+## Health and fitness
+
+`cancer-info` answers from [beat-it](https://charles2ke.github.io/beat-it/)'s
+reviewed information on cancer types, offline, reading the project's data
+files directly (it needs no Node.js):
+
+```bash
+jarvis "lung cancer symptoms"
+jarvis "breast cancer screening"
+jarvis "leukemia medicines"
+jarvis "is cancer hereditary?"
+jarvis "cancer topics"
+```
+
+It covers each type's overview, symptoms, risk factors, screening, treatments,
+medicines and FDA approvals as beat-it lists them, beat-it's frequently asked
+questions and its worldwide figures. It is general information, never a
+diagnosis: questions about your own symptoms get a gentle reply that urges you
+to see a doctor, a message that you or someone close to you has cancer is
+acknowledged kindly first, and answers about a particular type say when beat-it
+last reviewed it. Messages that only mention the word — the star sign, the
+Tropic of Cancer, a poem or a note — go to the skills that handle them, and
+thoughts of ending your life still reach `crisis-support` first.
+
+`workout-plan` shows the weekly plan in
+[workout](https://charles2ke.github.io/workout/), read from the project each
+time and matched to your computer's date:
+
+```bash
+jarvis "what's my workout today?"
+jarvis "Friday workout"
+jarvis "when is leg day?"
+jarvis "is today a rest day?"
+jarvis "weekly workout plan"
+```
+
+Each day's session lists the plan's exercises as the project describes them
+and ends with a short safety note. A heart-rate target in the plan is pointed
+out as the author's own, not a target for everyone.
 
 ## Knowledge sources
 
@@ -595,7 +764,10 @@ jarvis "look up the Voyager probes online"
 | `off` | Jarvis never searches the web. |
 
 Used as a library, `Assistant()` defaults to `manual`; pass
-`Assistant(web_search="auto")` to behave like the CLI.
+`Assistant(web_search="auto")` to behave like the CLI. The live `weather`,
+`hazard-alerts` and `space-weather` skills read their feeds when you ask in
+`auto` or `manual` mode, and stay offline in `off` mode
+([Weather and hazard alerts](#weather-and-hazard-alerts)).
 
 Only messages that read like a factual question are searched automatically.
 Personal messages are never sent unless you ask: anything that mentions *me*,
@@ -634,13 +806,54 @@ read, Jarvis falls back to the search snippet.
   it can quote something related that does not quite answer the question.
   Check the sources.
 - Wikipedia is an encyclopedia, not a live feed. Questions about news, weather,
-  prices or scores get a note suggesting Brave Search or SearXNG instead.
+  prices or scores get a note suggesting Brave Search or SearXNG instead;
+  today's weather and recent alerts for a place have their own skills
+  ([Weather and hazard alerts](#weather-and-hazard-alerts)).
 - The search request gives up after 10 seconds without data. Result pages give
   up after 8 seconds without data, and Jarvis stops waiting for them 15 seconds
   after the search returns, using their search snippets instead. Press Ctrl-C
   to cancel a slow search in a session.
 - Web search widens what Jarvis can answer, but Jarvis is still a rule-based
   assistant, not artificial general intelligence.
+
+## Weather and hazard alerts
+
+Three skills run [5-Mins](https://charles2ke.github.io/5-Mins/)'s own code,
+which reads free public feeds that need no API key:
+
+```bash
+jarvis "weather in Paris"
+jarvis "what's the weather like in Tokyo"
+jarvis "is it raining in Seattle"
+jarvis "weather alerts for Miami"
+jarvis "any earthquakes near Lima"
+jarvis "hazards near Manila"
+jarvis "space weather"
+```
+
+| Skill | What it shows |
+| --- | --- |
+| `weather` | The current conditions and today's range at a place. |
+| `hazard-alerts` | The recent alerts 5-Mins finds near a place, most severe first; worldwide alerts are only counted. |
+| `space-weather` | The worldwide alerts, such as space weather, that 5-Mins finds. |
+
+5-Mins decides which feeds to ask, how far around a place to look and how far
+back; Jarvis finds the place in your question and words the answer. Name a
+city, add its region or country (`Paris, Texas`), or give coordinates
+(`48.85, 2.35`). Only the place name, never the rest of your message, is sent
+to the place lookup — a region or country is matched on your computer — and the
+feeds receive its coordinates. Jarvis does not know where you are, so
+`weather near me` asks you to name a place. Weather covers now and today only;
+Jarvis does not forecast later days. A feed that fails is listed rather than
+hiding the others' alerts. Every reply lists the hosts it asked and when, and
+says that Jarvis is not an official warning system — follow your local
+authorities.
+
+These skills go online only when you ask, in `auto` or `manual` mode. With
+`--web-search off` they say that web access is off rather than going online.
+Like a web search, they are not sent for a message that Jarvis recognises as
+being about suicide or self-harm, such as a plan to jump from a bridge; it
+shows the crisis help lines instead.
 
 ## Text to speech
 
@@ -943,6 +1156,37 @@ run it under a UTF-8 locale (for example `LANG=C.UTF-8`) or use the daemon.
 The helpers live in `jarvis.signalmessenger` (`parse_recipient`,
 `build_command`, `build_rpc_request`, `send`).
 
+## Connected projects
+
+Six of the author's other projects power Jarvis skills. Jarvis keeps no copy of
+them: each is a git submodule in `projects/`, pinned to a commit of its own
+repository, and the skills run that project's own code — or, for beat-it, read
+its data files — from there. Jarvis's modules only read your question and word
+the project's answer, and every reply credits the project and links to its app.
+
+| Project | Skills | What Jarvis uses | Licence |
+| --- | --- | --- | --- |
+| [tax-break](https://github.com/charles2ke/tax-break) | `tax-estimate` | its tax engine, through `bridges/tax-break.mjs` | AGPL-3.0 (its `package.json` files say MIT) |
+| [Portfolio-Watcher](https://github.com/charles2ke/Portfolio-Watcher) | `investment-math` | its research calculators, through `bridges/portfolio-watcher.mjs` | MIT |
+| [OpenTrading](https://github.com/charles2ke/OpenTrading) | `paper-trading` | its trading core, through `bridges/opentrading.mjs` | Apache-2.0 |
+| [beat-it](https://github.com/charles2ke/beat-it) | `cancer-info`, `cancer-topics` | its data files, read directly | AGPL-3.0-only |
+| [5-Mins](https://github.com/charles2ke/5-Mins) | `weather`, `hazard-alerts`, `space-weather` | its weather and alert code, through `bridges/five-mins.mjs` | AGPL-3.0 |
+| [workout](https://github.com/charles2ke/workout) | `workout-plan` | the plan in its `workout.js`, through `bridges/workout.mjs` | MIT |
+
+To set them up, clone with `--recurse-submodules` (or run
+`git submodule update --init` in an existing clone) and install
+[Node.js](https://nodejs.org/) 22.18 or newer, which runs the projects'
+JavaScript and TypeScript as they are; beat-it needs no Node.js. Set
+`JARVIS_NODE` to use a particular `node`, and `JARVIS_PROJECTS_DIR` when the
+checkouts are somewhere other than `projects/` next to `src/` — for example
+after a non-editable `pip install`. When a project or Node.js is missing, the
+rest of Jarvis works as usual and that project's skills reply with these steps
+and a link to its app.
+
+Answers follow whatever commit each submodule is pinned to. To move a project
+on, run `git submodule update --remote projects/<name>`, run the tests and
+commit the new pointer.
+
 ## Project layout
 
 ```
@@ -953,10 +1197,16 @@ src/jarvis/
   memory.py       JSON backed memory, or RAM only when no path is given
   nl.py           natural language normalisation and number words
   <topic>.py      the data and logic behind a family of skills
-                  (atlas, bible, braille, calculator, clock, cloud, cua,
-                  dates, emergency, encyclopedia, finance, knowledge, maritime,
-                  percentages, poetry, science, signalmessenger, signlanguage,
-                  sketch, speech, traffic, units, websearch)
+                  (alerts, atlas, bible, braille, calculator, cancer, clock,
+                  cloud, cua, dates, emergency, encyclopedia, finance,
+                  investing, knowledge, maritime, papertrade, percentages,
+                  poetry, science, signalmessenger, signlanguage, sketch,
+                  speech, tax, traffic, units, websearch, workout)
+  projects.py     finds the connected projects and runs them with Node.js
+  bridges/        one small Node.js adapter per connected project
+projects/         the connected projects, as git submodules
+scripts/
+  build_site.py   builds the GitHub Pages site from the skill registry
 tests/            one unittest module per topic
 ```
 
@@ -994,8 +1244,11 @@ install first:
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-The suite never goes online. To also check web search against the real
-Wikipedia, opt in to the live test:
+The suite never goes online. The tests that run the connected projects skip
+when a project's submodule or Node.js is missing; set
+`JARVIS_REQUIRE_PROJECTS=1`, as CI does, to make that a failure instead.
+
+To also check web search against the real Wikipedia, opt in to the live test:
 
 ```bash
 JARVIS_LIVE_WEB_TESTS=1 PYTHONPATH=src python -m unittest tests.test_websearch
@@ -1007,4 +1260,6 @@ module, and any new routing order should be covered there as well.
 
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](LICENSE).
+AGPL-3.0-or-later. See [LICENSE](LICENSE). The connected projects in
+`projects/` are separate repositories under their own licences (see
+[Connected projects](#connected-projects)).
